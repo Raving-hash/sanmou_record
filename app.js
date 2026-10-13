@@ -32,6 +32,7 @@ app.use((req, res, next) => {
     pico: assetVer('pico.min.css'),
     style: assetVer('style.css'),
     upload: assetVer('upload.js'),
+    lightbox: assetVer('lightbox.js'),
   };
   // 时间格式化。入参是 ISO 字符串或毫秒时间戳（Date 两种都吃）——
   // 打分截止那种现算出来的时间就是个毫秒数，模板里不用再包一层 new Date()。

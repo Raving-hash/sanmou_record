@@ -42,7 +42,7 @@
     <% if (rows.some((r) => r.ace)) { %>
       <strong>上一期</strong>积分第一 / 第二 的阵容卡分别描亮蓝 / 亮银边。
     <% } %>
-    点图开原图；说明超过 5 行会被截断。
+    点图在页面里放大看（能翻这个人的其它截图，见 public/lightbox.js）；说明超过 5 行会被截断。
   </p>
   <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
   <% if (canRate && quotaLeft.size) { %>
@@ -82,7 +82,11 @@
             <span class="shot-score is-pending">未交积分</span>
           <% } %>
         </figcaption>
-        <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+        <%# data-shots 是给 public/lightbox.js 的：这个人的**全部**阵容截图，
+            弹层里能 ‹ › 翻。卡上只摊开第一张，所以「共 N 张」那句从前是个
+            看不到的死信息。href 仍然照旧 —— 没 JS 时它就是原图链接。 %>
+        <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener"
+           data-shots="<%= r.images.map((i) => `/uploads/${i.filename}`).join(' ') %>">
           <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图"
                loading="lazy" decoding="async">
         </a>

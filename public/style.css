@@ -799,7 +799,7 @@ nav ul li,
 /* 本期看板上的阵容墙：每人第一张，铺开来看。
    object-fit:contain 是关键 —— 阵容截图多半是 2844×1280 这类超宽比例（2.2:1），
    cover 会左右各裁掉约 1/4，而武将恰恰铺在两侧，裁掉就正好看不见了。
-   contain 宁可留边也不裁，横图竖图都不变形。要看清细节点图开原图。 */
+   contain 宁可留边也不裁，横图竖图都不变形。要看清细节点图放大（页面内盖一层，见第 15 节）。 */
 /* 一排小卡片，每张正好 200px 宽。左对齐 —— 上面的 h3 和说明都是左对齐的，
    卡片若居中就会和大标题错开，像掉在中间。
    轨道写死 200px 而不是 `minmax(200px, 1fr)`：后者会把列拉伸填满整行，
@@ -922,7 +922,7 @@ nav ul li,
   background: var(--yw-ink-1000);
 }
 /* 和列表缩略图 .thumb 同尺寸、同 contain、同暗底：
-   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图开原图。 */
+   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图放大（第 15 节）。 */
 .shot-frame img {
   display: block;
   width: 200px;
@@ -1276,7 +1276,124 @@ footer.container {
 }
 
 /* --------------------------------------------------------------------------
-   15. 窄屏
+   15. 图片弹层（点图看大图）
+   -------------------------------------------------------------------------- */
+/* 点阵容图 / 积分图不再跳新标签页，改成盖一层（public/lightbox.js）。
+   这一层和里面的零件**全部由那个脚本现建**，模板里没有它们的 DOM ——
+   所以没 JS 的页面上不会出现一个点不开的空壳（和 upload.js 里虚线框同一个理由）。
+   下面这些类名因此只在那段脚本跑起来之后才有元素。 */
+
+/* 弹层开着时锁住背景滚动。锁在 <html> 上而不是 <body>：滚动容器是文档本身，
+   body 上的 overflow 在部分移动浏览器里不生效，背景照样能滑。 */
+html.lb-lock {
+  overflow: hidden;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;                            /* 顶部导航是 sticky（第 3 节），层数不够会被压在下面 */
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(11, 9, 6, 0.92);        /* --yw-ink-1000 的 92% */
+  cursor: zoom-out;                        /* 点哪都能关，光标先说明这一点 */
+}
+.lightbox.is-on {
+  display: flex;
+}
+/* 图 + 说明。上限卡在容器上，图本身再按视口缩（见下面 .lb-img） */
+.lightbox .lb-fig {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  max-height: 100%;
+}
+/* 按视口缩，不按原图像素：截图长边可能到 2560，直接铺开会顶出屏幕。
+   上面留 86vh 的额度是给关闭按钮和说明那一行的，手机另有一档（见第 16 节）。
+   contain 而不是 cover —— 和缩略图同一个道理：阵容图的武将在两侧，裁不得。 */
+.lightbox .lb-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 86vh;
+  object-fit: contain;
+  background: var(--yw-ink-1000);
+  border: 1px solid var(--yw-line);
+  border-radius: 4px;
+}
+.lightbox .lb-cap {
+  max-width: 90vw;
+  text-align: center;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--yw-text-dim);
+}
+/* 「2/3」那一小截。用衬线数字，和站里其它数字一致 */
+.lightbox .lb-cap-main {
+  font-variant-numeric: tabular-nums;
+}
+.lightbox .lb-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--yw-text-mute);
+}
+
+/* × 和 ‹ ›。z-index 不用给：它们排在 figure 后面，DOM 顺序就压在上面。
+   ★ width 必须写明 —— Pico 给 button 默认 width:100%（见第 10 节的注释），
+   不按回去这两个圆会横着铺满整屏。 */
+.lightbox .lb-btn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+  font-size: 1.2rem;
+  color: var(--yw-text-dim);
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.lightbox .lb-btn:hover {
+  color: var(--yw-gold-lt);
+  border-color: var(--yw-gold-a35);
+  background: var(--yw-ink-700);
+}
+.lightbox .lb-x {
+  top: 0.6rem;
+  right: 0.6rem;
+  font-size: 1.3rem;
+}
+.lightbox .lb-prev,
+.lightbox .lb-next {
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.5rem;
+}
+.lightbox .lb-prev {
+  left: 0.6rem;
+}
+.lightbox .lb-next {
+  right: 0.6rem;
+}
+/* 只有一张图时没有可翻的页：两个按钮整个不出（脚本给根节点挂 is-solo） */
+.lightbox.is-solo .lb-prev,
+.lightbox.is-solo .lb-next {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   16. 窄屏
    -------------------------------------------------------------------------- */
 @media (max-width: 640px) {
   h2 {
@@ -1334,6 +1451,24 @@ footer.container {
   }
   .stat-num {
     font-size: 1.25rem;
+  }
+  /* 弹层：手机左右两侧没有余量（图几乎铺满），‹ › 挪到底部居中。
+     不能留在两侧 —— 超宽阵容图的武将近乎顶到左右边缘，两个圆正好盖住人家要看的东西。
+     图的高度也相应让出一截，免得说明和按钮叠在一起。 */
+  .lightbox .lb-img {
+    max-height: 74vh;
+  }
+  .lightbox .lb-prev,
+  .lightbox .lb-next {
+    top: auto;
+    bottom: 0.5rem;
+    transform: none;
+  }
+  .lightbox .lb-prev {
+    left: calc(50% - 3rem);
+  }
+  .lightbox .lb-next {
+    right: calc(50% - 3rem);
   }
 }
 

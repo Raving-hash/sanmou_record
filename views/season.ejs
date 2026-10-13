@@ -51,9 +51,11 @@
             </a>
             <figcaption>积分截图</figcaption>
           </figure>
+          <%# 这一个人的全部阵容截图，给 public/lightbox.js 的弹层翻页用（见 lineup-gallery.ejs） %>
+          <% const shots = r.images.map((i) => `/uploads/${i.filename}`).join(' '); %>
           <% r.images.forEach((img) => { %>
             <figure>
-              <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+              <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
                 <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
               </a>
               <figcaption>
