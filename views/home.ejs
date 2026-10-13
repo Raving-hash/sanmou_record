@@ -80,7 +80,8 @@
     </div>
   <% } %>
 
-  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate: true }) %>
+  <%# quota 是本期**我自己**还剩的打分名额（routes/main.js 里查好），只有能打分时才传 %>
+  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate: true, quota }) %>
 
   <h3>还没交积分（<%= notSubmitted.length %>）</h3>
   <% if (!notSubmitted.length) { %>

@@ -790,6 +790,26 @@ nav ul li,
   justify-content: start;
   margin-bottom: 1.8rem;
 }
+/* 本期我的打分名额（views/partials/lineup-gallery.ejs，只在能打分的期出现）。
+   名额是「我」的、不是某张卡的，所以在标题下面说一次，不塞进卡里重复十几遍。
+   投满的那档加 .is-out：压暗 + 删除线，和卡上那几个变灰的按钮对应得上。
+   --yw-serif 只上数字（「400」），和站里其它数字一个字体。 */
+.quota-line {
+  margin: -0.4rem 0 0.9rem;
+  font-size: 0.82rem;
+  color: var(--yw-text-mute);
+}
+.quota-line b {
+  font-family: var(--yw-serif);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--yw-gold-lt);
+}
+.quota-line .is-out,
+.quota-line .is-out b {
+  color: var(--yw-text-dim);
+  text-decoration: line-through;
+}
 .shot-card {
   display: flex;
   flex-direction: column;
@@ -1169,6 +1189,13 @@ footer.container {
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   border-radius: 5px;
+}
+/* 这档名额投满了（db.RATE_QUOTA）：按钮**留着但点不动**——留着是因为五个格子
+   等分整行，抽掉一个剩下的会变形；压暗是让它明显区别于旁边还能点的四个。
+   真正拦人的是服务端（routes/main.js），这里只是别让人对着死按钮反复点。 */
+.rate-form button.rate-tier:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* 「你打了 400」。金色底 + 金边，和 .score-pill 一个路子。

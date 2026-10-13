@@ -15,6 +15,19 @@
     heading  小节标题，如「本期阵容」/「第32期 阵容」
     canRate  这一期还能不能打分。进行中的期传 true；首页回退到「上一期结果」时传 false——
              那时连按钮都不出，只留均分/最高/最低。
+    quota    本期**打分的人自己**还剩几个名额（db.getMyQuota 的结果，
+             [{ value, quota, used, left }]，只含 400/300/250 这三个有限额的档位）。
+             只有 canRate 时才传 —— 页面上就两处用它：标题下面列一行"还剩几个"，
+             以及把投满的那档按钮灰掉。**这是"我"的名额，不是被评分人的**，
+             所以只在墙上说一次，不塞进每张卡里重复十几遍。
+%>
+<%
+  // value → 还剩几个。查不到的档位（50 / 200）就是不限，按钮照常出。
+  // **必须写 locals.quota 而不是 quota**：首页回退到「上一期结果」时压根不传这个入参，
+  // 而 EJS 里引用一个没传进来的名字是 ReferenceError（不是 undefined），
+  // 整个首页会 500 —— 那句话只有在"没有进行中的期"时才炸，最不容易撞见。
+  const quota = locals.quota || [];
+  const quotaLeft = new Map(quota.map((q) => [q.value, q.left]));
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -26,6 +39,16 @@
     <% } %>
     点图开原图；说明超过 5 行会被截断。
   </p>
+  <%# 名额是「我」的，不是某张卡的，所以在墙上说一次就够（见文件头的入参说明） %>
+  <% if (canRate && quotaLeft.size) { %>
+    <p class="quota-line">
+      本期你的打分名额：
+      <%# 「已用完」那档的 class 写成条件属性，不要用「等于号输出 + 三元」把它拼进来：
+          那个写法会转义引号，出来的属性是坏掉的，样式根本不生效（实测踩过）。 %>
+      <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><span<% if (!q.left) { %> class="is-out"<% } %>><b><%= q.value %></b> <%= q.left ? `剩 ${q.left}` : '已用完' %></span><% }) %>
+      （50 / 200 不限）
+    </p>
+  <% } %>
   <div class="shot-grid">
     <% rows.forEach((r) => { const img = r.images[0];
          // 上一期的积分第一/第二：描边区分（亮蓝 / 亮银）。ace 由 db.getPrevAces 跨期查出来，
@@ -86,11 +109,18 @@
             <p class="rate-lock">一期内不能改</p>
           <% } else if (canRate) { %>
             <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。
-                没有 <input>，value 直接挂在按钮上。 %>
+                没有 <input>，value 直接挂在按钮上。
+                本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
+                flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
+                这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
             <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
-              <% rateValues.forEach((v) => { %>
+              <% rateValues.forEach((v) => {
+                   const left = quotaLeft.get(v);   // undefined = 这档不限（50 / 200）
+                   const out = left === 0;          // 投满了。老数据可能还超了，见 db.getMyQuota %>
                 <button type="submit" name="value" value="<%= v %>" class="rate-tier"
-                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分"><%= v %></button>
+                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分"
+                        <% if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
+                        <% if (out) { %>disabled<% } %>><%= v %></button>
               <% }) %>
             </form>
           <% } %>

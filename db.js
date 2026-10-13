@@ -182,6 +182,15 @@ db.collectSeasonFiles = (seasonId) => {
 const RATE_VALUES = [50, 200, 250, 300, 400];
 db.RATE_VALUES = RATE_VALUES;
 
+// 每期每人给某一档的**名额上限**。没列出来的档位不限（50 / 200 想投几张投几张）。
+// 高分票是稀缺资源：给谁 400 得先想清楚，不能一口气全撒出去。
+// 同样是产品参数，改规矩只改这一行。
+// 它**不落库**：名额不是存下来的计数器，而是每次按 ratings 现数（见 getMyQuota）——
+// 于是改这张表对已经在投的这期立刻生效，管理员在 /admin 删掉一条票也当场退还名额，
+// 不会出现"计数器说用完了、记录里却翻不出那张票"的对不上。
+const RATE_QUOTA = { 400: 2, 300: 3, 250: 4 };
+db.RATE_QUOTA = RATE_QUOTA;
+
 // 没人打过分时的形状。模板直接读，不用到处判空；冻结只是提醒别改它。
 db.EMPTY_RATING = Object.freeze({
   n: 0, avg: null, max: null, min: null, maxBy: [], minBy: [], mine: null,
@@ -224,6 +233,30 @@ db.listSeasonRatings = (seasonId) => db.prepare(`
   WHERE e.season_id = ?
   ORDER BY target.id, r.value DESC, r.id
 `).all(seasonId);
+
+// 本期我各档还剩几个名额：[{ value, quota, used, left }]，高档在前（400 → 300 → 250）。
+// 只列**有名额限制**的档位 —— 不限的档位没有"还剩几个"这回事，模板不用知道它们。
+// 期由 entry 带出来（ratings 表里没存 season_id，见 schema.sql）。
+//
+// 名额是后加的规矩，所以老数据可能**已经超了**（比如有人手里已经投出去三个 400）：
+// 他的票一条不动，只是这里把 left 归零 —— 后果是他这期不能再投 400。
+// 从"删掉两张票把名额腾出来"和"既往不咎、从下一张开始挡"里选了后者：
+// 票是成员对阵容的评价，规矩不该回头改写已经投过的票。
+db.getMyQuota = (seasonId, raterId) => {
+  const used = new Map(db.prepare(`
+    SELECT r.value, COUNT(*) AS n
+    FROM ratings r JOIN entries e ON e.id = r.entry_id
+    WHERE e.season_id = ? AND r.rater_id = ?
+    GROUP BY r.value
+  `).all(seasonId, raterId).map((r) => [r.value, r.n]));
+
+  return Object.entries(RATE_QUOTA)
+    .map(([value, quota]) => {
+      const n = used.get(Number(value)) || 0;
+      return { value: Number(value), quota, used: n, left: Math.max(0, quota - n) };
+    })
+    .sort((a, b) => b.value - a.value);
+};
 
 // rows（getSeasonRatings 的结果）→ Map<entry_id, summary>
 // summary = { n, avg, max, min, maxBy, minBy, mine }

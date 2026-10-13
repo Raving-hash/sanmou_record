@@ -19,6 +19,9 @@ router.get('/', (req, res) => {
       last: null,
       ranking: withImages(db.getRanking(season.id)),
       lineups: db.getLineupWall(season.id, req.user.id),
+      // 本期我的打分名额（只含有限额的档位）。阵容墙用它把投满的档位按钮灰掉、
+      // 在标题下面列一行"还剩几个"。没在打分的人也会看到，但那是他自己的数，无妨。
+      quota: db.getMyQuota(season.id, req.user.id),
       notSubmitted: db.getNotSubmitted(season.id),
       me_entry: entry,
       me_images: entry ? db.getLineupImages(entry.id) : [],
@@ -212,6 +215,20 @@ router.post('/entries/:id/rate', (req, res) => {
   const had = db.findRating(entry.id, req.user.id);
   if (had) {
     req.session.flash = { type: 'err', msg: `你已经给他打过 ${had.value} 了，一期内只能打一次` };
+    return res.redirect(back);
+  }
+
+  // 名额：400 / 300 / 250 每期每人分别只有 2 / 3 / 4 张，50 和 200 不限（db.RATE_QUOTA）。
+  // 放在「你已经投过」后面：两条都撞上时，先说更具体的那条。
+  // 前端那些灰按钮只是提示，真正拦人的是这里 —— 直接 POST 一个自己已经投满的档位照样被拒。
+  // 从上面那次 SELECT 到这下面的 INSERT 中间没有 await，better-sqlite3 又全是同步调用，
+  // 所以中间插不进另一个请求，不会出现两个并发请求各投一张、合起来超一名额。
+  const q = db.getMyQuota(season.id, req.user.id).find((x) => x.value === value);
+  if (q && !q.left) {
+    req.session.flash = {
+      type: 'err',
+      msg: `一期内 ${value} 分只有 ${q.quota} 个名额，你已经投满了（50 / 200 不限）`,
+    };
     return res.redirect(back);
   }
 
