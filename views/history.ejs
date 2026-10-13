@@ -1,0 +1,51 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>历史赛期</h2>
+  <p class="muted">一共办了 <%= rows.length %> 期</p>
+</hgroup>
+
+<% if (!rows.length) { %>
+  <p class="muted">还没有任何一期。</p>
+<% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>期名</th>
+          <th class="w-time">日期</th>
+          <th class="w-status">状态</th>
+          <th>胜者</th>
+          <th class="w-score">胜者积分</th>
+          <th class="w-players">参赛人数</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% rows.forEach((s) => { %>
+          <tr>
+            <td><a href="/seasons/<%= s.id %>"><%= s.name %></a></td>
+            <td><small class="muted"><%= fmt(s.created_at) %></small></td>
+            <td>
+              <% if (s.status === 'open') { %>
+                <span class="badge badge-open">进行中</span>
+              <% } else { %>
+                <span class="badge badge-settled">已结算</span>
+              <% } %>
+            </td>
+            <td>
+              <% if (s.winner_name) { %>
+                <a href="/u/<%= s.winner_uid %>">👑 <%= s.winner_name %></a>
+              <% } else { %>
+                <small class="muted">—</small>
+              <% } %>
+            </td>
+            <td class="num"><%= s.winner_score === null ? '—' : s.winner_score %></td>
+            <td class="num"><%= s.players %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

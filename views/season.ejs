@@ -1,0 +1,96 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>
+    <%= season.name %>
+    <% if (settled) { %>
+      <span class="badge badge-settled">已结算</span>
+    <% } else { %>
+      <span class="badge badge-open">进行中</span>
+    <% } %>
+  </h2>
+  <p class="muted">
+    开始于 <%= fmt(season.created_at) %>
+    <% if (settled && season.settled_at) { %> · 结算于 <%= fmt(season.settled_at) %><% } %>
+    · 参赛 <%= players %> 人
+  </p>
+</hgroup>
+
+<% if (!rows.length) { %>
+  <p class="muted">这一期还没有人交积分。</p>
+<% } else { %>
+  <% rows.forEach((r, i) => { %>
+    <article class="entry-card <%= i === 0 && settled ? 'entry-winner' : '' %>">
+      <header>
+        <strong class="rank-no">#<%= i + 1 %></strong>
+        <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+        <% if (i === 0 && settled) { %><span class="badge badge-first">👑 胜者</span><% } %>
+        <% if (i === 0 && !settled) { %><span class="badge badge-first">暂列第一</span><% } %>
+        <span class="score-pill"><%= r.score %> 分</span>
+        <small class="muted">提交于 <%= fmt(r.score_submitted_at) %></small>
+      </header>
+
+      <div class="entry-body">
+        <div class="entry-shots">
+          <figure>
+            <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
+              <img src="/uploads/<%= r.score_image %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
+            </a>
+            <figcaption>积分截图</figcaption>
+          </figure>
+          <% r.images.forEach((img) => { %>
+            <figure>
+              <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+                <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+              </a>
+              <figcaption>
+                阵容截图
+                <% if (!settled && (me.is_admin || r.user_id === me.id)) { %>
+                  <form method="post" action="/lineup/<%= img.id %>/delete" class="inline-form">
+                    <input type="hidden" name="back" value="season">
+                    <button type="submit" class="outline secondary btn-sm">删除</button>
+                  </form>
+                <% } %>
+              </figcaption>
+            </figure>
+          <% }) %>
+        </div>
+
+        <% if (r.lineup_note) { %>
+          <p class="lineup-note"><strong>阵容说明：</strong><%= r.lineup_note %></p>
+        <% } %>
+
+        <% if (!settled && me.is_admin) { %>
+          <form method="post" action="/admin/entries/<%= r.id %>" class="fix-form">
+            <label>
+              管理员修正积分
+              <input type="number" name="score" min="0" max="999999999" step="1" value="<%= r.score %>" required>
+            </label>
+            <button type="submit" class="secondary btn-sm">修正</button>
+            <small class="muted">修正不会刷新提交时间</small>
+          </form>
+        <% } %>
+      </div>
+    </article>
+  <% }) %>
+<% } %>
+
+<% if (!settled && notSubmitted.length) { %>
+  <h3>还没交积分（<%= notSubmitted.length %>）</h3>
+  <ul class="plain-list">
+    <% notSubmitted.forEach((p) => { %>
+      <li>
+        <a href="/u/<%= p.uid %>"><%= p.nickname %></a>
+        <% if (p.lineup_uploaded) { %>
+          <span class="badge badge-ok">已传阵容</span>
+        <% } else { %>
+          <span class="badge badge-wait">还没传阵容</span>
+        <% } %>
+      </li>
+    <% }) %>
+  </ul>
+<% } %>
+
+<p><a href="/history">← 回到历史赛期</a></p>
+
+<%- include('partials/footer') %>

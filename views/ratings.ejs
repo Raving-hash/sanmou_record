@@ -1,0 +1,43 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>我的打分记录</h2>
+  <p class="muted">
+    一期内对同一个阵容只能打一次，打完就不能改；打分只作展示，不影响名次。
+  </p>
+</hgroup>
+
+<% if (!rows.length) { %>
+  <p class="muted">你还没有打过分。去<a href="/">首页阵容墙</a>上点一下那五个档位就投出去了。</p>
+<% } else { %>
+  <p class="muted small">一共打了 <strong class="num"><%= rows.length %></strong> 次。</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>期名</th>
+          <th>打给谁</th>
+          <th class="w-score">我打的</th>
+          <th class="w-time">时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% rows.forEach((r) => { %>
+          <tr>
+            <td>
+              <a href="/seasons/<%= r.season_id %>"><%= r.season_name %></a>
+              <% if (r.season_status === 'open') { %>
+                <span class="badge badge-open">进行中</span>
+              <% } %>
+            </td>
+            <td><a href="/u/<%= r.uid %>"><%= r.nickname %></a></td>
+            <td class="num"><strong><%= r.value %></strong></td>
+            <td><small class="muted"><%= fmt(r.created_at) %></small></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

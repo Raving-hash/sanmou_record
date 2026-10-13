@@ -1,0 +1,86 @@
+<%#
+  本期阵容墙：每人只摊开第一张阵容截图 + 阵容说明（截断到 5 行）+ 打分区。
+  「第一张」按上传顺序（getLineupImages 是 ORDER BY id），不是按文件名——
+  想换展示哪张，去 /lineup 把第一张删掉，后面的会顶上来。
+
+  入参：
+    rows     db.getLineupWall() 的结果。每行已带 rank（交了积分的才有，否则 null）、
+             score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
+             且只包含至少传了一张阵容的人，所以这里不用再筛。
+    heading  小节标题，如「本期阵容」/「第32期 阵容」
+    canRate  这一期还能不能打分。进行中的期传 true；首页回退到「上一期结果」时传 false——
+             那时连按钮都不出，只留均分/最高/最低。
+%>
+<% if (rows.length) { %>
+  <h3><%= heading %></h3>
+  <p class="muted small">
+    每人只展示第一张阵容截图（按上传顺序，不是按文件名）和阵容说明，交了积分的排前面。
+    点图开原图；说明超过 5 行会被截断。
+  </p>
+  <div class="shot-grid">
+    <% rows.forEach((r) => { const img = r.images[0]; %>
+      <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
+      <figure class="shot-card" id="e<%= r.id %>">
+        <figcaption class="shot-head">
+          <% if (r.rank) { %><span class="shot-rank">#<%= r.rank %></span><% } %>
+          <a class="shot-who" href="/u/<%= r.uid %>"><%= r.nickname %></a>
+          <% if (r.images.length > 1) { %>
+            <span class="badge badge-wait">共 <%= r.images.length %> 张</span>
+          <% } %>
+          <% if (r.rank) { %>
+            <span class="shot-score"><%= r.score %> 分</span>
+          <% } else { %>
+            <span class="shot-score is-pending">未交积分</span>
+          <% } %>
+        </figcaption>
+        <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+          <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图"
+               loading="lazy" decoding="async">
+        </a>
+        <% if (r.lineup_note) { %>
+          <p class="shot-note"><%= r.lineup_note %></p>
+        <% } %>
+
+        <div class="shot-rate">
+          <% if (!r.rating.n) { %>
+            <p class="rate-line is-empty">还没有人打分</p>
+          <% } else { %>
+            <p class="rate-line">
+              <span class="rate-k">均分</span>
+              <b class="rate-v"><%= r.rating.avg %></b>
+              <span class="rate-who"><%= r.rating.n %> 人打分</span>
+            </p>
+            <p class="rate-line">
+              <span class="rate-k">最高</span>
+              <b class="rate-v is-hi"><%= r.rating.max %></b>
+              <span class="rate-who"><%= nameList(r.rating.maxBy) %></span>
+            </p>
+            <p class="rate-line">
+              <span class="rate-k">最低</span>
+              <b class="rate-v is-lo"><%= r.rating.min %></b>
+              <span class="rate-who"><%= nameList(r.rating.minBy) %></span>
+            </p>
+          <% } %>
+
+          <% if (r.rating.mine) { %>
+            <%# 打过就锁死（UNIQUE(entry_id, rater_id)），所以不出按钮，
+                明说一句省得人到处找「怎么改」。要改只能请管理员去 /admin 清掉。
+                「一期内不能改」单独一行而不是塞进色块里：塞进去在 200px 卡上会被
+                折成「一期内不 / 能改」，断得难看。 %>
+            <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
+            <p class="rate-lock">一期内不能改</p>
+          <% } else if (canRate) { %>
+            <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。
+                没有 <input>，value 直接挂在按钮上。 %>
+            <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
+              <% rateValues.forEach((v) => { %>
+                <button type="submit" name="value" value="<%= v %>" class="rate-tier"
+                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分"><%= v %></button>
+              <% }) %>
+            </form>
+          <% } %>
+        </div>
+      </figure>
+    <% }) %>
+  </div>
+<% } %>

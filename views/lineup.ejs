@@ -1,0 +1,45 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>上传阵容 · <%= season.name %></h2>
+  <p class="muted">最多 <%= max %> 张，支持 jpg / png / webp，单张不超过 10MB</p>
+</hgroup>
+
+<h3>已上传（<%= images.length %> / <%= max %>）</h3>
+<% if (!images.length) { %>
+  <p class="muted">还没传阵容截图。传了之后所有登录的成员都能看到。</p>
+<% } else { %>
+  <div class="gallery">
+    <% images.forEach((img) => { %>
+      <figure>
+        <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+          <img src="/uploads/<%= img.filename %>" alt="阵容截图" loading="lazy">
+        </a>
+        <form method="post" action="/lineup/<%= img.id %>/delete">
+          <button type="submit" class="outline secondary btn-sm">删除</button>
+        </form>
+      </figure>
+    <% }) %>
+  </div>
+<% } %>
+
+<form method="post" action="/lineup" enctype="multipart/form-data">
+  <label>继续上传
+    <input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple
+           data-max="<%= max - images.length %>">
+    <small class="muted">可以一次多选，最多还能传 <%= max - images.length %> 张</small>
+  </label>
+  <label>阵容说明
+    <textarea name="lineup_note" rows="3"
+              placeholder="这套阵容的思路、站位、克制谁……"><%= entry && entry.lineup_note ? entry.lineup_note : '' %></textarea>
+  </label>
+  <button type="submit">保存</button>
+</form>
+
+<p><small class="muted">只改阵容截图或说明，不会影响你的积分提交时间。</small></p>
+
+<%# 拖拽上传。挂在表单后面：脚本执行时 input 已经在 DOM 里，不用等 DOMContentLoaded。
+     ?v= 和样式表同理 —— nginx 给 /public/ 盖了 max-age=604800。 %>
+<script src="/public/upload.js?v=<%= assetVer.upload %>"></script>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,57 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2><%= u.nickname %><% if (u.is_disabled) { %> <span class="badge badge-wait">已禁用</span><% } %></h2>
+  <p class="muted">ID：<%= u.user_id %> · 加入于 <%= fmt(u.created_at) %></p>
+</hgroup>
+
+<% if (!stats) { %>
+  <p class="muted">还没有已结算的战绩。</p>
+<% } else { %>
+  <div class="stat-grid">
+    <article class="stat"><span class="stat-num"><%= stats.wins %></span><span class="stat-label">胜场</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.plays %></span><span class="stat-label">参赛</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.win_rate %>%</span><span class="stat-label">胜率</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.avg_score %></span><span class="stat-label">平均分</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.best_score %></span><span class="stat-label">最高分</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.best_rank ?? '—' %></span><span class="stat-label">最佳名次</span></article>
+  </div>
+<% } %>
+
+<h3>历史各期</h3>
+<% if (!history.length) { %>
+  <p class="muted">还没有参加过的已结算赛期。</p>
+<% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>期名</th>
+          <th class="w-time">日期</th>
+          <th class="w-score">积分</th>
+          <th class="w-rank">名次</th>
+          <th>结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% history.forEach((h) => { %>
+          <tr class="<%= h.is_winner ? 'row-first' : '' %>">
+            <td><a href="/seasons/<%= h.id %>"><%= h.name %></a></td>
+            <td><small class="muted"><%= fmt(h.created_at) %></small></td>
+            <td class="num"><strong><%= h.score %></strong></td>
+            <td class="num"><%= h.final_rank %></td>
+            <td>
+              <% if (h.is_winner) { %>
+                <span class="badge badge-first">👑 获胜</span>
+              <% } else { %>
+                <small class="muted">第 <%= h.final_rank %> 名 / 共 <%= h.players %> 人</small>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

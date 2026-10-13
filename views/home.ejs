@@ -1,0 +1,175 @@
+<%- include('partials/header') %>
+
+<% if (season) { %>
+
+  <hgroup class="page-head">
+    <h2><%= season.name %> <span class="badge badge-open">进行中</span></h2>
+    <p class="muted">开始于 <%= fmt(season.created_at) %> · 积分最高者获胜，同分时先提交的排前面</p>
+  </hgroup>
+
+  <div class="actions">
+    <a role="button" href="/lineup">上传阵容</a>
+    <a role="button" class="secondary" href="/score">录入积分</a>
+  </div>
+
+  <% if (me_entry && me_entry.score !== null) { %>
+    <article class="mine-card">
+      <p>你本期已提交 <strong class="num"><%= me_entry.score %></strong> 分
+        <small class="muted">（提交于 <%= fmt(me_entry.score_submitted_at) %>）</small></p>
+      <p class="muted small">改分或换截图会刷新提交时间，同分时排名会靠后。</p>
+    </article>
+  <% } else if (me_entry) { %>
+    <article class="mine-card">
+      <p class="muted">你本期传了阵容但还没录积分 —— <a href="/score">现在录入</a>。按规则，没交积分算本期没打。</p>
+    </article>
+  <% } else { %>
+    <article class="mine-card">
+      <p class="muted">你本期还没开始 —— <a href="/lineup">上传阵容</a>、<a href="/score">录入积分</a>。</p>
+    </article>
+  <% } %>
+
+  <h3>本期排名</h3>
+  <% if (!ranking.length) { %>
+    <p class="muted">还没有人交积分，快去抢第一名。</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="w-rank">名次</th>
+            <th>昵称</th>
+            <th class="w-score">积分</th>
+            <th class="w-time">提交时间</th>
+            <th>积分截图</th>
+            <th>阵容截图</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% ranking.forEach((r, i) => { %>
+            <tr class="<%= i === 0 ? 'row-first' : '' %>">
+              <td class="num"><%= i + 1 %></td>
+              <td>
+                <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+                <% if (i === 0) { %><span class="badge badge-first">暂列第一</span><% } %>
+              </td>
+              <td class="num"><strong><%= r.score %></strong></td>
+              <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
+              <td>
+                <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
+                  <img class="thumb" src="/uploads/<%= r.score_image %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
+                </a>
+              </td>
+              <td>
+                <% if (r.images.length) { %>
+                  <div class="thumb-row">
+                    <% r.images.forEach((img) => { %>
+                      <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+                        <img class="thumb" src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+                      </a>
+                    <% }) %>
+                  </div>
+                <% } else { %>
+                  <small class="muted">没传</small>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate: true }) %>
+
+  <h3>还没交积分（<%= notSubmitted.length %>）</h3>
+  <% if (!notSubmitted.length) { %>
+    <p class="muted">所有人都交了，可以催管理员结算了。</p>
+  <% } else { %>
+    <ul class="plain-list">
+      <% notSubmitted.forEach((p) => { %>
+        <li>
+          <a href="/u/<%= p.uid %>"><%= p.nickname %></a>
+          <% if (p.lineup_uploaded) { %>
+            <span class="badge badge-ok">已传阵容</span>
+          <% } else { %>
+            <span class="badge badge-wait">还没传阵容</span>
+          <% } %>
+        </li>
+      <% }) %>
+    </ul>
+    <p><small class="muted">没交积分就算本期没打，不计入参赛次数和胜率。</small></p>
+  <% } %>
+
+<% } else { %>
+
+  <hgroup class="page-head">
+    <h2>本期看板</h2>
+    <p class="muted">现在没有进行中的赛期，等管理员开启下一期</p>
+  </hgroup>
+
+  <% if (!last) { %>
+    <p class="muted">还没有办过任何一期。管理员先去<a href="/admin">管理页</a>创建第一期吧。</p>
+  <% } else { %>
+    <h3><%= last.name %> 的结果 <span class="badge badge-settled">已结算</span></h3>
+    <% if (myRank) { %>
+      <p class="muted">你在这期拿了第 <strong class="num"><%= myRank %></strong> 名。</p>
+    <% } %>
+    <% if (!ranking.length) { %>
+      <p class="muted">这一期没有人交积分。</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="w-rank">名次</th>
+              <th>昵称</th>
+              <th class="w-score">积分</th>
+              <th class="w-time">提交时间</th>
+              <th>积分截图</th>
+              <th>阵容截图</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% ranking.forEach((r, i) => { %>
+              <tr class="<%= i === 0 ? 'row-first' : '' %>">
+                <td class="num"><%= i + 1 %></td>
+                <td>
+                  <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+                  <% if (i === 0) { %><span class="badge badge-first">胜者</span><% } %>
+                </td>
+                <td class="num"><strong><%= r.score %></strong></td>
+                <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
+                <td>
+                  <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
+                    <img class="thumb" src="/uploads/<%= r.score_image %>" alt="积分截图" loading="lazy">
+                  </a>
+                </td>
+                <td>
+                  <% if (r.images.length) { %>
+                    <div class="thumb-row">
+                      <% r.images.forEach((img) => { %>
+                        <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+                          <img class="thumb" src="/uploads/<%= img.filename %>" alt="阵容截图" loading="lazy">
+                        </a>
+                      <% }) %>
+                    </div>
+                  <% } else { %>
+                    <small class="muted">没传</small>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+
+    <%# 这一期已经结算了，打分也一起封盘：只显示均分/最高/最低，不出按钮 %>
+    <%- include('partials/lineup-gallery', { rows: lineups, heading: `${last.name} 阵容`, canRate: false }) %>
+
+    <p><a href="/seasons/<%= last.id %>">看这一期的完整详情</a> · <a href="/history">全部历史赛期</a></p>
+  <% } %>
+
+<% } %>
+
+<%- include('partials/footer') %>

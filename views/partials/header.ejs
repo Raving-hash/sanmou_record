@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- data-theme="dark" 是墨金主题的前提：Pico 靠它切到暗色令牌分支。
+     写死在这里（而不是跟随系统）是为了所有人看到的都是同一套配色。
+     style.css 里的 --pico-primary-inverse 等假设也建立在暗色分支上。 -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#14110c">
+  <title><%= locals.title ? title + ' · 演武擂台' : '演武擂台' %></title>
+  <%# ?v= 是给 nginx 的 expires 7d 破缓存用的：/public/ 反代给 Node 时
+      nginx 会盖上 max-age=604800，改了 style.css 浏览器最多一周都不来取新的。
+      带上文件 mtime 后每次改动都是新 URL，不用让用户按 Ctrl+Shift+R。 %>
+  <link rel="stylesheet" href="/public/pico.min.css?v=<%= assetVer.pico %>">
+  <link rel="stylesheet" href="/public/style.css?v=<%= assetVer.style %>">
+</head>
+<body>
+<nav class="container-fluid topnav">
+  <ul>
+    <li><a class="brand" href="/">演武擂台</a></li>
+  </ul>
+  <ul>
+    <% if (locals.me) { %>
+      <li><a href="/" class="<%= path === '/' ? 'active' : '' %>">本期</a></li>
+      <li><a href="/history" class="<%= path === '/history' ? 'active' : '' %>">历史</a></li>
+      <li><a href="/rank" class="<%= path === '/rank' ? 'active' : '' %>">排行</a></li>
+      <li><a href="/ratings" class="<%= path === '/ratings' ? 'active' : '' %>">打分</a></li>
+      <li><a href="/u/<%= me.user_id %>" class="<%= path.startsWith('/u/') ? 'active' : '' %>">我的</a></li>
+      <% if (me.is_admin) { %>
+        <li><a href="/admin" class="<%= path.startsWith('/admin') ? 'active' : '' %>">管理</a></li>
+      <% } %>
+      <li><a href="/password" class="<%= path === '/password' ? 'active' : '' %>">改密码</a></li>
+      <li>
+        <form method="post" action="/logout" class="nav-out">
+          <button type="submit" class="outline secondary btn-sm">退出</button>
+        </form>
+      </li>
+    <% } else { %>
+      <li><a href="/login" class="<%= path === '/login' ? 'active' : '' %>">登录</a></li>
+      <li><a href="/register" class="<%= path === '/register' ? 'active' : '' %>">注册</a></li>
+    <% } %>
+  </ul>
+</nav>
+<main class="container">
+<% if (locals.flash) { %>
+  <div class="flash flash-<%= flash.type %>"><%= flash.msg %></div>
+<% } %>

@@ -1,0 +1,44 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>总排行榜</h2>
+  <p class="muted">只统计已结算的赛期，且只有交了积分才算参赛</p>
+</hgroup>
+
+<% if (!board.length) { %>
+  <p class="muted">还没有已结算的赛期，打完第一期这里就有数据了。</p>
+<% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="w-rank">名次</th>
+          <th>昵称</th>
+          <th class="w-score">胜场</th>
+          <th class="w-score">参赛</th>
+          <th class="w-score">胜率</th>
+          <th class="w-score">平均分</th>
+          <th class="w-score">最高分</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% board.forEach((r, i) => { %>
+          <tr class="<%= i === 0 ? 'row-first' : '' %>">
+            <td class="num"><%= i + 1 %></td>
+            <td>
+              <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+              <% if (i === 0) { %><span class="badge badge-first">👑 头名</span><% } %>
+            </td>
+            <td class="num"><strong><%= r.wins %></strong></td>
+            <td class="num"><%= r.plays %></td>
+            <td class="num"><%= r.win_rate %>%</td>
+            <td class="num"><%= r.avg_score %></td>
+            <td class="num"><%= r.best_score %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

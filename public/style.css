@@ -1,0 +1,1210 @@
+/* ==========================================================================
+   演武擂台 —— 墨金国风主题
+   在 Pico.css v2 之上做的一层重着色：把 Pico 的 --pico-* 令牌整体换成
+   墨底（暖黑）+ 金（主色）+ 朱红（危险）的色板，再补上少量组件样式。
+
+   依赖前提：views/partials/header.ejs 里 <html> 上写了 data-theme="dark"。
+   没有它 Pico 会走浅色分支，--pico-primary-inverse 之类的假设就不成立了。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. 色板
+   -------------------------------------------------------------------------- */
+:root {
+  /* 墨 —— 由深到浅 */
+  --yw-ink-1000: #0b0906;
+  --yw-ink-900:  #14110c;   /* 页面底色 */
+  --yw-ink-800:  #1a1611;   /* 卡片 */
+  --yw-ink-700:  #221d16;   /* 卡片内分区 / 表头 / 悬浮 */
+  --yw-ink-600:  #2b251b;   /* 输入框 */
+  --yw-line:     #332c21;   /* 描边 */
+  --yw-line-soft:#272118;   /* 更弱的线（表格行） */
+
+  /* 金 —— 主色 */
+  --yw-gold:     #c8a24a;
+  --yw-gold-lt:  #e8cd86;
+  --yw-gold-dk:  #8a6d2c;
+  --yw-gold-a10: rgba(200, 162, 74, 0.10);
+  --yw-gold-a20: rgba(200, 162, 74, 0.20);
+  --yw-gold-a35: rgba(200, 162, 74, 0.35);
+
+  /* 朱红 —— 危险 / 未交 */
+  --yw-cinnabar:    #8c2f2f;
+  --yw-cinnabar-lt: #e89a9a;
+
+  /* 青玉 —— 成功 / 已交 */
+  --yw-jade:    #3f7d5c;
+  --yw-jade-lt: #8ac9a6;
+
+  /* 文字（暖白，不用纯白，避免和墨底打架） */
+  --yw-text:      #ece5d8;
+  --yw-text-dim:  #a89b83;
+  --yw-text-mute: #756b59;
+
+  --yw-radius: 8px;
+  --yw-radius-lg: 12px;
+
+  --yw-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
+              "Noto Serif SC", "SimSun", "宋体", serif;
+  --yw-sans:  -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+              "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC",
+              "WenQuanYi Micro Hei", sans-serif;
+
+  /* ---- 把 Pico 的令牌接到上面的色板上 ---- */
+  --pico-font-family: var(--yw-sans);
+  --pico-font-family-sans-serif: var(--yw-sans);
+  --pico-font-weight: 400;
+
+  --pico-background-color: var(--yw-ink-900);
+  --pico-color: var(--yw-text);
+  --pico-muted-color: var(--yw-text-dim);
+  --pico-muted-border-color: var(--yw-line);
+  --pico-border-color: var(--yw-line);
+  --pico-border-radius: var(--yw-radius);
+  --pico-text-selection-color: var(--yw-gold-a35);
+
+  /* 标题：金色系 */
+  --pico-h1-color: var(--yw-gold-lt);
+  --pico-h2-color: var(--yw-gold-lt);
+  --pico-h3-color: var(--yw-gold);
+  --pico-h4-color: var(--yw-gold);
+  --pico-h5-color: var(--yw-text);
+  --pico-h6-color: var(--yw-text-dim);
+
+  /* 主色 = 金。inverse 是按钮上的字，必须是墨色，否则金字金底看不见 */
+  --pico-primary: var(--yw-gold);
+  --pico-primary-background: var(--yw-gold);
+  --pico-primary-border: var(--yw-gold);
+  --pico-primary-hover: var(--yw-gold-lt);
+  --pico-primary-hover-background: var(--yw-gold-lt);
+  --pico-primary-hover-border: var(--yw-gold-lt);
+  --pico-primary-focus: var(--yw-gold-a20);
+  --pico-primary-inverse: var(--yw-ink-1000);
+  --pico-primary-underline: var(--yw-gold-a35);
+  --pico-primary-hover-underline: var(--yw-gold-lt);
+
+  /* 次要按钮（.secondary / .outline）：低调的暖灰 */
+  --pico-secondary: var(--yw-text-dim);
+  --pico-secondary-background: var(--yw-ink-700);
+  --pico-secondary-border: var(--yw-line);
+  --pico-secondary-hover: var(--yw-gold-lt);
+  --pico-secondary-hover-background: var(--yw-ink-600);
+  --pico-secondary-hover-border: var(--yw-gold-a35);
+  --pico-secondary-inverse: var(--yw-ink-1000);
+  --pico-secondary-underline: rgba(168, 155, 131, 0.4);
+  --pico-secondary-hover-underline: var(--yw-gold-lt);
+  --pico-secondary-focus: var(--yw-gold-a20);
+
+  --pico-contrast: var(--yw-text);
+  --pico-contrast-background: var(--yw-ink-600);
+  --pico-contrast-border: var(--yw-line);
+  --pico-contrast-hover: var(--yw-ink-1000);
+  --pico-contrast-hover-background: var(--yw-text);
+  --pico-contrast-inverse: var(--yw-ink-1000);
+
+  /* 卡片 */
+  --pico-card-background-color: var(--yw-ink-800);
+  --pico-card-border-color: var(--yw-line);
+  --pico-card-sectioning-background-color: var(--yw-ink-700);
+  --pico-card-box-shadow: none;
+  --pico-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --pico-button-box-shadow: none;
+  --pico-button-hover-box-shadow: none;
+
+  /* 表单 */
+  --pico-form-element-background-color: var(--yw-ink-600);
+  --pico-form-element-border-color: var(--yw-line);
+  --pico-form-element-color: var(--yw-text);
+  --pico-form-element-placeholder-color: var(--yw-text-mute);
+  --pico-form-element-active-background-color: var(--yw-ink-700);
+  --pico-form-element-active-border-color: var(--yw-gold);
+  --pico-form-element-focus-color: var(--yw-gold-a20);
+  --pico-form-element-selected-background-color: var(--yw-ink-700);
+  --pico-form-element-valid-border-color: var(--yw-jade);
+  --pico-form-element-valid-active-border-color: var(--yw-jade-lt);
+  --pico-form-element-valid-focus-color: rgba(63, 125, 92, 0.25);
+  --pico-form-element-invalid-border-color: var(--yw-cinnabar);
+  --pico-form-element-invalid-active-border-color: var(--yw-cinnabar-lt);
+  --pico-form-element-invalid-focus-color: rgba(140, 47, 47, 0.25);
+  --pico-form-label-font-weight: 500;
+
+  /* 代码 */
+  --pico-code-background-color: var(--yw-ink-700);
+  --pico-code-color: var(--yw-gold-lt);
+  --pico-code-kbd-background-color: var(--yw-ink-700);
+  --pico-code-kbd-color: var(--yw-text);
+
+  /* 表格 */
+  --pico-table-border-color: var(--yw-line-soft);
+  --pico-table-row-stripped-background-color: rgba(255, 255, 255, 0.018);
+
+  /* 其它零散组件 */
+  --pico-mark-background-color: var(--yw-gold-a35);
+  --pico-mark-color: var(--yw-gold-lt);
+  --pico-del-color: var(--yw-cinnabar-lt);
+  --pico-ins-color: var(--yw-jade-lt);
+  --pico-blockquote-border-color: var(--yw-gold-a35);
+  --pico-blockquote-footer-color: var(--yw-text-dim);
+  --pico-dropdown-background-color: var(--yw-ink-700);
+  --pico-dropdown-border-color: var(--yw-line);
+  --pico-dropdown-color: var(--yw-text);
+  --pico-dropdown-hover-background-color: var(--yw-gold-a20);
+  --pico-tooltip-background-color: var(--yw-ink-600);
+  --pico-tooltip-color: var(--yw-text);
+  --pico-switch-background-color: var(--yw-ink-600);
+  --pico-switch-checked-background-color: var(--yw-gold);
+  --pico-switch-color: var(--yw-ink-1000);
+  --pico-progress-background-color: var(--yw-ink-700);
+  --pico-progress-color: var(--yw-gold);
+  --pico-accordion-border-color: var(--yw-line);
+  --pico-accordion-active-summary-color: var(--yw-gold);
+  --pico-accordion-close-summary-color: var(--yw-text);
+  --pico-accordion-open-summary-color: var(--yw-text);
+  --pico-modal-overlay-background-color: rgba(11, 9, 6, 0.82);
+
+  accent-color: var(--yw-gold);
+}
+
+/* --------------------------------------------------------------------------
+   2. 底子
+   -------------------------------------------------------------------------- */
+
+/* 顶部一抹极淡的暖光，让纯色底不至于死板。纯 CSS，不引外部图。 */
+body {
+  min-height: 100vh;
+  background-color: var(--yw-ink-900);
+  background-image:
+    radial-gradient(1100px 380px at 50% -140px, rgba(200, 162, 74, 0.075), transparent 70%),
+    radial-gradient(700px 320px at 100% 0, rgba(140, 47, 47, 0.045), transparent 70%);
+  background-repeat: no-repeat;
+}
+
+main.container {
+  padding-bottom: 2rem;
+}
+
+::selection {
+  background: var(--yw-gold-a35);
+  color: var(--yw-gold-lt);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--yw-line) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--yw-line);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--yw-gold-dk);
+}
+
+/* 标题走衬线，正文保持无衬线 —— 中文衬线在正文里可读性会掉 */
+h1, h2, h3, h4 {
+  font-family: var(--yw-serif);
+  letter-spacing: 0.03em;
+}
+
+h2 {
+  font-size: 1.6rem;
+}
+h3 {
+  font-size: 1.15rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--yw-line);
+  margin-bottom: 1rem;
+}
+
+/* 页头：Pico 的 hgroup 自带下边框，这里把颜色和间距调顺 */
+hgroup {
+  border-bottom: 1px solid var(--yw-line);
+  padding-bottom: 0.85rem;
+}
+hgroup h2 {
+  margin-bottom: 0.35rem;
+}
+.page-head {
+  margin-bottom: 1.5rem;
+}
+
+a {
+  text-underline-offset: 3px;
+  transition: color 0.14s ease;
+}
+
+/* 焦点环统一成金色 */
+:focus-visible {
+  outline: 2px solid var(--yw-gold);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   3. 顶部导航
+   -------------------------------------------------------------------------- */
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin-bottom: 2rem;
+  padding-inline: var(--pico-spacing);
+  background: rgba(20, 17, 12, 0.93);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--yw-line);
+}
+
+/* 金线：两端渐隐，比实线精致 */
+.topnav::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--yw-gold-a35) 15%,
+    var(--yw-gold-a35) 85%,
+    transparent
+  );
+}
+
+.topnav .brand {
+  font-family: var(--yw-serif);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.16em;
+  color: var(--yw-gold-lt);
+  text-decoration: none;
+}
+.topnav .brand:hover {
+  color: #f2dda0;
+}
+/* 品牌前的金色短竖 —— 像一方窄印 */
+.topnav .brand::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 1.05em;
+  margin-right: 0.6rem;
+  vertical-align: -0.16em;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--yw-gold-lt), var(--yw-gold-dk));
+}
+
+.topnav ul:last-child {
+  gap: 0.15rem;
+}
+.topnav ul:last-child li a {
+  display: inline-block;
+  font-size: 0.95rem;
+  color: var(--yw-text-dim);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  transition: color 0.14s ease, background 0.14s ease;
+}
+.topnav ul:last-child li a:hover {
+  color: var(--yw-gold-lt);
+  background: var(--yw-gold-a10);
+}
+.topnav a.active {
+  color: var(--yw-gold-lt);
+  font-weight: 600;
+  background: var(--yw-gold-a10);
+  box-shadow: inset 0 -2px 0 var(--yw-gold);
+  text-decoration: none;
+}
+
+.nav-out {
+  margin: 0;
+}
+.nav-out button {
+  margin: 0;
+  padding: 0.22rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+/* --------------------------------------------------------------------------
+   4. 通用零件
+   -------------------------------------------------------------------------- */
+.muted {
+  color: var(--yw-text-dim);
+}
+.small {
+  font-size: 0.85rem;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 徽章：半透明色底 + 亮色字，在暗底上比实心浅色块协调得多 */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  line-height: 1.65;
+  white-space: nowrap;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+.badge-open {
+  background: var(--yw-gold-a20);
+  border-color: var(--yw-gold-a35);
+  color: var(--yw-gold-lt);
+}
+.badge-settled {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--yw-line);
+  color: var(--yw-text-dim);
+}
+.badge-first {
+  background: var(--yw-gold-a20);
+  border-color: var(--yw-gold-a35);
+  color: var(--yw-gold-lt);
+}
+.badge-ok {
+  background: rgba(63, 125, 92, 0.16);
+  border-color: rgba(63, 125, 92, 0.45);
+  color: var(--yw-jade-lt);
+}
+.badge-wait {
+  background: rgba(140, 47, 47, 0.18);
+  border-color: rgba(140, 47, 47, 0.5);
+  color: var(--yw-cinnabar-lt);
+}
+.badge-admin {
+  background: rgba(122, 108, 178, 0.18);
+  border-color: rgba(122, 108, 178, 0.45);
+  color: #bcb0e6;
+}
+
+/* 提示条 */
+.flash {
+  padding: 0.75rem 1rem;
+  border-radius: var(--yw-radius);
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  margin-bottom: 1.2rem;
+}
+.flash-ok {
+  background: rgba(63, 125, 92, 0.12);
+  border-color: rgba(63, 125, 92, 0.3);
+  border-left-color: var(--yw-jade-lt);
+  color: #a9ddc1;
+}
+.flash-err {
+  background: rgba(140, 47, 47, 0.14);
+  border-color: rgba(140, 47, 47, 0.35);
+  border-left-color: var(--yw-cinnabar-lt);
+  color: #f2b4b4;
+}
+
+/* 按钮排 */
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1.4rem;
+}
+.actions form {
+  margin: 0;
+}
+.actions button,
+.actions [role="button"] {
+  margin: 0;
+}
+
+button,
+[role="button"],
+input[type="submit"] {
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+              color 0.15s ease, transform 0.08s ease;
+}
+button:not(:disabled):active,
+[role="button"]:active {
+  transform: translateY(1px);
+}
+
+.btn-sm {
+  padding: 0.2rem 0.65rem !important;
+  font-size: 0.8rem !important;
+  width: auto;
+  margin: 0;
+}
+.btn-danger {
+  color: var(--yw-cinnabar-lt) !important;
+  border-color: rgba(140, 47, 47, 0.55) !important;
+}
+.btn-danger:hover {
+  background: rgba(140, 47, 47, 0.16) !important;
+  border-color: var(--yw-cinnabar-lt) !important;
+}
+
+/* 文件选择框那个小按钮 */
+input[type="file"]::file-selector-button {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.32rem 0.8rem;
+  margin-right: 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--yw-line);
+  background: var(--yw-ink-700);
+  color: var(--yw-gold);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+input[type="file"]::file-selector-button:hover {
+  background: var(--yw-gold-a20);
+  border-color: var(--yw-gold-a35);
+  color: var(--yw-gold-lt);
+}
+
+/* ---- 拖拽上传 ----------------------------------------------------------
+   下面这几个类全由 public/upload.js 生成，模板里没有它们 ——
+   脚本没跑（JS 关了、浏览器太老）的页面上不该出现一个拖不动东西的虚线框。
+   虚线是给人「这儿能放东西」的凭据，没有它没人会想到可以拖；
+   拖上来时描边转金、底色透金，和站内其它 hover 态一个路子。
+
+   transition 只服务于「拖进来」那一下的高亮。类刚加上时不能让它生效 ——
+   否则页面一打开就是「无框 → 有框」的 140ms 淡入。upload.js 加类前会先把
+   这条过渡压掉，见那边的注释。 */
+.drop-field {
+  padding: 0.7rem 0.85rem 0.8rem;
+  border: 1px dashed var(--yw-line);
+  border-radius: var(--yw-radius);
+  background: var(--yw-ink-800);
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.drop-field.is-dragover {
+  border-color: var(--yw-gold);
+  background: var(--yw-gold-a10);
+}
+.drop-hint {
+  display: block;
+  margin-top: 0.3rem;
+}
+/* 结果提示。默认 display:none 而不是靠空元素不留痕：留着的话没拖过的页面上
+   也会多出一截 margin。JS 加 .is-on 才显示。 */
+.drop-msg {
+  display: none;
+}
+.drop-msg.is-on {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--yw-text-dim);
+  overflow-wrap: anywhere;   /* 文件名可能很长，别把卡片撑破 */
+}
+.drop-msg.is-warn {
+  color: var(--yw-cinnabar-lt);
+}
+
+/* --------------------------------------------------------------------------
+   5. 登录 / 注册 / 改密码
+   -------------------------------------------------------------------------- */
+.auth-wrap {
+  max-width: 25rem;
+  margin: 2.5rem auto;
+  padding: 1.9rem 1.7rem 1.5rem;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius-lg);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  position: relative;
+  overflow: hidden;
+}
+/* 顶部一道金线，和卡片呼应 */
+.auth-wrap::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--yw-gold), transparent);
+}
+.auth-wrap hgroup {
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: 1.4rem;
+}
+.auth-wrap button.fit {
+  width: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   6. 卡片 / 我的状态
+   -------------------------------------------------------------------------- */
+.card {
+  padding: 1.2rem 1.3rem 1.3rem;
+  margin-bottom: 1.6rem;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius-lg);
+}
+.card h3 {
+  margin-bottom: 0.9rem;
+}
+
+.mine-card {
+  padding: 1rem 1.15rem;
+  margin-bottom: 1.5rem;
+  background:
+    linear-gradient(120deg, var(--yw-gold-a10), transparent 55%),
+    var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-left: 3px solid var(--yw-gold);
+  border-radius: var(--yw-radius);
+}
+.mine-card p:last-child {
+  margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   7. 表格
+   -------------------------------------------------------------------------- */
+.table-wrap {
+  overflow: auto;
+  margin-bottom: 1.5rem;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius-lg);
+}
+.table-wrap table {
+  min-width: 34rem;
+  margin: 0;
+}
+.table-wrap th {
+  background: var(--yw-ink-700);
+  color: var(--yw-gold);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.table-wrap th,
+.table-wrap td {
+  vertical-align: middle;
+  padding: 0.6rem 0.85rem;
+}
+.table-wrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table-wrap tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.w-rank    { width: 4rem; }
+.w-score   { width: 6rem; }
+.w-time    { width: 11rem; }
+.w-status  { width: 6rem; }
+.w-players { width: 5rem; }
+
+/* 名次列居中。所有带 .num 的表里第一列都是名次，
+   而 history/user 的第一列是期名（不带 .num），不会被误伤。 */
+.table-wrap td.num:first-child {
+  text-align: center;
+  color: var(--yw-text-dim);
+  font-weight: 600;
+}
+.table-wrap td.num {
+  text-align: right;
+}
+
+/* 第一名整行鎏金，左侧再加一道实金条 */
+.row-first td {
+  background: rgba(200, 162, 74, 0.075);
+}
+.row-first td:first-child {
+  box-shadow: inset 3px 0 0 var(--yw-gold);
+}
+.row-first:hover td {
+  background: rgba(200, 162, 74, 0.11);
+}
+.row-muted td {
+  opacity: 0.45;
+}
+
+/* 列表里的截图缩略图。放大到 200×160 是为了能一眼认出是哪张图 —— 64×64 太小了。
+   用 contain 而不是 cover：阵容截图实测 2844×1280（约 2.2:1），塞进 1.25:1 的框里
+   cover 会左右各裁掉约 1/4，而武将恰恰铺在两侧，裁掉就正好看不见了。
+   留白用卡片底色而不是白色，看起来是刻意的暗底letterbox，不是加载失败。 */
+.thumb {
+  width: 200px;
+  height: 160px;
+  object-fit: contain;
+  background: var(--yw-ink-1000);
+  border-radius: 6px;
+  border: 1px solid var(--yw-line);
+  display: block;
+  transition: border-color 0.14s ease;
+}
+a:hover > .thumb {
+  border-color: var(--yw-gold-a35);
+}
+.thumb-lg {
+  max-width: 320px;
+  border-radius: 6px;
+  border: 1px solid var(--yw-line);
+  margin-top: 0.4rem;
+}
+/* 一个人最多 6 张阵容截图。不给这个 flex 容器封顶的话，它在表格单元格里的
+   max-content 宽度就是 6×200 = 1200px，整张表会被撑出 .container（1280 视口下只有 1200px）
+   变成横向滚动。封在 420px 刚好一行两张。 */
+.thumb-row {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  max-width: 420px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.row-actions form {
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   8. 名单
+   -------------------------------------------------------------------------- */
+
+/* Pico v2 有一条裸的 `ul li { list-style: square }`，是直接写在 li 上的，
+   会压过从 ul 继承下来的 list-style:none；display:flex 也拦不住
+   （list-item 是块级值，不会像 inline 那样被 blockify 掉）。
+   所以必须点名到 li。导航和名单都不要标记。 */
+nav ul li,
+.plain-list li {
+  list-style: none;
+}
+
+.plain-list {
+  padding-left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.2rem;
+}
+.plain-list li {
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   9. 阵容图廊
+   -------------------------------------------------------------------------- */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+.gallery figure {
+  margin: 0;
+  padding: 0.5rem 0.5rem 0.2rem;
+  text-align: center;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+}
+.gallery img {
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--yw-line-soft);
+}
+.gallery button {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+/* 本期看板上的阵容墙：每人第一张，铺开来看。
+   object-fit:contain 是关键 —— 阵容截图多半是 2844×1280 这类超宽比例（2.2:1），
+   cover 会左右各裁掉约 1/4，而武将恰恰铺在两侧，裁掉就正好看不见了。
+   contain 宁可留边也不裁，横图竖图都不变形。要看清细节点图开原图。 */
+/* 一排小卡片，每张正好 200px 宽。左对齐 —— 上面的 h3 和说明都是左对齐的，
+   卡片若居中就会和大标题错开，像掉在中间。
+   轨道写死 200px 而不是 `minmax(200px, 1fr)`：后者会把列拉伸填满整行，
+   卡片就不是 200 宽了。1280 视口的容器 1200px 里排得下 5 张。
+   窄屏另有一档（见文件末尾的 640px 媒体查询）。 */
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 200px);
+  gap: 0.9rem 0.75rem;
+  justify-content: start;
+  margin-bottom: 1.8rem;
+}
+.shot-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  width: 200px;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+  overflow: hidden;
+}
+/* 200px 宽装不下「#1 王小明 共3张 320分」一行，所以间距和字号都比卡片大时收紧，
+   允许换行。同一行的卡片由 grid 拉成等高，顶栏高度不齐也不会歪。 */
+.shot-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--yw-line-soft);
+  background: linear-gradient(180deg, var(--yw-ink-700), var(--yw-ink-800));
+}
+.shot-rank {
+  font-family: var(--yw-serif);
+  font-weight: 700;
+  color: var(--yw-gold);
+}
+.shot-who {
+  font-weight: 600;
+  text-decoration: none;
+}
+.shot-who:hover {
+  color: var(--yw-gold-lt);
+  text-decoration: underline;
+}
+.shot-score {
+  margin-left: auto;
+  font-family: var(--yw-serif);
+  color: var(--yw-text-dim);
+}
+/* 传了阵容但还没交积分的人排在最后，右侧不写分数而是这个 */
+.shot-score.is-pending {
+  font-family: var(--yw-sans);
+  font-size: 0.82rem;
+  color: var(--yw-text-mute);
+}
+/* flex:1 + 纵向居中：顶栏换行导致同一行卡片高度不齐时，
+   多出来的高度均分到图上下，而不是在卡片底部留一条死白。
+   min-height 是给懒加载出图前占位的，免得边滚边跳。 */
+.shot-frame {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  background: var(--yw-ink-1000);
+}
+/* 和列表缩略图 .thumb 同尺寸、同 contain、同暗底：
+   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图开原图。 */
+.shot-frame img {
+  display: block;
+  width: 200px;
+  height: 160px;
+  object-fit: contain;
+}
+/* 阵容说明。卡片只有 200px 宽，而说明最长 1000 字，全摊出来会把整行卡片一起顶高
+   （grid 每行等高，最高的那张说了算），所以按行截断 5 行。
+   pre-wrap 是为了保住玩家自己敲的换行 —— 「一队……／二队……」这种分行写的说明
+   压成一大坨就没法看了。
+
+   ⚠️ 这里必须用 margin 排版，不能用上下 padding：Firefox 的 -webkit-line-clamp
+   算盒子高度时不计 padding，给了上下 padding 就会在第 5 行底下漏出第 6 行的一条边
+   （实测 Firefox 140：padding:0 → 干净 5 行；padding:.5rem/…/.6rem → 漏半行）。
+   padding 只留 0 就没事，左右留白交给 margin。 */
+.shot-note {
+  margin: 0.5rem 0.55rem 0.6rem;
+  padding: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--yw-text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   10. 赛期详情：每人一张卡
+   -------------------------------------------------------------------------- */
+.entry-card {
+  padding: 1.05rem 1.2rem 1.15rem;
+  margin-bottom: 1.2rem;
+  background: var(--yw-ink-800);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius-lg);
+}
+.entry-card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+  padding: 0;
+  background: none;
+}
+.entry-winner {
+  border-left: 3px solid var(--yw-gold);
+  background:
+    linear-gradient(100deg, var(--yw-gold-a10), transparent 45%),
+    var(--yw-ink-800);
+}
+.rank-no {
+  font-family: var(--yw-serif);
+  font-size: 1.15rem;
+  color: var(--yw-gold);
+}
+.score-pill {
+  font-family: var(--yw-serif);
+  font-weight: 700;
+  background: var(--yw-gold-a20);
+  border: 1px solid var(--yw-gold-a35);
+  color: var(--yw-gold-lt);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+}
+.entry-shots {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+.entry-shots figure {
+  margin: 0;
+  max-width: 260px;
+}
+.entry-shots img {
+  max-width: 260px;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--yw-line);
+  background: var(--yw-ink-1000);
+}
+.entry-shots figcaption {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--yw-text-dim);
+}
+.lineup-note {
+  margin-top: 0.8rem;
+  white-space: pre-wrap;
+}
+.fix-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--yw-line-soft);
+}
+.fix-form label {
+  margin: 0;
+}
+.fix-form input {
+  width: 10rem;
+  margin: 0;
+}
+/* Pico 给 button 默认加了 width:100%。当按钮是 flex 行的直接子项时，
+   它会换行独占一整行；独立表单里的提交按钮则保持满宽（那是想要的）。 */
+.fix-form button,
+.mine-card form button {
+  width: auto;
+}
+.inline-form {
+  display: inline;
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   11. 统计格子
+   -------------------------------------------------------------------------- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.6rem;
+}
+.stat {
+  margin: 0;
+  padding: 0.9rem 0.7rem;
+  text-align: center;
+  background: linear-gradient(160deg, var(--yw-ink-700), var(--yw-ink-800));
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+}
+.stat-num {
+  display: block;
+  font-family: var(--yw-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--yw-gold-lt);
+  line-height: 1.25;
+}
+.stat-label {
+  display: block;
+  font-size: 0.76rem;
+  color: var(--yw-text-dim);
+  letter-spacing: 0.1em;
+  margin-top: 0.15rem;
+}
+
+/* --------------------------------------------------------------------------
+   12. 管理页
+   -------------------------------------------------------------------------- */
+.invite-code {
+  font-family: var(--pico-font-family-monospace);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--yw-gold-lt);
+  background: var(--yw-ink-700);
+  border: 1px dashed var(--yw-gold-a35);
+  border-radius: var(--yw-radius);
+  padding: 0.2rem 0.8rem;
+}
+.copy-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.copy-row input {
+  margin: 0;
+  font-family: var(--pico-font-family-monospace);
+  font-size: 0.85rem;
+  color: var(--yw-text-dim);
+}
+.copy-row button {
+  margin: 0;
+  white-space: nowrap;
+}
+.inline-create {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+.inline-create label {
+  margin: 0;
+}
+.inline-create input {
+  margin: 0;
+  width: 14rem;
+}
+.inline-create button {
+  margin: 0;
+  width: auto;
+}
+
+/* --------------------------------------------------------------------------
+   13. 页脚
+   -------------------------------------------------------------------------- */
+footer.container {
+  margin-top: 3rem;
+  padding-top: 1.3rem;
+  border-top: 1px solid var(--yw-line-soft);
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   14. 打分（阵容墙卡片里的打分区）
+   -------------------------------------------------------------------------- */
+/* 接着第 9 节：卡片 200px 宽、纵向 flex，打分区是最后一个子块，
+   靠一条 border-top 和上面的图/说明分开。
+
+   三种样子，都由模板决定渲染哪个（这里没有 JS）：
+     没人打过   → 一行「还没有人打分」 + 五个档位按钮
+     我还没投   → 均分/最高/最低三行 + 五个档位按钮
+     我投过了   → 均分/最高/最低三行 + 一行「你打了 X」，按钮不再出现
+   已结算的期模板干脆不渲染按钮，所以这里不用管禁用态。 */
+.shot-rate {
+  padding: 0.45rem 0.5rem 0.55rem;
+  border-top: 1px solid var(--yw-line-soft);
+}
+
+.rate-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  /* 一行装不下时让整块换行，别把「张三、李四」从中间劈开。
+     配合下面 .rate-who 的 nowrap：名字要么整段留在这一行，要么整段下移一行。 */
+  flex-wrap: wrap;
+}
+.rate-line:last-child {
+  margin-bottom: 0;
+}
+.rate-line.is-empty {
+  font-size: 0.72rem;
+  color: var(--yw-text-mute);
+}
+/* 「均分 / 最高 / 最低」三个标签。**不能用 flex 的定宽基准**：
+   实测 `flex: 0 0 2em` 时 2 个汉字正好等于 2em，差一点点就会折成「均」/「分」两行。
+   交给 max-content，三个标签都是 2 个字，宽度自然一样，数字照样对齐。 */
+.rate-k {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--yw-text-mute);
+}
+.rate-v {
+  font-family: var(--yw-serif);
+  font-size: 0.95rem;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--yw-gold-lt);
+}
+.rate-v.is-hi { color: var(--yw-gold-lt); }
+.rate-v.is-lo { color: var(--yw-text-dim); }
+/* 打分人。nowrap 是故意的：让它作为一个整体换行，而不是被 overflow-wrap 从
+   名字中间切开（「张三、李」/「四」）。名字最多两个 + 「等 N 人」，
+   最宽约 12 字，178px 的行宽装得下。 */
+.rate-who {
+  min-width: 0;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  color: var(--yw-text-mute);
+}
+
+/* 五个档位。flex:1 1 0 + min-width:0 让它们等分整行：
+   200px 卡内宽 184px，减去 4 个 0.2rem 间距，每格约 34px，
+   而「400」在 0.7rem 下约 19px，装得下。
+   width:auto 不能省：Pico 给 button 默认 width:100%（见第 10 节的注释），
+   不覆盖的话每个按钮都想占满整行，flex 行会被挤成一列。 */
+.rate-form {
+  display: flex;
+  gap: 0.2rem;
+  margin: 0.45rem 0 0;
+}
+.rate-form button.rate-tier {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 0.18rem 0;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  border-radius: 5px;
+}
+
+/* 「你打了 400」。金色底 + 金边，和 .score-pill 一个路子。
+   用圆角矩形而不是胶囊：窄卡上内容会换行，胶囊一换行就难看。 */
+.rate-mine {
+  margin: 0.5rem 0 0;
+  padding: 0.22rem 0.45rem;
+  text-align: center;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--yw-gold-lt);
+  background: var(--yw-gold-a20);
+  border: 1px solid var(--yw-gold-a35);
+  border-radius: var(--yw-radius);
+}
+.rate-mine b {
+  font-family: var(--yw-serif);
+  font-size: 0.95rem;
+}
+/* 锁死的说明。**单独一行**，不塞进上面那个色块 —— 塞进去在 200px 卡上会被折成
+   「一期内不 / 能改」。它存在的唯一目的是省得人去找一个不存在的「改分」按钮。 */
+.rate-lock {
+  margin: 0.2rem 0 0;
+  text-align: center;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--yw-text-mute);
+}
+
+/* --------------------------------------------------------------------------
+   15. 窄屏
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  h2 {
+    font-size: 1.35rem;
+  }
+  .topnav {
+    flex-wrap: wrap;
+    padding-block: 0.4rem;
+  }
+  .topnav ul:last-child {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .topnav ul:last-child li a {
+    padding: 0.22rem 0.5rem;
+    font-size: 0.88rem;
+  }
+  .topnav .brand {
+    letter-spacing: 0.1em;
+  }
+  .auth-wrap {
+    margin: 1rem auto;
+    padding: 1.4rem 1.2rem 1.1rem;
+  }
+  .entry-shots img {
+    max-width: 100%;
+  }
+  /* 窄屏同样按 1.25:1 缩，桌面 200×160 → 手机 120×96。
+     420px 的封顶在 120px 下变成一行三张，表格靠 .table-wrap 横向滚动兜底。 */
+  .thumb {
+    width: 120px;
+    height: 96px;
+  }
+  /* 阵容墙同理：桌面每张 200×160，手机上 150×120，一排两张正好铺满 375px 视口 */
+  .shot-grid {
+    grid-template-columns: repeat(auto-fill, 150px);
+  }
+  .shot-card {
+    width: 150px;
+  }
+  .shot-frame {
+    min-height: 120px;
+  }
+  .shot-frame img {
+    width: 150px;
+    height: 120px;
+  }
+  /* 打分：150px 的卡内宽只剩约 137px，五档每格约 25px，
+     字号收到 0.66rem（「400」约 18px）才不溢出。 */
+  .shot-rate {
+    padding: 0.4rem 0.4rem 0.5rem;
+  }
+  .rate-form button.rate-tier {
+    font-size: 0.66rem;
+  }
+  .stat-num {
+    font-size: 1.25rem;
+  }
+}
+
+/* 尊重系统的减弱动效设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

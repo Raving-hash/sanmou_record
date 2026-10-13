@@ -1,0 +1,11 @@
+data/
+uploads/
+backup/
+.env
+node_modules/
+*.log
+
+# 部署文件（nginx 配置、systemd 单元、DEPLOY.md）是本机专属的，不进仓库
+deploy/
+# 设计预览的构建产物，随时能重新生成
+.preview-build/

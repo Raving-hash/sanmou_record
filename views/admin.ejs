@@ -1,0 +1,218 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>管理</h2>
+  <p class="muted">邀请码、赛期、成员</p>
+</hgroup>
+
+<section class="card">
+  <h3>邀请码</h3>
+  <% if (invite) { %>
+    <p>当前邀请码：<code class="invite-code" id="inviteCode"><%= invite %></code></p>
+    <label>注册链接
+      <span class="copy-row">
+        <input id="inviteLink" readonly value="<%= origin %>/register?code=<%= invite %>">
+        <button type="button" class="secondary btn-sm" data-copy="inviteLink">复制</button>
+      </span>
+    </label>
+    <p class="muted small">这个码可以无限次使用，拿到的人都能注册。朋友们注册完建议点【关闭注册】，以后有新人再加入时再打开。</p>
+  <% } else { %>
+    <p><span class="badge badge-wait">注册已关闭</span> 现在任何邀请码都用不了。</p>
+  <% } %>
+
+  <div class="actions">
+    <form method="post" action="/admin/invite/regenerate"
+          onsubmit="return confirm('重新生成后旧邀请码立刻失效，确定吗？')">
+      <button type="submit">重新生成邀请码</button>
+    </form>
+    <% if (invite) { %>
+      <form method="post" action="/admin/invite/close">
+        <button type="submit" class="outline secondary">关闭注册</button>
+      </form>
+    <% } %>
+  </div>
+</section>
+
+<section class="card">
+  <h3>赛期</h3>
+  <% if (openSeason) { %>
+    <p class="muted small">当前进行中：<strong><%= openSeason.name %></strong>。同一时间只能有一期进行中。</p>
+  <% } %>
+  <form method="post" action="/admin/seasons" class="inline-create">
+    <label>新建赛期
+      <input name="name" required maxlength="40" placeholder="例如 第32期" <%= openSeason ? 'disabled' : '' %>>
+    </label>
+    <button type="submit" <%= openSeason ? 'disabled' : '' %>>创建</button>
+  </form>
+
+  <% if (!seasons.length) { %>
+    <p class="muted">还没有任何一期。</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>期名</th>
+            <th class="w-time">日期</th>
+            <th class="w-status">状态</th>
+            <th>胜者</th>
+            <th class="w-players">参赛</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% seasons.forEach((s) => { %>
+            <tr>
+              <td><a href="/seasons/<%= s.id %>"><%= s.name %></a></td>
+              <td><small class="muted"><%= fmt(s.created_at) %></small></td>
+              <td>
+                <% if (s.status === 'open') { %>
+                  <span class="badge badge-open">进行中</span>
+                <% } else { %>
+                  <span class="badge badge-settled">已结算</span>
+                <% } %>
+              </td>
+              <td><%= s.winner_name ? s.winner_name + '（' + s.winner_score + '）' : '—' %></td>
+              <td class="num"><%= s.players %></td>
+              <td class="row-actions">
+                <% if (s.status === 'open') { %>
+                  <form method="post" action="/admin/seasons/<%= s.id %>/settle"
+                        onsubmit="return confirm('结束本期并结算？要至少 2 人交了积分。')">
+                    <button type="submit" class="btn-sm">结束本期</button>
+                  </form>
+                <% } else { %>
+                  <form method="post" action="/admin/seasons/<%= s.id %>/reopen"
+                        onsubmit="return confirm('撤销结算？这一期会变回进行中。')">
+                    <button type="submit" class="outline secondary btn-sm">撤销结算</button>
+                  </form>
+                <% } %>
+                <form method="post" action="/admin/seasons/<%= s.id %>/delete"
+                      onsubmit="return confirm('删除这一期？连同所有积分和阵容截图一起删掉，不能恢复。')">
+                  <button type="submit" class="outline btn-danger btn-sm">删除</button>
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<%# 打分是一锤子买卖，本人改不了，点错了只能从这儿清掉。
+    默认收起，免得几十行打分把管理页撑长。 %>
+<section class="card">
+  <h3>打分记录</h3>
+  <% if (!openSeason) { %>
+    <p class="muted small">现在没有进行中的赛期。打分只能在进行中的期产生，要清历史期的记录，
+      先在上面把那一期【撤销结算】。</p>
+  <% } else { %>
+    <details>
+      <summary>本期（<%= openSeason.name %>）共 <%= seasonRatings.length %> 条打分</summary>
+      <% if (!seasonRatings.length) { %>
+        <p class="muted">这一期还没有人打分。</p>
+      <% } else { %>
+        <p class="muted small">删掉之后那个人对这套阵容重新变成「没打过」，可以再打一次。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>打给谁</th>
+                <th>打分人</th>
+                <th class="w-score">分数</th>
+                <th class="w-time">时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% seasonRatings.forEach((r) => { %>
+                <tr>
+                  <td><a href="/u/<%= r.target_uid %>"><%= r.target_name %></a></td>
+                  <td><a href="/u/<%= r.rater_uid %>"><%= r.rater_name %></a></td>
+                  <td class="num"><strong><%= r.value %></strong></td>
+                  <td><small class="muted"><%= fmt(r.created_at) %></small></td>
+                  <td class="row-actions">
+                    <form method="post" action="/admin/ratings/<%= r.id %>/delete"
+                          onsubmit="return confirm('清掉 <%= r.rater_name %> 给 <%= r.target_name %> 打的 <%= r.value %> 分？他会可以重新打一次。')">
+                      <button type="submit" class="outline btn-danger btn-sm">清除</button>
+                    </form>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </details>
+  <% } %>
+</section>
+
+<section class="card">
+  <h3>成员（<%= users.length %>）</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>昵称</th>
+          <th>ID</th>
+          <th class="w-status">状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% users.forEach((u) => { %>
+          <tr class="<%= u.is_disabled ? 'row-muted' : '' %>">
+            <td><a href="/u/<%= u.user_id %>"><%= u.nickname %></a>
+              <% if (u.is_admin) { %><span class="badge badge-admin">管理员</span><% } %>
+            </td>
+            <td><code><%= u.user_id %></code></td>
+            <td>
+              <% if (u.is_disabled) { %>
+                <span class="badge badge-wait">已禁用</span>
+              <% } else { %>
+                <span class="badge badge-ok">正常</span>
+              <% } %>
+            </td>
+            <td class="row-actions">
+              <% if (u.id !== me.id) { %>
+                <form method="post" action="/admin/users/<%= u.id %>/toggle">
+                  <button type="submit" class="outline secondary btn-sm">
+                    <%= u.is_disabled ? '启用' : '禁用' %>
+                  </button>
+                </form>
+              <% } %>
+              <form method="post" action="/admin/users/<%= u.id %>/reset"
+                    onsubmit="return confirm('重置 <%= u.nickname %> 的密码？会生成一个临时密码。')">
+                <button type="submit" class="outline secondary btn-sm">重置密码</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var el = document.getElementById(btn.dataset.copy);
+      if (!el) return;
+      var text = el.value || el.textContent;
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { el.select(); document.execCommand('copy'); done(); });
+      } else {
+        el.select();
+        document.execCommand('copy');
+        done();
+      }
+    });
+  });
+</script>
+
+<%- include('partials/footer') %>
