@@ -1134,14 +1134,19 @@ footer.container {
 }
 .rate-v.is-hi { color: var(--yw-gold-lt); }
 .rate-v.is-lo { color: var(--yw-text-dim); }
-/* 打分人。nowrap 是故意的：让它作为一个整体换行，而不是被 overflow-wrap 从
-   名字中间切开（「张三、李」/「四」）。名字最多两个 + 「等 N 人」，
-   最宽约 12 字，178px 的行宽装得下。 */
+/* 打分人（views/partials/name-list.ejs）。名字最多两个 + 「等 N 人」。 */
 .rate-who {
   min-width: 0;
   font-size: 0.7rem;
-  white-space: nowrap;
   color: var(--yw-text-mute);
+}
+/* 「昵称 + 慧眼圆框」是一个不可拆的单位：不能被 overflow-wrap 从名字中间切开
+   （「张三1」/「3」）。但 nowrap 得挂在**这个名字**上，不能像从前那样挂在
+   .rate-who 整行上 —— 每个名字后面多了一个圆框，一行宽出三四十像素，
+   整行 nowrap 只会横向溢出 178px 的卡；挂在这里则是整组掉到下一行。
+   顿号是独立的文本节点，断行规则不许在它前面断，所以不会出现「、」开头的行。 */
+.name-unit {
+  white-space: nowrap;
 }
 
 /* 五个档位。flex:1 1 0 + min-width:0 让它们等分整行：

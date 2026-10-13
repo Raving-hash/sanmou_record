@@ -72,7 +72,7 @@
                   <span class="badge badge-settled">已结算</span>
                 <% } %>
               </td>
-              <td><%= s.winner_name ? s.winner_name + '（' + s.winner_score + '）' : '—' %></td>
+              <td><%= s.winner_name ? s.winner_name + '（' + s.winner_score + '）' : '—' %><%- include('partials/eye', { uid: s.winner_uid }) %></td>
               <td class="num"><%= s.players %></td>
               <td class="row-actions">
                 <% if (s.status === 'open') { %>

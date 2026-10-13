@@ -67,12 +67,13 @@
             <p class="rate-line">
               <span class="rate-k">最高</span>
               <b class="rate-v is-hi"><%= r.rating.max %></b>
-              <span class="rate-who"><%= nameList(r.rating.maxBy) %></span>
+              <%# 打分人昵称也带慧眼圆框 —— 和别处一样，见 partials/name-list.ejs %>
+              <span class="rate-who"><%- include('./name-list', { list: r.rating.maxBy }) %></span>
             </p>
             <p class="rate-line">
               <span class="rate-k">最低</span>
               <b class="rate-v is-lo"><%= r.rating.min %></b>
-              <span class="rate-who"><%= nameList(r.rating.minBy) %></span>
+              <span class="rate-who"><%- include('./name-list', { list: r.rating.minBy }) %></span>
             </p>
           <% } %>
 

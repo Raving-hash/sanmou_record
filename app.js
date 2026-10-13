@@ -38,10 +38,8 @@ app.use((req, res, next) => {
     : '';
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
-  // 「最高 400 由谁打的」这类名单。截前两个，再多就「等 N 人」——
-  // 只有五档，并列很常见，全摊在 200px 的卡上会占三行。
-  res.locals.nameList = (list) => list.slice(0, 2).map((x) => x.nickname).join('、')
-    + (list.length > 2 ? ` 等 ${list.length} 人` : '');
+  // 「最高 400 由谁打的」这类名单走 views/partials/name-list.ejs —— 从前是这里的一个
+  // nameList 助手，加慧眼圆框时挪进了模板：名单要逐个名字拼 HTML，光有字符串不够了。
   // 慧眼等级：所有人初始 10 级，只在结算时按"有没有看准前两名"加减（见 db.settleSeason）。
   // 昵称出现的地方都要带那个小圆框（views/partials/eye.ejs），但各个列表查出来的字段
   // 五花八门（多数只有一个 uid），所以这里每次请求拉一张 uid → 等级 的小表兜底，

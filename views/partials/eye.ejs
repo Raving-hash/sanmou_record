@@ -10,5 +10,10 @@
 
   查不到这个人（uid 拼错、或者是个老数据）时**整个不输出** ——
   宁可少一个框，也不要在页面上留一个空圈。
-%>
-<% const lv = eyeLevel(uid); if (lv !== null) { %><span class="eye<%= lv > 0 ? '' : ' eye-low' %>" title="慧眼等级 <%= lv %>"><%= lv %></span><% } %>
+
+  收尾那个带下划线的注释标签是 EJS 的「吃掉紧邻换行」写法：这个文件不多吐一个空白，
+  和它前面的昵称贴不贴在一起，完全由调用处两行之间的换行决定 ——
+  写在单独一行上就是「昵称 13」（站上多数地方如此），紧挨着写就是「昵称13」
+  （views/partials/name-list.ejs 要的就是后者，200px 的卡上省一个空格）。
+_%>
+<% const lv = eyeLevel(uid); if (lv !== null) { %><span class="eye<%= lv > 0 ? '' : ' eye-low' %>" title="慧眼等级 <%= lv %>"><%= lv %></span><% } _%>

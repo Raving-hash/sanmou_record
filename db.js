@@ -228,7 +228,7 @@ db.listSeasonRatings = (seasonId) => db.prepare(`
 // rows（getSeasonRatings 的结果）→ Map<entry_id, summary>
 // summary = { n, avg, max, min, maxBy, minBy, mine }
 // maxBy / minBy 把**并列的人全给**：只有五档，并列太常见了，只挑一个人显示是误导。
-// 展示时截前两个，见 app.js 的 nameList。
+// 展示时截前两个，见 views/partials/name-list.ejs。
 db.summarizeRatings = (rows, viewerId) => {
   const byEntry = new Map();
 
