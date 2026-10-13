@@ -13,6 +13,13 @@ router.get('/', (req, res) => {
 
   if (season) {
     const entry = db.findEntry(season.id, req.user.id);
+    // 打分截到每期开期后第一个周四 12:00（北京），过点整期封盘：不出按钮、也不收 POST。
+    // 和名额一样现算（db.getRateLockAt），所以撤销结算后如果还在窗口里，按钮自己就回来了。
+    // 能不能打分问 isRateLocked，别自己比大小：万一 created_at 是坏的、算不出截止点，
+    // 它按"没封盘"处理，和 POST 那道关同一个口径 —— 否则会出现墙上不出按钮、
+    // 手动 POST 却写得进去的错位。
+    const rateLockAt = db.getRateLockAt(season);
+    const canRate = !db.isRateLocked(season);
     return res.render('home', {
       title: '本期看板',
       season,
@@ -21,7 +28,10 @@ router.get('/', (req, res) => {
       lineups: db.getLineupWall(season.id, req.user.id),
       // 本期我的打分名额（只含有限额的档位）。阵容墙用它把投满的档位按钮灰掉、
       // 在标题下面列一行"还剩几个"。没在打分的人也会看到，但那是他自己的数，无妨。
-      quota: db.getMyQuota(season.id, req.user.id),
+      // 封盘后不查了：那时一个按钮都不出，名额行也就没地方显示。
+      quota: canRate ? db.getMyQuota(season.id, req.user.id) : [],
+      canRate,
+      rateLockAt,
       notSubmitted: db.getNotSubmitted(season.id),
       me_entry: entry,
       me_images: entry ? db.getLineupImages(entry.id) : [],
@@ -182,8 +192,10 @@ router.post('/score/withdraw', (req, res) => {
 
 // ---------- 打分（成员互评） ----------
 // 和上面的「积分」完全是两回事：积分是本人上传截图的战绩分、决定名次；
-// 这里是别人点一下给的评价，只展示。一期内对一个阵容只能打一次，打完就不能改
-// （要改只能请管理员在 /admin 删掉那条记录）—— 所以这里没有「改分」路由。
+// 这里是别人点一下给的评价，只展示。**一期内一个阵容一票，但同一票在截止前随时能改**
+// —— 改分没有单独的路由，就是再 POST 一次这个地址（有则 UPDATE、无则 INSERT）。
+// 两道时间关：这一期得是进行中，而且还没到截止点（每期开期后第一个周四 12:00 北京，
+// 见 db.getRateLockAt）。过了截止整期封盘，连改都不行；要撤掉某条票只能请管理员去 /admin 清。
 router.post('/entries/:id/rate', (req, res) => {
   const entry = db.getEntry(Number(req.params.id));
   if (!entry) {
@@ -201,6 +213,16 @@ router.post('/entries/:id/rate', (req, res) => {
     return res.redirect(back);
   }
 
+  // 封盘。截止的具体时刻在阵容墙上写着（重定向回去就落在墙上），这里只把规矩说清楚，
+  // 免得模板里再拼一次时间、多一处格式化的地方。
+  if (db.isRateLocked(season)) {
+    req.session.flash = {
+      type: 'err',
+      msg: '本期打分已截止（每期开期后第一个周四 12:00 封盘），不能再投也不能改',
+    };
+    return res.redirect(back);
+  }
+
   const value = Number(req.body.value);
   if (!db.RATE_VALUES.includes(value)) {
     req.session.flash = { type: 'err', msg: `只能打 ${db.RATE_VALUES.join(' / ')} 这几档` };
@@ -212,16 +234,23 @@ router.post('/entries/:id/rate', (req, res) => {
     return res.redirect(back);
   }
 
+  const target = db.getUserById(entry.user_id);
   const had = db.findRating(entry.id, req.user.id);
-  if (had) {
-    req.session.flash = { type: 'err', msg: `你已经给他打过 ${had.value} 了，一期内只能打一次` };
+
+  // 点的就是原来那一档：一个字都不写。**不能当改分处理** —— 那会白刷一次 created_at，
+  // 而 created_at 决定"这个分是谁先给的"（见 getSeasonRatings 的排序），
+  // 手滑点一下自己那档、署名就换人了。
+  if (had && had.value === value) {
+    req.session.flash = { type: 'ok', msg: `你给 ${target.nickname} 打的就是 ${value} 分，没有改动` };
     return res.redirect(back);
   }
 
   // 名额：400 / 300 / 250 每期每人分别只有 2 / 3 / 4 张，50 和 200 不限（db.RATE_QUOTA）。
-  // 放在「你已经投过」后面：两条都撞上时，先说更具体的那条。
+  // 改分时这里同样管用，而且不必为"把旧档位的名额退回来"写任何代码 —— 名额是现数的
+  // （db.getMyQuota 按 ratings 数），我原来占的那一档不在 value 这一档里，算出来的
+  // 就是改完之后的样子。
   // 前端那些灰按钮只是提示，真正拦人的是这里 —— 直接 POST 一个自己已经投满的档位照样被拒。
-  // 从上面那次 SELECT 到这下面的 INSERT 中间没有 await，better-sqlite3 又全是同步调用，
+  // 从这里到下面的写库中间没有 await，better-sqlite3 又全是同步调用，
   // 所以中间插不进另一个请求，不会出现两个并发请求各投一张、合起来超一名额。
   const q = db.getMyQuota(season.id, req.user.id).find((x) => x.value === value);
   if (q && !q.left) {
@@ -232,16 +261,31 @@ router.post('/entries/:id/rate', (req, res) => {
     return res.redirect(back);
   }
 
-  db.prepare('INSERT INTO ratings (entry_id, rater_id, value) VALUES (?, ?, ?)')
-    .run(entry.id, req.user.id, value);
-
-  const target = db.getUserById(entry.user_id);
-  req.session.flash = { type: 'ok', msg: `已给 ${target.nickname} 打 ${value} 分` };
+  if (had) {
+    // 改分：更新那一行，并刷新 created_at —— 和「本人改了积分就刷新提交时间」同一套道理，
+    // 时间戳说的是这条评价的时间，不是第一次投票的时间。署名问题由上面那个提前 return 挡着：
+    // 点自己原来那档不写库，所以这里一定是真的换了档位。
+    db.prepare('UPDATE ratings SET value=?, created_at=? WHERE id=?')
+      .run(value, new Date().toISOString(), had.id);
+    req.session.flash = { type: 'ok', msg: `已把给 ${target.nickname} 的 ${had.value} 分改成 ${value} 分` };
+  } else {
+    db.prepare('INSERT INTO ratings (entry_id, rater_id, value) VALUES (?, ?, ?)')
+      .run(entry.id, req.user.id, value);
+    req.session.flash = { type: 'ok', msg: `已给 ${target.nickname} 打 ${value} 分` };
+  }
   res.redirect(back);
 });
 
 router.get('/ratings', (req, res) => {
-  res.render('ratings', { title: '我的打分记录', rows: db.getMyRatings(req.user.id) });
+  // 进行中、且还没到截止点的期：表里给这些行的票挂一个「去改」的链接，直接跳到那张卡。
+  // 别的期（已结算、或已封盘）的票改不了，链接也就不出。
+  const season = db.getOpenSeason();
+  res.render('ratings', {
+    title: '我的打分记录',
+    rows: db.getMyRatings(req.user.id),
+    canEdit: season && !db.isRateLocked(season) ? season.id : null,
+    rateLockAt: season ? db.getRateLockAt(season) : null,
+  });
 });
 
 // ---------- 历史 / 详情 / 排行 / 个人 ----------
@@ -265,6 +309,10 @@ router.get('/seasons/:id', (req, res) => {
     eye: settled ? db.getEyeAdjustments(season.id) : [],
     notSubmitted: settled ? [] : db.getNotSubmitted(season.id),
     players: db.countPlayers(season.id),
+    // 打分截止。进行中的期才摆这一行：已结算的期传 null，模板就不出它。
+    // canRate 在这里只用来选措辞（「截止 …」还是「已于 … 截止」）—— 这一页本身没有打分区。
+    rateLockAt: settled ? null : db.getRateLockAt(season),
+    canRate: !settled && !db.isRateLocked(season),
   });
 });
 

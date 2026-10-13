@@ -80,8 +80,10 @@
     </div>
   <% } %>
 
-  <%# quota 是本期**我自己**还剩的打分名额（routes/main.js 里查好），只有能打分时才传 %>
-  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate: true, quota }) %>
+  <%# canRate / quota / rateLockAt 都是 routes/main.js 查好的：能打分 = 进行中且还没过截止点
+      （每期开期后第一个周四 12:00）；quota 是**我自己**还剩的名额（封盘后是空的）；
+      rateLockAt 给墙上显示截止时间 %>
+  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt }) %>
 
   <h3>还没交积分（<%= notSubmitted.length %>）</h3>
   <% if (!notSubmitted.length) { %>
@@ -168,7 +170,9 @@
       </div>
     <% } %>
 
-    <%# 这一期已经结算了，打分也一起封盘：只显示均分/最高/最低，不出按钮 %>
+    <%# 这一期已经结算了，打分也一起封盘：只显示均分/最高/最低，不出按钮。
+        quota / rateLockAt 故意不传 —— 只出均分的那一版没有名额行，也没有截止时间可报，
+        模板里用 locals.xxx 兜底（引一个没传进来的名字是 ReferenceError，整页会 500）。 %>
     <%- include('partials/lineup-gallery', { rows: lineups, heading: `${last.name} 阵容`, canRate: false }) %>
 
     <%- include('partials/eye-board', { rows: eye, heading: `${last.name} 慧眼等级变动` }) %>

@@ -4,7 +4,9 @@
   入参：
     uid   这个人的 user_id。等级由 app.js 塞进 locals 的 eyeLevel(uid) 查出来。
 
-  等级只显示数字和颜色，不解释：>0 亮蓝、<=0 暗红（style.css 的 .eye / .eye-low），
+  等级只显示数字和颜色，不解释：颜色按等级分档（2026-10-13 起）——
+  10–11 暗、12–14 亮银、15–19 亮蓝、20 及以上亮金，越往上越亮。
+  档位名由 app.js 的 eyeTier 给，配色在 style.css 的 .eye-*，和 eyeLevel 一样是 locals。
   鼠标停上去有 title。等级是**结算时才算出来的**，所以进行中的期里它反映的是
   上一期结算完的状态 —— 这也是为什么它只在结算相关的页面上讲得通。
 
@@ -16,4 +18,4 @@
   写在单独一行上就是「昵称 13」（站上多数地方如此），紧挨着写就是「昵称13」
   （views/partials/name-list.ejs 要的就是后者，200px 的卡上省一个空格）。
 _%>
-<% const lv = eyeLevel(uid); if (lv !== null) { %><span class="eye<%= lv > 0 ? '' : ' eye-low' %>" title="慧眼等级 <%= lv %>"><%= lv %></span><% } _%>
+<% const lv = eyeLevel(uid); if (lv !== null) { %><span class="eye eye-<%= eyeTier(lv) %>" title="慧眼等级 <%= lv %>"><%= lv %></span><% } _%>

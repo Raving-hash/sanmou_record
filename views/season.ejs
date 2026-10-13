@@ -13,6 +13,12 @@
     开始于 <%= fmt(season.created_at) %>
     <% if (settled && season.settled_at) { %> · 结算于 <%= fmt(season.settled_at) %><% } %>
     · 参赛 <%= players %> 人
+    <%# 打分截止。只在进行中的期出现（已结算时 routes/main.js 传的 rateLockAt 是 null）；
+        这一页没有打分区，所以能改的时候顺手指个路 —— 打分/改分都在首页阵容墙上 %>
+    <% if (rateLockAt) { %>
+      <% if (canRate) { %> · <a href="/">打分截止 <%= fmt(rateLockAt) %></a>（<%= fmtLeft(rateLockAt - Date.now()) %>）
+      <% } else { %> · 打分已于 <%= fmt(rateLockAt) %> 截止<% } %>
+    <% } %>
   </p>
 </hgroup>
 

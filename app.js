@@ -33,20 +33,46 @@ app.use((req, res, next) => {
     style: assetVer('style.css'),
     upload: assetVer('upload.js'),
   };
-  res.locals.fmt = (iso) => iso
-    ? new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  // 时间格式化。入参是 ISO 字符串或毫秒时间戳（Date 两种都吃）——
+  // 打分截止那种现算出来的时间就是个毫秒数，模板里不用再包一层 new Date()。
+  res.locals.fmt = (t) => t
+    ? new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
     : '';
+  // 还剩多久（打分截止的倒计时）。**精度到小时**：没人关心还剩多少分钟，
+  // 但"还剩 3 小时"和"还剩 3 天"完全是两种心情，所以超过一天时把天数一起说出来。
+  // 传进来的可能是负数（页面渲染的那一瞬间刚过点），统一说「已截止」。
+  res.locals.fmtLeft = (ms) => {
+    if (!(ms > 0)) return '已截止';
+    const hours = Math.floor(ms / 3600e3);
+    if (hours < 1) return `还剩 ${Math.max(1, Math.floor(ms / 60e3))} 分钟`;
+    if (hours < 24) return `还剩 ${hours} 小时`;
+    const days = Math.floor(hours / 24);
+    const rest = hours % 24;
+    return rest ? `还剩 ${days} 天 ${rest} 小时` : `还剩 ${days} 天`;
+  };
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
   // 「最高 400 由谁打的」这类名单走 views/partials/name-list.ejs —— 从前是这里的一个
   // nameList 助手，加慧眼圆框时挪进了模板：名单要逐个名字拼 HTML，光有字符串不够了。
-  // 慧眼等级：所有人初始 10 级，只在结算时按"有没有看准前两名"加减（见 db.settleSeason）。
+  // 慧眼等级：所有人初始 10 级，只在结算时按"有没有看准前两名"往上加（只涨不跌，
+  // 50 / 200 不再扣，见 db.settleSeason 与 EYE_GAIN）。
   // 昵称出现的地方都要带那个小圆框（views/partials/eye.ejs），但各个列表查出来的字段
   // 五花八门（多数只有一个 uid），所以这里每次请求拉一张 uid → 等级 的小表兜底，
   // 而不是给十处 SQL 各补一列 JOIN。成员就十几个人，代价可以忽略。
   // 查不到这个人返回 null，模板据此**整个不输出**圆框（宁可少一个，也不要空圈）。
   const eyeLevels = db.getEyeLevels();
   res.locals.eyeLevel = (uid) => eyeLevels.get(String(uid ?? '').toLowerCase()) ?? null;
+  // 圆框的颜色档位（views/partials/eye.ejs 拿它拼 class，配色写在 style.css 的 .eye-*）：
+  // 10–11 暗、12–14 亮银、15–19 亮蓝、20 及以上亮金 —— 越往上越亮，一眼能排出来。
+  // 阈值放这儿而不是模板里：圆框被十几处 include，写进模板等于同一串数字抄十几遍。
+  // 结算只涨不跌（见 db.js 的 EYE_GAIN），所以低等级只有初始的 10 和刚涨 1 级的 11；
+  // 老库里万一手工改出过 10 以下的值，也落这一档。
+  res.locals.eyeTier = (lv) => {
+    if (lv >= 20) return 'gold';
+    if (lv >= 15) return 'blue';
+    if (lv >= 12) return 'silver';
+    return 'dim';
+  };
   // 一次性提示（重定向后显示）
   res.locals.flash = req.session ? req.session.flash || null : null;
   if (req.session) delete req.session.flash;

@@ -36,12 +36,12 @@
   --yw-jade:    #3f7d5c;
   --yw-jade-lt: #8ac9a6;
 
-  /* 亮蓝 —— 用在两处：慧眼等级 > 0 的小圆框、阵容墙上「上期积分第一」那张卡的描边。
+  /* 亮蓝 —— 用在两处：慧眼等级 15–19 的小圆框、阵容墙上「上期积分第一」那张卡的描边。
      色板里原本没有蓝，这是新加的一支：就这两处用，不参与 Pico 的语义色映射
      （不像 gold/jade/cinnabar 那样有 --pico-* 的对应项）。 */
   --yw-azure-lt: #79c2f2;
 
-  /* 亮银 —— 阵容墙上「上期积分第二」那张卡的描边 */
+  /* 亮银 —— 用在两处：慧眼等级 12–14 的小圆框、阵容墙上「上期积分第二」那张卡的描边 */
   --yw-silver:   #ccd6e2;
 
   /* 文字（暖白，不用纯白，避免和墨底打架） */
@@ -399,8 +399,15 @@ a {
 }
 
 /* 慧眼等级：昵称旁边的小圆框（views/partials/eye.ejs）。
-   数字外面套一个圈，>0 亮蓝、<=0 暗红 —— 颜色是唯一的等级信号，所以圈做得很小，
-   只求认得出、不跟昵称抢注意力。min-width 撑住 1 位数的圆形；两位数会自然拉成胶囊形，
+   数字外面套一个圈，**颜色是唯一的等级信号** —— 圈做得很小，只求认得出、不跟昵称抢注意力。
+   颜色分四档（档位由 app.js 的 eyeTier 判，配色在这儿，2026-10-13 起）：
+     10–11 暗（初始等级的样子）/ 12–14 亮银 / 15–19 亮蓝 / 20 及以上亮金，越往上越亮。
+   "亮"就是直接用色板上那支亮色（银 --yw-silver、蓝 --yw-azure-lt、金 --yw-gold-lt）
+   再垫一层同色底，不靠发光/投影那些特效：圈只有 1.5em，加了特效反而抢注意力。
+   形状和颜色分开写：`.eye` 只管盒子，`.eye-dim` / `-silver` / `-blue` / `-gold` 管颜色。
+   暗色那档和 `.eye` 写在同一组选择器里，所以**没带档位类时落到暗色** ——
+   万一哪个模板漏了档位，不至于变成一个没颜色的裸圈。
+   min-width 撑住 1 位数的圆形；两位数会自然拉成胶囊形，
    这没关系（等级上三位数时本来也放不进正圆）。
    注意它和 .badge 是两套东西：那个是胶囊+文字标签，这个是等宽数字的圆章。 */
 .eye {
@@ -411,23 +418,38 @@ a {
   height: 1.5em;
   padding: 0 0.3em;
   border-radius: 999px;
-  border: 1px solid rgba(96, 170, 240, 0.5);
-  background: rgba(56, 132, 214, 0.18);
-  color: var(--yw-azure-lt);
+  border: 1px solid transparent;   /* 颜色按档位来，见下面的 .eye-* */
   font-size: 0.72rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
 }
-.eye-low {
-  border-color: rgba(140, 47, 47, 0.5);
-  background: rgba(140, 47, 47, 0.18);
-  color: var(--yw-cinnabar-lt);
+.eye, .eye-dim {
+  border-color: rgba(168, 155, 131, 0.35);
+  background: rgba(120, 110, 95, 0.16);
+  color: var(--yw-text-dim);
+}
+.eye-silver {
+  border-color: rgba(204, 214, 226, 0.5);
+  background: rgba(204, 214, 226, 0.14);
+  color: var(--yw-silver);
+}
+.eye-blue {
+  border-color: rgba(96, 170, 240, 0.5);
+  background: rgba(56, 132, 214, 0.18);
+  color: var(--yw-azure-lt);
+}
+.eye-gold {
+  border-color: rgba(200, 162, 74, 0.55);
+  background: var(--yw-gold-a20);
+  color: var(--yw-gold-lt);
 }
 
-/* 慧眼等级变动榜（views/partials/eye-board.ejs）里的 +3 / −1。
-   涨跌沿用圆框那套颜色语义（蓝=正、红=负），不另立一套 —— 同一屏里两个红色
-   应该指的是同一件事。 */
+/* 慧眼等级变动榜（views/partials/eye-board.ejs）里的 +3 / +1。
+   涨用亮蓝、跌用暗红（.delta-up / .delta-down），和圆框那套颜色语义对齐 ——
+   同一屏里两个颜色应该指的是同一件事。
+   ⚠️ 2026-10-13 起 50 / 200 不再扣等级，**新结算出来的变动只可能是正的**，
+   `.delta-down` 只服务"旧规则时代结算过、之后没重新结算过"的那些明细。 */
 .delta-up   { color: var(--yw-azure-lt); }
 .delta-down { color: var(--yw-cinnabar-lt); }
 
@@ -809,6 +831,22 @@ nav ul li,
 .quota-line .is-out b {
   color: var(--yw-text-dim);
   text-decoration: line-through;
+}
+/* 打分截止那一行（阵容墙上，紧跟在名额行下面）。封盘之后名额行就不出了，
+   只剩这一句 is-locked 的提示 —— 那时它是"为什么没有按钮"的答案，所以压暗一档。 */
+.rate-deadline {
+  margin: -0.5rem 0 0.9rem;
+  font-size: 0.82rem;
+  color: var(--yw-text-mute);
+}
+.rate-deadline b {
+  font-family: var(--yw-serif);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--yw-gold-lt);
+}
+.rate-deadline.is-locked b {
+  color: var(--yw-text-dim);
 }
 .shot-card {
   display: flex;
@@ -1197,6 +1235,17 @@ footer.container {
   opacity: 0.35;
   cursor: not-allowed;
 }
+/* 「我给他打的就是这一档」。五个档位默认都是金色实心（Pico 的 primary 按钮），
+   所以高亮不能换个色系，只能更亮：底色换成浅金 + 外面套一圈金光。
+   环用 box-shadow 而不是 border / outline：box-shadow 不占布局 ——
+   五个格子是 flex:1 1 0 等分整行的，border 一宽就挤掉内容宽度、这一格跟着变形
+   （第 8 节慧眼圆框踩过同样的坑）；而 outline 要留给键盘聚焦的焦点框。 */
+.rate-form button.rate-tier.is-mine {
+  background: var(--yw-gold-lt);
+  border-color: var(--yw-gold-lt);
+  box-shadow: 0 0 0 2px var(--yw-gold-a35);
+  font-weight: 700;
+}
 
 /* 「你打了 400」。金色底 + 金边，和 .score-pill 一个路子。
    用圆角矩形而不是胶囊：窄卡上内容会换行，胶囊一换行就难看。 */
@@ -1215,9 +1264,10 @@ footer.container {
   font-family: var(--yw-serif);
   font-size: 0.95rem;
 }
-/* 锁死的说明。**单独一行**，不塞进上面那个色块 —— 塞进去在 200px 卡上会被折成
-   「一期内不 / 能改」。它存在的唯一目的是省得人去找一个不存在的「改分」按钮。 */
-.rate-lock {
+/* 打分区的一句说明，两种时候出现：「点别的档位就是改分」（投过之后）和
+   「打分已截止，改不了」（整期封盘之后）。**单独一行**，不塞进上面那个色块 ——
+   塞进去在 200px 卡上会被折成「打分已 / 截止」，断得难看。 */
+.rate-note {
   margin: 0.2rem 0 0;
   text-align: center;
   font-size: 0.68rem;

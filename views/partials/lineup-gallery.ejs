@@ -4,30 +4,35 @@
   想换展示哪张，去 /lineup 把第一张删掉，后面的会顶上来。
 
   入参：
-    rows     db.getLineupWall() 的结果。**已按互评均分从高到低排好**（没人打分的在最后），
-             每行已带 rank（积分名次，交了积分的才有，否则 null）、
-             score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
-             且只包含至少传了一张阵容的人，所以这里不用再筛。
-             （下面引 eye.ejs 写的是 './eye' 而不是 'partials/eye'：EJS 解析 include 时
-             **先相对本文件**（→ views/partials/partials/eye，不存在），再退回 views 根，
-             而退回那步要靠 Express 传进来的 views 选项 —— 干脆直接写同级路径，
-             两个渲染入口（Express / 裸 ejs）都对。）
-    heading  小节标题，如「本期阵容」/「第32期 阵容」
-    canRate  这一期还能不能打分。进行中的期传 true；首页回退到「上一期结果」时传 false——
-             那时连按钮都不出，只留均分/最高/最低。
-    quota    本期**打分的人自己**还剩几个名额（db.getMyQuota 的结果，
-             [{ value, quota, used, left }]，只含 400/300/250 这三个有限额的档位）。
-             只有 canRate 时才传 —— 页面上就两处用它：标题下面列一行"还剩几个"，
-             以及把投满的那档按钮灰掉。**这是"我"的名额，不是被评分人的**，
-             所以只在墙上说一次，不塞进每张卡里重复十几遍。
+    rows        db.getLineupWall() 的结果。**已按互评均分从高到低排好**（没人打分的在最后），
+                每行已带 rank（积分名次，交了积分的才有，否则 null）、
+                score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
+                且只包含至少传了一张阵容的人，所以这里不用再筛。
+                （下面引 eye.ejs 写的是 './eye' 而不是 'partials/eye'：EJS 解析 include 时
+                **先相对本文件**（→ views/partials/partials/eye，不存在），再退回 views 根，
+                而退回那步要靠 Express 传进来的 views 选项 —— 干脆直接写同级路径，
+                两个渲染入口（Express / 裸 ejs）都对。）
+    heading     小节标题，如「本期阵容」/「第32期 阵容」
+    canRate     这一期还能不能打分 = 进行中 **且** 还没到截止点（每期开期后第一个
+                周四 12:00 北京，db.getRateLockAt）。首页回退到「上一期结果」时传 false ——
+                那时连按钮都不出，只留均分/最高/最低和一句「打分已截止」。
+    rateLockAt  这一期的打分截止时刻（毫秒时间戳），模板只拿它显示、不自己算时间。
+                只有进行中的期才传：已结算的回退分支不传（那儿的票本来也改不了）。
+    quota       本期**打分的人自己**还剩几个名额（db.getMyQuota 的结果，
+                [{ value, quota, used, left }]，只含 400/300/250 这三个有限额的档位）。
+                只有 canRate 时才传（封盘后一个按钮都不出，名额行没地方显示）——
+                页面上就两处用它：标题下面列一行"还剩几个"，以及把投满的那档按钮灰掉。
+                **这是"我"的名额，不是被评分人的**，所以只在墙上说一次，
+                不塞进每张卡里重复十几遍。
 %>
 <%
   // value → 还剩几个。查不到的档位（50 / 200）就是不限，按钮照常出。
-  // **必须写 locals.quota 而不是 quota**：首页回退到「上一期结果」时压根不传这个入参，
-  // 而 EJS 里引用一个没传进来的名字是 ReferenceError（不是 undefined），
-  // 整个首页会 500 —— 那句话只有在"没有进行中的期"时才炸，最不容易撞见。
+  // **必须写 locals.xxx 而不是 xxx**：首页回退到「上一期结果」时压根不传 quota 和
+  // rateLockAt，而 EJS 里引用一个没传进来的名字是 ReferenceError（不是 undefined），
+  // 整个首页会 500 —— 这两行只有在"没有进行中的期"时才炸，最不容易撞见。
   const quota = locals.quota || [];
   const quotaLeft = new Map(quota.map((q) => [q.value, q.left]));
+  const rateLockAt = locals.rateLockAt ?? null;
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -39,7 +44,7 @@
     <% } %>
     点图开原图；说明超过 5 行会被截断。
   </p>
-  <%# 名额是「我」的，不是某张卡的，所以在墙上说一次就够（见文件头的入参说明） %>
+  <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
   <% if (canRate && quotaLeft.size) { %>
     <p class="quota-line">
       本期你的打分名额：
@@ -47,6 +52,13 @@
           那个写法会转义引号，出来的属性是坏掉的，样式根本不生效（实测踩过）。 %>
       <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><span<% if (!q.left) { %> class="is-out"<% } %>><b><%= q.value %></b> <%= q.left ? `剩 ${q.left}` : '已用完' %></span><% }) %>
       （50 / 200 不限）
+    </p>
+  <% } %>
+  <%# 截止时间。封盘之后名额行不出了，这一句就是"为什么没有按钮"的答案 %>
+  <% if (rateLockAt) { %>
+    <p class="rate-deadline<% if (!canRate) { %> is-locked<% } %>">
+      <% if (canRate) { %>打分截止 <b><%= fmt(rateLockAt) %></b>（<%= fmtLeft(rateLockAt - Date.now()) %>）—— 投出去的票在那之前都能改
+      <% } else { %>本期打分已于 <b><%= fmt(rateLockAt) %></b> 截止，不能再投也不能改，等管理员结算<% } %>
     </p>
   <% } %>
   <div class="shot-grid">
@@ -100,29 +112,38 @@
             </p>
           <% } %>
 
+          <%# 我打过的那一档：先一句金色色块，下面按钮行里那一格再高亮（.is-mine）。
+              「打分已截止」**单独一行**，不塞进色块里 —— 塞进去在 200px 卡上会被
+              折成「打分已 / 截止」，断得难看。 %>
           <% if (r.rating.mine) { %>
-            <%# 打过就锁死（UNIQUE(entry_id, rater_id)），所以不出按钮，
-                明说一句省得人到处找「怎么改」。要改只能请管理员去 /admin 清掉。
-                「一期内不能改」单独一行而不是塞进色块里：塞进去在 200px 卡上会被
-                折成「一期内不 / 能改」，断得难看。 %>
             <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
-            <p class="rate-lock">一期内不能改</p>
-          <% } else if (canRate) { %>
-            <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。
-                没有 <input>，value 直接挂在按钮上。
+          <% } %>
+
+          <% if (canRate) { %>
+            <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。没有 <input>，
+                value 直接挂在按钮上。**投过之后按钮照样出** —— 点别的档位就是改分
+                （服务端 UPDATE 那一行，见 routes/main.js），高亮的那格是我现在打的分。
                 本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
                 flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
                 这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
+            <% if (r.rating.mine) { %>
+              <p class="rate-note">点别的档位就是改分</p>
+            <% } %>
             <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
               <% rateValues.forEach((v) => {
-                   const left = quotaLeft.get(v);   // undefined = 这档不限（50 / 200）
-                   const out = left === 0;          // 投满了。老数据可能还超了，见 db.getMyQuota %>
-                <button type="submit" name="value" value="<%= v %>" class="rate-tier"
-                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分"
-                        <% if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
+                   const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
+                   const mine = r.rating.mine === v;  // 我给他打的就是这一档
+                   // 投满了**且不是我正占着的那一格**才灰。自己那格永远点得动：
+                   // 灰掉它等于告诉人"你这一票不算数"（老数据还可能超了，见 db.getMyQuota）。
+                   const out = left === 0 && !mine; %>
+                <button type="submit" name="value" value="<%= v %>" class="rate-tier<% if (mine) { %> is-mine<% } %>"
+                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分<% if (mine) { %>（你打的就是这一档）<% } %>"
+                        <% if (mine) { %>title="你给他打的就是 <%= v %> 分，点它不会变"<% } else if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
                         <% if (out) { %>disabled<% } %>><%= v %></button>
               <% }) %>
             </form>
+          <% } else if (r.rating.mine) { %>
+            <p class="rate-note">打分已截止，改不了</p>
           <% } %>
         </div>
       </figure>

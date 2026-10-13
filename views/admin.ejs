@@ -36,7 +36,11 @@
 <section class="card">
   <h3>赛期</h3>
   <% if (openSeason) { %>
-    <p class="muted small">当前进行中：<strong><%= openSeason.name %></strong>。同一时间只能有一期进行中。</p>
+    <p class="muted small">
+      当前进行中：<strong><%= openSeason.name %></strong>。同一时间只能有一期进行中。
+      <%# 打分截止是按开期时间算出来的（每期开期后第一个周四 12:00），管理员要靠它决定何时结算 %>
+      · 打分<% if (canRate) { %>截止 <strong><%= fmt(rateLockAt) %></strong>（<%= fmtLeft(rateLockAt - Date.now()) %>）<% } else { %>已于 <strong><%= fmt(rateLockAt) %></strong> 截止，可以结算了<% } %>
+    </p>
   <% } %>
   <form method="post" action="/admin/seasons" class="inline-create">
     <label>新建赛期
@@ -44,6 +48,14 @@
     </label>
     <button type="submit" <%= openSeason ? 'disabled' : '' %>>创建</button>
   </form>
+  <% if (!openSeason) { %>
+    <%# 截止点是**按开期时间**算的，所以开期时间一变，窗口长短就变（周三开只有一天多）。
+        先摆出来，省得开完才发现这期几乎没法投 %>
+    <p class="muted small">
+      注意：打分的截止点是按<strong>开期时间</strong>算的 —— 每期开期后遇到的第一个周四 12:00（北京）就封盘。
+      现在开一期的话，打分截止在 <strong><%= fmt(nextLockAt) %></strong>（<%= fmtLeft(nextLockAt - Date.now()) %>）。
+    </p>
+  <% } %>
 
   <% if (!seasons.length) { %>
     <p class="muted">还没有任何一期。</p>
@@ -99,7 +111,8 @@
   <% } %>
 </section>
 
-<%# 打分是一锤子买卖，本人改不了，点错了只能从这儿清掉。
+<%# 本人的票在截止前（每期开期后第一个周四 12:00）能自己改，所以这儿不是唯一的出口：
+    它管的是"过了截止要撤掉某条票"和"本人投错了、要重置成没打过"。
     默认收起，免得几十行打分把管理页撑长。 %>
 <section class="card">
   <h3>打分记录</h3>
@@ -112,7 +125,9 @@
       <% if (!seasonRatings.length) { %>
         <p class="muted">这一期还没有人打分。</p>
       <% } else { %>
-        <p class="muted small">删掉之后那个人对这套阵容重新变成「没打过」，可以再打一次。</p>
+        <p class="muted small">
+          删掉之后那个人对这套阵容重新变成「没打过」<%= canRate ? '，可以再打一次' : '；本期打分已截止，删掉就补不回来了' %>。
+        </p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -135,7 +150,7 @@
                   <td><small class="muted"><%= fmt(r.created_at) %></small></td>
                   <td class="row-actions">
                     <form method="post" action="/admin/ratings/<%= r.id %>/delete"
-                          onsubmit="return confirm('清掉 <%= r.rater_name %> 给 <%= r.target_name %> 打的 <%= r.value %> 分？他会可以重新打一次。')">
+                          onsubmit="return confirm('清掉 <%= r.rater_name %> 给 <%= r.target_name %> 打的 <%= r.value %> 分？删掉就没了。')">
                       <button type="submit" class="outline btn-danger btn-sm">清除</button>
                     </form>
                   </td>

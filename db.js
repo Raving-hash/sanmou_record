@@ -191,12 +191,54 @@ db.RATE_VALUES = RATE_VALUES;
 const RATE_QUOTA = { 400: 2, 300: 3, 250: 4 };
 db.RATE_QUOTA = RATE_QUOTA;
 
+// 打分的**截止时刻**：每期开期后遇到的第一个周四 12:00（北京时间）。过点整期封盘 ——
+// 那一期再也投不出新票、也改不了已投的，一直等到管理员结算（结算后连按钮都不出）。
+//
+// 为什么要给打分设截止：打分不进名次，但**结算时按"有没有看准前两名"涨慧眼等级**
+// （见下面的 applyEye）。名次基本明朗之后再补票、再改分，等于照着答案改卷子。
+// 周四 12:00 这个时点是用户定的。
+//
+// 和名额一样**不落库**：截止点按 seasons.created_at 现算。于是「撤销结算」
+// （created_at 不动）、改规矩（只改下面两个常数）都自动生效，也不会出现
+// "库里存着一个时间、规则又算出另一个时间"的两套说法。
+// 时区固定北京：全站时间都按 Asia/Shanghai 显示，而北京时间没有夏令时，
+// 固定 +8 小时就够，不用 Intl 也不用时区库。
+const LOCK_WEEKDAY = 4;                   // 4 = 周四（getUTCDay 口径，0 是周日）
+const LOCK_HOUR_BJ = 12;                  // 北京时间正午
+const BJ_OFFSET_MS = 8 * 3600 * 1000;     // 北京 = UTC+8
+
+// 这一期的打分截止时刻（毫秒时间戳），没有有效的 created_at 就返回 null。
+// 取**严格晚于** created_at 的那一个周四 12:00：万一正好卡在周四 12:00:00.000 开期，
+// 算下一周 —— 否则那一期一开出来就是封盘的。
+db.getRateLockAt = (season) => {
+  const created = Date.parse(season?.created_at ?? '');
+  if (!Number.isFinite(created)) return null;
+
+  // 把"北京墙上时间"借 UTC 的字段读出来：created + 8h 之后，getUTC* 拿到的就是北京的日期
+  const d = new Date(created + BJ_OFFSET_MS);
+  // 12:00 北京 = 04:00 UTC，所以拿日期直接凑出当天那个时刻，再一天天往后找周四
+  let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), LOCK_HOUR_BJ - 8);
+  for (let i = 0; i < 8; i++) {           // 最多往后 7 天，必中
+    if (t > created && new Date(t + BJ_OFFSET_MS).getUTCDay() === LOCK_WEEKDAY) break;
+    t += 86400000;
+  }
+  return t;
+};
+
+// 这一期封盘了没有。**只看时间**，不看 status：已结算的期由别处挡着
+// （结算后连打分区都不出），这里管的是"还开着、但已经过了周四 12:00"。
+db.isRateLocked = (season) => {
+  const at = db.getRateLockAt(season);
+  return at !== null && Date.now() >= at;
+};
+
 // 没人打过分时的形状。模板直接读，不用到处判空；冻结只是提醒别改它。
 db.EMPTY_RATING = Object.freeze({
   n: 0, avg: null, max: null, min: null, maxBy: [], minBy: [], mine: null,
 });
 
-// 我给他打过没有。打过就锁死了 —— 一期内一个阵容只能打一次
+// 我给他打过没有。一期内一个阵容只有一票（UNIQUE(entry_id, rater_id) 兜底），
+// 但**截止前随时能改**：改分就是 UPDATE 这一行，见 routes/main.js。
 db.findRating = (entryId, raterId) =>
   db.prepare(`SELECT * FROM ratings WHERE entry_id=? AND rater_id=?`).get(entryId, raterId);
 
@@ -237,6 +279,9 @@ db.listSeasonRatings = (seasonId) => db.prepare(`
 // 本期我各档还剩几个名额：[{ value, quota, used, left }]，高档在前（400 → 300 → 250）。
 // 只列**有名额限制**的档位 —— 不限的档位没有"还剩几个"这回事，模板不用知道它们。
 // 期由 entry 带出来（ratings 表里没存 season_id，见 schema.sql）。
+//
+// 现数还有个附带的好处：**改分时旧档位的名额当场退回来**。把一张 400 改成 50，
+// 这一查就只剩一张 400 了，不用额外写"退名额"的代码，也不会退错。
 //
 // 名额是后加的规矩，所以老数据可能**已经超了**（比如有人手里已经投出去三个 400）：
 // 他的票一条不动，只是这里把 left 归零 —— 后果是他这期不能再投 400。
@@ -342,33 +387,35 @@ db.getHistory = () => db.prepare(`
 // 所有人初始 10 级（users.eye_level 的 DEFAULT），**只在结算那一刻**动，而且只动
 // "给本期积分第一/第二的人打过分的"那几个人 —— 奖励的是"看准了冠军"的眼光，
 // 不是按人头普涨。**自评也算**（本站不禁止自评，一视同仁，见 README）。
+// "只认前两名"是**唯一和名次有关的地方**（第三名往后一分不加，这是有意的）；
+// 除此之外名次不再有别 —— 给第二名的分和给第一名一样算，见下。
 //
-// 给积分**第一**的人打分时的增减。这是唯一真源，下面第二名的表由它推出来。
+// 给**积分第一/第二**的人打分时的增减。这是唯一真源，整站就这一张表。
 // ⚠️ 键就是 RATE_VALUES 的五个档位，改档位时这里必须一起改；
 // 对不上的档位（比如老数据里已下线的档位）按 0 处理：不涨不跌，也不写记录。
-const EYE_GAIN = { 400: 3, 300: 2, 250: 1, 200: -1, 50: -2 };
-
-// 名次不同、权重不同：第一名的分原样算，第二名的**减半后向零取整** ——
-// 于是第二名的表是 400→+1、300→+1、250→0、200→0、50→−1（看准第二也有分，但小一半）。
-// 与其手写两张表（改档位要改两处、还容易对不上），不如从 EYE_GAIN 推出来。
-db.eyeDelta = (value, rank) => {
-  const base = EYE_GAIN[value];
-  if (base === undefined) return 0;
-  return rank === 1 ? base : Math.trunc(base / 2);
-};
+//
+// 2026-10-13 改了两处：
+//  1. **50 和 200 不再扣等级**（原本是 −2 / −1）。打低分的意思是"我觉得他打得一般"，
+//     不该倒扣眼光 —— 于是所有增减都 ≥ 0，**慧眼等级只涨不跌**，初始那 10 级就是地板。
+//     这两个键留着并显式写 0（而不是删掉），为的是让人一眼看出五个档位都考虑过、
+//     它俩是有意给 0，而不是漏了一档。
+//  2. **第二名不再减半**（原本是这张表减半向零取整，于是只有 400 / 300 给 +1）：
+//     看准第二名和看准第一名一样值钱。两张表并成一张之后，`eyeDelta` 就只剩一次查表，
+//     连 rank 参数都去掉了 —— 留着它会让人以为名次还参与计算。
+const EYE_GAIN = { 400: 3, 300: 2, 250: 1, 200: 0, 50: 0 };
+db.eyeDelta = (value) => EYE_GAIN[value] ?? 0;
 
 // 结算时把慧眼等级算出来并落库。ranking 是 getRanking 的结果（积分序、已含 user_id）。
-// 一期一人写一行，先把这个人的所有票加起来（他可能既给第一打了 400、又给第二打了 50）。
+// 一期一人写一行，先把这个人的所有票加起来（他可能既给第一打了 400、又给第二打了 250）。
 const applyEye = (seasonId, ranking) => {
-  // entry_id → 名次。只取前两名；本期不足两人时表里就只有一条。
-  const rankOf = new Map();
-  ranking.slice(0, 2).forEach((row, i) => rankOf.set(row.id, i + 1));
+  // 本期前两名的 entry_id。名次本身已经不参与计算了（第一和第二同一张表），
+  // 这个集合只用来筛掉"给第三名往后打的票"；本期不足两人时集合里就只有一条。
+  const top2 = new Set(ranking.slice(0, 2).map((row) => row.id));
 
   const deltas = new Map();                       // users.id → 本期净增减
   for (const r of db.getSeasonRatings(seasonId)) {
-    const rank = rankOf.get(r.entry_id);
-    if (!rank) continue;                          // 不是给前两名打的，跟他没关系
-    const d = db.eyeDelta(r.value, rank);
+    if (!top2.has(r.entry_id)) continue;          // 不是给前两名打的，跟他没关系
+    const d = db.eyeDelta(r.value);
     if (d) deltas.set(r.rater_id, (deltas.get(r.rater_id) || 0) + d);
   }
 

@@ -3,9 +3,25 @@
 <hgroup class="page-head">
   <h2>我的打分记录</h2>
   <p class="muted">
-    一期内对同一个阵容只能打一次，打完就不能改；打分只作展示，不影响名次。
+    一期内对同一个阵容只有一票，但<strong>截止前随时能改</strong>（每期开期后第一个周四 12:00 封盘，
+    过了就整期不能投也不能改）；打分只作展示，不影响名次。
   </p>
 </hgroup>
+
+<%# canEdit / rateLockAt 由 routes/main.js 传：前者是"还能改分的那个期 id"，没有就是 null。
+    这一页只有那一个渲染入口，两个入参必定都传，所以模板里直接用名字 %>
+<% if (rateLockAt) { %>
+  <p class="muted small">
+    <% if (canEdit) { %>
+      进行中的那一期还没封盘，打分截止 <strong><%= fmt(rateLockAt) %></strong>
+      （<%= fmtLeft(rateLockAt - Date.now()) %>）—— 要改就点下表里的「去改」跳到那张卡，
+      或者直接去<a href="/">首页阵容墙</a>点别的档位。
+    <% } else { %>
+      进行中的那一期已于 <strong><%= fmt(rateLockAt) %></strong> 封盘，
+      表里的票都改不了了，等管理员结算。
+    <% } %>
+  </p>
+<% } %>
 
 <% if (!rows.length) { %>
   <p class="muted">你还没有打过分。去<a href="/">首页阵容墙</a>上点一下那五个档位就投出去了。</p>
@@ -28,6 +44,10 @@
               <a href="/seasons/<%= r.season_id %>"><%= r.season_name %></a>
               <% if (r.season_status === 'open') { %>
                 <span class="badge badge-open">进行中</span>
+              <% } %>
+              <%# 只有"进行中、且还没封盘"的那一期能改，链接直接跳到那张卡（/#e<id>） %>
+              <% if (canEdit === r.season_id) { %>
+                · <a href="/#e<%= r.entry_id %>">去改</a>
               <% } %>
             </td>
             <td><a href="/u/<%= r.uid %>"><%= r.nickname %></a>
