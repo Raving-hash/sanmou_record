@@ -16,6 +16,12 @@
   </p>
 </hgroup>
 
+<%# 慧眼等级变动榜放在战绩卡**上面**：它是结算的头条结论（"这期谁涨得最多"），
+    塞在十几张截图卡下面就得滚很久才看得到。 %>
+<% if (settled) { %>
+  <%- include('partials/eye-board', { rows: eye, heading: '本期慧眼等级变动' }) %>
+<% } %>
+
 <% if (!rows.length) { %>
   <p class="muted">这一期还没有人交积分。</p>
 <% } else { %>
@@ -24,6 +30,7 @@
       <header>
         <strong class="rank-no">#<%= i + 1 %></strong>
         <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+        <%- include('partials/eye', { uid: r.uid }) %>
         <% if (i === 0 && settled) { %><span class="badge badge-first">👑 胜者</span><% } %>
         <% if (i === 0 && !settled) { %><span class="badge badge-first">暂列第一</span><% } %>
         <span class="score-pill"><%= r.score %> 分</span>
@@ -81,6 +88,7 @@
     <% notSubmitted.forEach((p) => { %>
       <li>
         <a href="/u/<%= p.uid %>"><%= p.nickname %></a>
+        <%- include('partials/eye', { uid: p.uid }) %>
         <% if (p.lineup_uploaded) { %>
           <span class="badge badge-ok">已传阵容</span>
         <% } else { %>

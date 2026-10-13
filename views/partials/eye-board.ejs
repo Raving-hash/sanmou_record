@@ -1,0 +1,55 @@
+<%#
+  本期慧眼等级变动排行榜 —— 结算之后用来回答"这期谁涨得最多"。
+  按变动从大到小排，第一行就是答案。
+
+  入参：
+    rows     db.getEyeAdjustments(seasonId) 的结果（已按 delta 降序、并列按 users.id）。
+             只有**给本期积分第一/第二的人打过分的**成员才会出现在这里，
+             净增减为 0 的压根不写记录，所以表里每行都是真动过的。
+    heading  小节标题，如「本期慧眼等级变动」/「第32期 慧眼等级变动」
+
+  只在**已结算**的期里引它：进行中的期还没算过，表必然是空的。
+  空表也照常出标题 + 一句说明 —— "为什么大家等级都没变"本身就是要回答的问题
+  （常见情形：本期没人给前两名打分）。
+%>
+<h3><%= heading %></h3>
+<% if (!rows.length) { %>
+  <p class="muted">
+    本期结算时<strong>没有任何人</strong>给积分第一/第二的人打分，所以慧眼等级全员没变。
+  </p>
+<% } else { %>
+  <p class="muted small">
+    结算时只有给<strong>积分第一/第二</strong>的人打过分的成员才会动等级：
+    给第一打 400 → +3、300 → +2、250 → +1、200 → −1、50 → −2，给第二的打分<strong>减半</strong>（向零取整）。
+    一个人一期里投的票先加起来再落账。自评也算。
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="w-rank">名次</th>
+          <th>昵称</th>
+          <th class="w-score">等级变动</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% rows.forEach((r, i) => { %>
+          <tr class="<%= i === 0 ? 'row-first' : '' %>">
+            <td class="num"><%= i + 1 %></td>
+            <td>
+              <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+              <%- include('./eye', { uid: r.uid }) %>
+              <%# 只给"真的涨了"的头名挂这枚章：整期都是负分时，第一行只是"跌得最少"，
+                  挂"涨得最多"就是撒谎。 %>
+              <% if (i === 0 && r.delta > 0) { %>
+                <span class="badge badge-first">本期涨得最多</span>
+              <% } %>
+            </td>
+            <td class="num"><strong class="<%= r.delta > 0 ? 'delta-up' : 'delta-down' %>"><%= r.delta > 0 ? '+' : '' %><%= r.delta %></strong></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <p><small class="muted">昵称旁的小圆框是这个人<strong>现在</strong>的慧眼等级，不是这一期结束时的。</small></p>
+<% } %>

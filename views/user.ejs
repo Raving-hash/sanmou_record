@@ -1,7 +1,7 @@
 <%- include('partials/header') %>
 
 <hgroup class="page-head">
-  <h2><%= u.nickname %><% if (u.is_disabled) { %> <span class="badge badge-wait">已禁用</span><% } %></h2>
+  <h2><%= u.nickname %><%- include('partials/eye', { uid: u.user_id }) %><% if (u.is_disabled) { %> <span class="badge badge-wait">已禁用</span><% } %></h2>
   <p class="muted">ID：<%= u.user_id %> · 加入于 <%= fmt(u.created_at) %></p>
 </hgroup>
 

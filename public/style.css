@@ -36,6 +36,14 @@
   --yw-jade:    #3f7d5c;
   --yw-jade-lt: #8ac9a6;
 
+  /* 亮蓝 —— 用在两处：慧眼等级 > 0 的小圆框、阵容墙上「上期积分第一」那张卡的描边。
+     色板里原本没有蓝，这是新加的一支：就这两处用，不参与 Pico 的语义色映射
+     （不像 gold/jade/cinnabar 那样有 --pico-* 的对应项）。 */
+  --yw-azure-lt: #79c2f2;
+
+  /* 亮银 —— 阵容墙上「上期积分第二」那张卡的描边 */
+  --yw-silver:   #ccd6e2;
+
   /* 文字（暖白，不用纯白，避免和墨底打架） */
   --yw-text:      #ece5d8;
   --yw-text-dim:  #a89b83;
@@ -389,6 +397,39 @@ a {
   border-color: rgba(122, 108, 178, 0.45);
   color: #bcb0e6;
 }
+
+/* 慧眼等级：昵称旁边的小圆框（views/partials/eye.ejs）。
+   数字外面套一个圈，>0 亮蓝、<=0 暗红 —— 颜色是唯一的等级信号，所以圈做得很小，
+   只求认得出、不跟昵称抢注意力。min-width 撑住 1 位数的圆形；两位数会自然拉成胶囊形，
+   这没关系（等级上三位数时本来也放不进正圆）。
+   注意它和 .badge 是两套东西：那个是胶囊+文字标签，这个是等宽数字的圆章。 */
+.eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 170, 240, 0.5);
+  background: rgba(56, 132, 214, 0.18);
+  color: var(--yw-azure-lt);
+  font-size: 0.72rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+.eye-low {
+  border-color: rgba(140, 47, 47, 0.5);
+  background: rgba(140, 47, 47, 0.18);
+  color: var(--yw-cinnabar-lt);
+}
+
+/* 慧眼等级变动榜（views/partials/eye-board.ejs）里的 +3 / −1。
+   涨跌沿用圆框那套颜色语义（蓝=正、红=负），不另立一套 —— 同一屏里两个红色
+   应该指的是同一件事。 */
+.delta-up   { color: var(--yw-azure-lt); }
+.delta-down { color: var(--yw-cinnabar-lt); }
 
 /* 提示条 */
 .flash {
@@ -758,6 +799,21 @@ nav ul li,
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius);
   overflow: hidden;
+}
+/* 上期积分第一 / 第二 的阵容卡（db.getPrevAces → 模板里的 is-prev-first / is-prev-second）。
+   边框本身只有 1px（.shot-card 的既有宽度），所以"亮"是靠**外面再补一圈 1px 的
+   box-shadow 环 + 一点辉光**做的 —— 不能改成 border-width: 2px：那会挤掉 1px 内容宽度，
+   而框里的图是写死 200px 的，会被 overflow:hidden 裁掉更多。阴影不参与布局，
+   加多少都不动卡片尺寸，也不会裁到图。 */
+.shot-card.is-prev-first {
+  border-color: var(--yw-azure-lt);
+  box-shadow: 0 0 0 1px rgba(121, 194, 242, 0.45),
+              0 0 12px rgba(56, 132, 214, 0.28);
+}
+.shot-card.is-prev-second {
+  border-color: var(--yw-silver);
+  box-shadow: 0 0 0 1px rgba(204, 214, 226, 0.4),
+              0 0 12px rgba(150, 165, 180, 0.22);
 }
 /* 200px 宽装不下「#1 王小明 共3张 320分」一行，所以间距和字号都比卡片大时收紧，
    允许换行。同一行的卡片由 grid 拉成等高，顶栏高度不齐也不会歪。 */

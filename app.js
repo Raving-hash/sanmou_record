@@ -42,6 +42,13 @@ app.use((req, res, next) => {
   // 只有五档，并列很常见，全摊在 200px 的卡上会占三行。
   res.locals.nameList = (list) => list.slice(0, 2).map((x) => x.nickname).join('、')
     + (list.length > 2 ? ` 等 ${list.length} 人` : '');
+  // 慧眼等级：所有人初始 10 级，只在结算时按"有没有看准前两名"加减（见 db.settleSeason）。
+  // 昵称出现的地方都要带那个小圆框（views/partials/eye.ejs），但各个列表查出来的字段
+  // 五花八门（多数只有一个 uid），所以这里每次请求拉一张 uid → 等级 的小表兜底，
+  // 而不是给十处 SQL 各补一列 JOIN。成员就十几个人，代价可以忽略。
+  // 查不到这个人返回 null，模板据此**整个不输出**圆框（宁可少一个，也不要空圈）。
+  const eyeLevels = db.getEyeLevels();
+  res.locals.eyeLevel = (uid) => eyeLevels.get(String(uid ?? '').toLowerCase()) ?? null;
   // 一次性提示（重定向后显示）
   res.locals.flash = req.session ? req.session.flash || null : null;
   if (req.session) delete req.session.flash;

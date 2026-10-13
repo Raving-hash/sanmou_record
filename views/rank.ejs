@@ -27,6 +27,7 @@
             <td class="num"><%= i + 1 %></td>
             <td>
               <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+              <%- include('partials/eye', { uid: r.uid }) %>
               <% if (i === 0) { %><span class="badge badge-first">👑 头名</span><% } %>
             </td>
             <td class="num"><strong><%= r.wins %></strong></td>

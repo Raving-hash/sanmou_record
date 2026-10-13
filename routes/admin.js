@@ -50,7 +50,13 @@ router.post('/seasons/:id/settle', (req, res) => {
 
   const ranking = db.settleSeason(season.id);
   const w = ranking[0];
-  ok(req, `${season.name} 已结算：${w.nickname} 以 ${w.score} 分夺冠（共 ${players} 人参赛）`);
+  const eye = db.getEyeAdjustments(season.id);
+  // 慧眼等级是结算的副产物，而且是大多数人在页面上唯一能看出"我为什么变了"的地方，
+  // 所以在提示里念一遍，免得有人发现自己的等级变了却不知道该问谁。
+  const eyeTip = eye.length
+    ? ` · 慧眼等级：${eye.map((e) => `${e.nickname} ${e.delta > 0 ? '+' : ''}${e.delta}`).join('、')}`
+    : ' · 本期没人给前两名打分，慧眼等级没变';
+  ok(req, `${season.name} 已结算：${w.nickname} 以 ${w.score} 分夺冠（共 ${players} 人参赛）${eyeTip}`);
   res.redirect(`/seasons/${season.id}`);
 });
 
@@ -70,10 +76,15 @@ router.post('/seasons/:id/delete', (req, res) => {
   if (!season) { err(req, '没有这一期'); return res.redirect('/admin'); }
 
   const files = db.collectSeasonFiles(season.id);
+  // 已结算的期删掉就当作从没办过，结算时加过的慧眼等级要一起退回来 ——
+  // 不退的话，删掉一期会给人留下白拿的等级（eye_adjustments 随 seasons 级联删，
+  // 所以必须先退、再删）。
+  const reverted = db.revertEye(season.id);
   db.prepare('DELETE FROM seasons WHERE id=?').run(season.id);   // 级联删 entries / lineup_images
   removeFiles(files);
 
-  ok(req, `已删除「${season.name}」，连同 ${files.length} 张图片`);
+  ok(req, `已删除「${season.name}」，连同 ${files.length} 张图片`
+    + (reverted ? `，并退回 ${reverted} 人的慧眼等级` : ''));
   res.redirect('/admin');
 });
 

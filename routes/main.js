@@ -39,6 +39,9 @@ router.get('/', (req, res) => {
     last,
     ranking: last ? withImages(db.getRanking(last.id)) : [],
     lineups: last ? db.getLineupWall(last.id, req.user.id) : [],
+    // 结算时的慧眼等级变动（没有 settled 的期就是空的）。这个回退分支显示的
+    // 一定是已结算的期，所以榜直接摆出来，不用再判一次状态。
+    eye: last ? db.getEyeAdjustments(last.id) : [],
     notSubmitted: [],
     me_entry: null,
     me_images: [],
@@ -241,6 +244,8 @@ router.get('/seasons/:id', (req, res) => {
     season,
     rows,
     settled,
+    // 慧眼等级变动榜（只有已结算的期才有内容，模板里也只在 settled 时引它）
+    eye: settled ? db.getEyeAdjustments(season.id) : [],
     notSubmitted: settled ? [] : db.getNotSubmitted(season.id),
     players: db.countPlayers(season.id),
   });

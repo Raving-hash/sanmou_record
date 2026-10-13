@@ -127,8 +127,10 @@
             <tbody>
               <% seasonRatings.forEach((r) => { %>
                 <tr>
-                  <td><a href="/u/<%= r.target_uid %>"><%= r.target_name %></a></td>
-                  <td><a href="/u/<%= r.rater_uid %>"><%= r.rater_name %></a></td>
+                  <td><a href="/u/<%= r.target_uid %>"><%= r.target_name %></a>
+                    <%- include('partials/eye', { uid: r.target_uid }) %></td>
+                  <td><a href="/u/<%= r.rater_uid %>"><%= r.rater_name %></a>
+                    <%- include('partials/eye', { uid: r.rater_uid }) %></td>
                   <td class="num"><strong><%= r.value %></strong></td>
                   <td><small class="muted"><%= fmt(r.created_at) %></small></td>
                   <td class="row-actions">
@@ -163,6 +165,7 @@
         <% users.forEach((u) => { %>
           <tr class="<%= u.is_disabled ? 'row-muted' : '' %>">
             <td><a href="/u/<%= u.user_id %>"><%= u.nickname %></a>
+              <%- include('partials/eye', { uid: u.user_id }) %>
               <% if (u.is_admin) { %><span class="badge badge-admin">管理员</span><% } %>
             </td>
             <td><code><%= u.user_id %></code></td>

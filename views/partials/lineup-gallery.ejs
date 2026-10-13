@@ -8,6 +8,10 @@
              每行已带 rank（积分名次，交了积分的才有，否则 null）、
              score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
              且只包含至少传了一张阵容的人，所以这里不用再筛。
+             （下面引 eye.ejs 写的是 './eye' 而不是 'partials/eye'：EJS 解析 include 时
+             **先相对本文件**（→ views/partials/partials/eye，不存在），再退回 views 根，
+             而退回那步要靠 Express 传进来的 views 选项 —— 干脆直接写同级路径，
+             两个渲染入口（Express / 裸 ejs）都对。）
     heading  小节标题，如「本期阵容」/「第32期 阵容」
     canRate  这一期还能不能打分。进行中的期传 true；首页回退到「上一期结果」时传 false——
              那时连按钮都不出，只留均分/最高/最低。
@@ -17,15 +21,23 @@
   <p class="muted small">
     每人只展示第一张阵容截图（按上传顺序，不是按文件名）和阵容说明。
     顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次，和上面的排名表一致。
+    <% if (rows.some((r) => r.ace)) { %>
+      <strong>上一期</strong>积分第一 / 第二 的阵容卡分别描亮蓝 / 亮银边。
+    <% } %>
     点图开原图；说明超过 5 行会被截断。
   </p>
   <div class="shot-grid">
-    <% rows.forEach((r) => { const img = r.images[0]; %>
+    <% rows.forEach((r) => { const img = r.images[0];
+         // 上一期的积分第一/第二：描边区分（亮蓝 / 亮银）。ace 由 db.getPrevAces 跨期查出来，
+         // 和本期的 r.rank（积分名次，#N 那个）完全是两回事。
+         const aceClass = r.ace === 1 ? ' is-prev-first' : r.ace === 2 ? ' is-prev-second' : '';
+         const aceTip = r.ace ? `上期积分第${r.ace === 1 ? '一' : '二'}` : ''; %>
       <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
-      <figure class="shot-card" id="e<%= r.id %>">
+      <figure class="shot-card<%= aceClass %>" id="e<%= r.id %>"<% if (aceTip) { %> title="<%= aceTip %>"<% } %>>
         <figcaption class="shot-head">
           <% if (r.rank) { %><span class="shot-rank">#<%= r.rank %></span><% } %>
           <a class="shot-who" href="/u/<%= r.uid %>"><%= r.nickname %></a>
+          <%- include('./eye', { uid: r.uid }) %>
           <% if (r.images.length > 1) { %>
             <span class="badge badge-wait">共 <%= r.images.length %> 张</span>
           <% } %>

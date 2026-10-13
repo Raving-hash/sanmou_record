@@ -11,6 +11,16 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
 
+// 轻量迁移。schema.sql 里全是 CREATE TABLE IF NOT EXISTS —— 对**已经存在**的表
+// 一个字都不会改，所以给老库补列（或补表）得在这儿单独来一次。
+// 判据是 PRAGMA 里看这个列在不在，跑多少次都幂等；新库建表时已经带上了，直接跳过。
+{
+  const cols = db.prepare(`PRAGMA table_info(users)`).all().map((c) => c.name);
+  if (!cols.includes('eye_level')) {
+    db.exec(`ALTER TABLE users ADD COLUMN eye_level INTEGER NOT NULL DEFAULT 10`);
+  }
+}
+
 // ---------- 配置 / 邀请码 ----------
 db.getSetting = (k) => db.prepare(`SELECT value FROM settings WHERE key=?`).get(k)?.value ?? null;
 db.setSetting = (k, v) => db.prepare(
@@ -34,6 +44,17 @@ db.listUsers = () => db.prepare(`SELECT * FROM users ORDER BY id`).all();
 db.createUser = ({ userId, nickname, passwordHash, isAdmin = 0 }) =>
   db.prepare(`INSERT INTO users (user_id, nickname, password_hash, is_admin) VALUES (?, ?, ?, ?)`)
     .run(userId, nickname, passwordHash, isAdmin ? 1 : 0);
+
+// uid（小写）→ 慧眼等级。**展示专用**：昵称出现的地方都要带那个小圆框，
+// 而各个列表查出来的字段五花八门（多数只有一个 uid，没有 users.id），
+// 与其给十处 SQL 各补一列 JOIN，不如每次请求拉这一张小表 —— 成员就十几个人。
+db.getEyeLevels = () => {
+  const m = new Map();
+  for (const u of db.prepare(`SELECT user_id, eye_level FROM users`).all()) {
+    m.set(u.user_id.toLowerCase(), u.eye_level);
+  }
+  return m;
+};
 
 // ---------- 赛期 / 参赛记录 ----------
 db.getOpenSeason = () => db.prepare(`SELECT * FROM seasons WHERE status='open'`).get();
@@ -75,6 +96,19 @@ db.getFinalRanking = (seasonId) => db.prepare(`
   ORDER BY e.final_rank IS NULL, e.final_rank ASC, e.score DESC, e.score_submitted_at ASC, e.id ASC
 `).all(seasonId);
 
+// 上一期的积分第一 / 第二是谁 —— 阵容墙给他们的卡描边（亮蓝 / 亮银）。
+// 「上一期」= 这一期之前**最近一个已结算的期**；没有就返回空表
+// （第一期，或者上一期还没结算 —— 这两种情况下墙上一条边都不描）。
+// 名次取 final_rank：它是结算时定死的，之后改不了（已结算期不允许改积分，见 routes/admin.js）。
+db.getPrevAces = (seasonId) => {
+  const aces = new Map();                                    // users.id → 1 | 2
+  const prev = db.prepare(
+    `SELECT id FROM seasons WHERE id < ? AND status='settled' ORDER BY id DESC LIMIT 1`).get(seasonId);
+  if (!prev) return aces;
+  db.getFinalRanking(prev.id).slice(0, 2).forEach((row, i) => aces.set(row.user_id, i + 1));
+  return aces;
+};
+
 // 本期阵容墙：所有传了阵容的人，**不限于交了积分的**。
 // 只看 ranking 是不够的 —— 新开一期时常常是「有人传了阵容但还没人交积分」，
 // 那样墙会是空的。
@@ -85,9 +119,10 @@ db.getFinalRanking = (seasonId) => db.prepare(`
 // lineup_note 也一起带出来：墙上除了第一张图还要展示阵容说明（模板里按行截断，
 // 卡片只有 200px 宽，1000 字的说明全摊开会把整行卡片顶得老高）。
 // viewerId 用来认出「我给他打了多少」，卡上要把这一档标出来（别人打的不用管）。
+// ace 是「上一期的积分第一/第二」（1 / 2），模板据此给卡描亮蓝/亮银边；其余人是 null。
 db.getLineupWall = (seasonId, viewerId) => {
   const rows = db.prepare(`
-    SELECT e.id, e.score, e.score_submitted_at, e.lineup_note, u.user_id AS uid, u.nickname
+    SELECT e.id, e.user_id, e.score, e.score_submitted_at, e.lineup_note, u.user_id AS uid, u.nickname
     FROM entries e JOIN users u ON u.id = e.user_id
     WHERE e.season_id = ?
       AND EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id)
@@ -102,10 +137,14 @@ db.getLineupWall = (seasonId, viewerId) => {
   // 只有交了积分的才有名次；没交的排最后且 rank 为 null。
   // rank 按上面那条 SQL 的顺序（= 积分序）数出来，所以它始终是积分名次，
   // 和下面重排展示顺序无关。
+  // ace 取的是**上一期**的名次（跨期查，见 getPrevAces），和本期的 rank 没有任何关系：
+  // 一个是"你上期第几"（决定边框），一个是"你这期第几"（决定 #N）。
+  const aces = db.getPrevAces(seasonId);
   let rank = 0;
   const wall = rows.map((r) => ({
     ...r,
     rank: r.score === null ? null : ++rank,
+    ace: aces.get(r.user_id) || null,
     images: db.getLineupImages(r.id),
     rating: ratings.get(r.id) || db.EMPTY_RATING,
   }));
@@ -266,17 +305,85 @@ db.getHistory = () => db.prepare(`
   LEFT JOIN users   u ON u.id = e.user_id
   ORDER BY s.id DESC`).all();
 
+// ---------- 慧眼等级 ----------
+// 所有人初始 10 级（users.eye_level 的 DEFAULT），**只在结算那一刻**动，而且只动
+// "给本期积分第一/第二的人打过分的"那几个人 —— 奖励的是"看准了冠军"的眼光，
+// 不是按人头普涨。**自评也算**（本站不禁止自评，一视同仁，见 README）。
+//
+// 给积分**第一**的人打分时的增减。这是唯一真源，下面第二名的表由它推出来。
+// ⚠️ 键就是 RATE_VALUES 的五个档位，改档位时这里必须一起改；
+// 对不上的档位（比如老数据里已下线的档位）按 0 处理：不涨不跌，也不写记录。
+const EYE_GAIN = { 400: 3, 300: 2, 250: 1, 200: -1, 50: -2 };
+
+// 名次不同、权重不同：第一名的分原样算，第二名的**减半后向零取整** ——
+// 于是第二名的表是 400→+1、300→+1、250→0、200→0、50→−1（看准第二也有分，但小一半）。
+// 与其手写两张表（改档位要改两处、还容易对不上），不如从 EYE_GAIN 推出来。
+db.eyeDelta = (value, rank) => {
+  const base = EYE_GAIN[value];
+  if (base === undefined) return 0;
+  return rank === 1 ? base : Math.trunc(base / 2);
+};
+
+// 结算时把慧眼等级算出来并落库。ranking 是 getRanking 的结果（积分序、已含 user_id）。
+// 一期一人写一行，先把这个人的所有票加起来（他可能既给第一打了 400、又给第二打了 50）。
+const applyEye = (seasonId, ranking) => {
+  // entry_id → 名次。只取前两名；本期不足两人时表里就只有一条。
+  const rankOf = new Map();
+  ranking.slice(0, 2).forEach((row, i) => rankOf.set(row.id, i + 1));
+
+  const deltas = new Map();                       // users.id → 本期净增减
+  for (const r of db.getSeasonRatings(seasonId)) {
+    const rank = rankOf.get(r.entry_id);
+    if (!rank) continue;                          // 不是给前两名打的，跟他没关系
+    const d = db.eyeDelta(r.value, rank);
+    if (d) deltas.set(r.rater_id, (deltas.get(r.rater_id) || 0) + d);
+  }
+
+  const ins = db.prepare(`INSERT INTO eye_adjustments (season_id, user_id, delta) VALUES (?, ?, ?)`);
+  const bump = db.prepare(`UPDATE users SET eye_level = eye_level + ? WHERE id = ?`);
+  for (const [userId, delta] of deltas) {
+    ins.run(seasonId, userId, delta);             // 净增减为 0 的人上面已经滤掉了
+    bump.run(delta, userId);
+  }
+};
+
+// 把某一期结算时加过的等级**原样退回去**。撤销结算、删除赛期都要先走这一步：
+// 不退的话「撤销 → 重新结算」会累加两次，删掉一期也会给人留下白拿的等级。
+db.revertEye = (seasonId) => {
+  const rows = db.prepare(`SELECT user_id, delta FROM eye_adjustments WHERE season_id=?`).all(seasonId);
+  const bump = db.prepare(`UPDATE users SET eye_level = eye_level - ? WHERE id = ?`);
+  for (const r of rows) bump.run(r.delta, r.user_id);
+  db.prepare(`DELETE FROM eye_adjustments WHERE season_id=?`).run(seasonId);
+  return rows.length;
+};
+
+// 某一期结算时的等级变动，给管理页的结算提示用（撤销后就是空的）。
+db.getEyeAdjustments = (seasonId) => db.prepare(`
+  SELECT a.delta, u.nickname, u.user_id AS uid
+  FROM eye_adjustments a JOIN users u ON u.id = a.user_id
+  WHERE a.season_id = ?
+  ORDER BY a.delta DESC, u.id ASC
+`).all(seasonId);
+
 // ---------- 结算 / 撤销（一个事务里做完） ----------
 db.settleSeason = db.transaction((seasonId) => {
   const ranking = db.getRanking(seasonId);
   const setRank = db.prepare(`UPDATE entries SET final_rank=?, is_winner=? WHERE id=?`);
   ranking.forEach((row, i) => setRank.run(i + 1, i === 0 ? 1 : 0, row.id));
+  // 先把这一期可能残留的慧眼明细退干净，再重新算。正常流程走不到这一步
+  // （结算前必然是 open 期，而变回 open 只能经 reopenSeason，那里已经退过），
+  // 但少了这句，一旦哪条路径漏了退，这里就会撞 eye_adjustments 的
+  // UNIQUE(season_id, user_id) 直接抛错、把整个结算回滚掉 ——
+  // 与其留个"结算失败"的雷，不如让结算天然幂等：算两遍结果一样。
+  db.revertEye(seasonId);
+  applyEye(seasonId, ranking);                    // 慧眼等级跟着名次一起定，同一个事务
   db.prepare(`UPDATE seasons SET status='settled', settled_at=? WHERE id=?`)
     .run(new Date().toISOString(), seasonId);
   return ranking;
 });
 
 db.reopenSeason = db.transaction((seasonId) => {
+  db.revertEye(seasonId);                         // 先把等级退回去，否则重新结算会累加两次
   db.prepare(`UPDATE entries SET final_rank=NULL, is_winner=0 WHERE season_id=?`).run(seasonId);
   db.prepare(`UPDATE seasons SET status='open', settled_at=NULL WHERE id=?`).run(seasonId);
 });

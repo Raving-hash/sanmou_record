@@ -30,7 +30,8 @@
                 <span class="badge badge-open">进行中</span>
               <% } %>
             </td>
-            <td><a href="/u/<%= r.uid %>"><%= r.nickname %></a></td>
+            <td><a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+              <%- include('partials/eye', { uid: r.uid }) %></td>
             <td class="num"><strong><%= r.value %></strong></td>
             <td><small class="muted"><%= fmt(r.created_at) %></small></td>
           </tr>

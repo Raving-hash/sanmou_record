@@ -35,6 +35,7 @@
             <td>
               <% if (s.winner_name) { %>
                 <a href="/u/<%= s.winner_uid %>">👑 <%= s.winner_name %></a>
+                <%- include('partials/eye', { uid: s.winner_uid }) %>
               <% } else { %>
                 <small class="muted">—</small>
               <% } %>

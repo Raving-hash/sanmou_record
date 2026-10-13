@@ -50,6 +50,7 @@
               <td class="num"><%= i + 1 %></td>
               <td>
                 <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+                <%- include('partials/eye', { uid: r.uid }) %>
                 <% if (i === 0) { %><span class="badge badge-first">暂列第一</span><% } %>
               </td>
               <td class="num"><strong><%= r.score %></strong></td>
@@ -89,6 +90,7 @@
       <% notSubmitted.forEach((p) => { %>
         <li>
           <a href="/u/<%= p.uid %>"><%= p.nickname %></a>
+          <%- include('partials/eye', { uid: p.uid }) %>
           <% if (p.lineup_uploaded) { %>
             <span class="badge badge-ok">已传阵容</span>
           <% } else { %>
@@ -135,6 +137,7 @@
                 <td class="num"><%= i + 1 %></td>
                 <td>
                   <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+                  <%- include('partials/eye', { uid: r.uid }) %>
                   <% if (i === 0) { %><span class="badge badge-first">胜者</span><% } %>
                 </td>
                 <td class="num"><strong><%= r.score %></strong></td>
@@ -166,6 +169,8 @@
 
     <%# 这一期已经结算了，打分也一起封盘：只显示均分/最高/最低，不出按钮 %>
     <%- include('partials/lineup-gallery', { rows: lineups, heading: `${last.name} 阵容`, canRate: false }) %>
+
+    <%- include('partials/eye-board', { rows: eye, heading: `${last.name} 慧眼等级变动` }) %>
 
     <p><a href="/seasons/<%= last.id %>">看这一期的完整详情</a> · <a href="/history">全部历史赛期</a></p>
   <% } %>
