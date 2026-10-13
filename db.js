@@ -77,7 +77,11 @@ db.getFinalRanking = (seasonId) => db.prepare(`
 
 // 本期阵容墙：所有传了阵容的人，**不限于交了积分的**。
 // 只看 ranking 是不够的 —— 新开一期时常常是「有人传了阵容但还没人交积分」，
-// 那样墙会是空的。排序列和 getRanking 完全一致，好让 rank 和排名表对得上。
+// 那样墙会是空的。
+// 展示顺序按**互评均分**从高到低（没人打分的垫底），不是按积分 ——
+// 积分排名是上面那张表的活儿，墙这边大家想看的是「哪套阵容公认最好」。
+// 但 rank 仍然按积分序算出来（见下），所以卡上的 #N 是**积分名次**，和排名表对得上，
+// 只是不再等于「墙上的第几张」。
 // lineup_note 也一起带出来：墙上除了第一张图还要展示阵容说明（模板里按行截断，
 // 卡片只有 200px 宽，1000 字的说明全摊开会把整行卡片顶得老高）。
 // viewerId 用来认出「我给他打了多少」，卡上要把这一档标出来（别人打的不用管）。
@@ -95,14 +99,22 @@ db.getLineupWall = (seasonId, viewerId) => {
   // 打分是「人数 × 阵容数」，量级很小，不值得为它写一堆 GROUP BY、再逐个回查打分人。
   const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId);
 
-  // 只有交了积分的才有名次；没交的排最后且 rank 为 null
+  // 只有交了积分的才有名次；没交的排最后且 rank 为 null。
+  // rank 按上面那条 SQL 的顺序（= 积分序）数出来，所以它始终是积分名次，
+  // 和下面重排展示顺序无关。
   let rank = 0;
-  return rows.map((r) => ({
+  const wall = rows.map((r) => ({
     ...r,
     rank: r.score === null ? null : ++rank,
     images: db.getLineupImages(r.id),
     rating: ratings.get(r.id) || db.EMPTY_RATING,
   }));
+
+  // 互评均分高的在前。没人打分的 avg 是 null，一律沉底。
+  // 均分相同的保持前面的积分序（sort 稳定），等于回落到「积分高者在前」，
+  // 不再另立一套同分规则。
+  const avgOf = (r) => (r.rating.avg === null ? -1 : r.rating.avg);
+  return wall.sort((a, b) => avgOf(b) - avgOf(a));
 };
 
 // 还没交积分的启用成员（R12：被禁用的不列出）

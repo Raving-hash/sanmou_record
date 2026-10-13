@@ -4,7 +4,8 @@
   想换展示哪张，去 /lineup 把第一张删掉，后面的会顶上来。
 
   入参：
-    rows     db.getLineupWall() 的结果。每行已带 rank（交了积分的才有，否则 null）、
+    rows     db.getLineupWall() 的结果。**已按互评均分从高到低排好**（没人打分的在最后），
+             每行已带 rank（积分名次，交了积分的才有，否则 null）、
              score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
              且只包含至少传了一张阵容的人，所以这里不用再筛。
     heading  小节标题，如「本期阵容」/「第32期 阵容」
@@ -14,7 +15,8 @@
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
   <p class="muted small">
-    每人只展示第一张阵容截图（按上传顺序，不是按文件名）和阵容说明，交了积分的排前面。
+    每人只展示第一张阵容截图（按上传顺序，不是按文件名）和阵容说明。
+    顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次，和上面的排名表一致。
     点图开原图；说明超过 5 行会被截断。
   </p>
   <div class="shot-grid">
