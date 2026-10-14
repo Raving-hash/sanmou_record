@@ -99,7 +99,12 @@ router.get('/', (req, res) => {
       title: '本期看板',
       season,
       last: null,
-      ranking: withImages(db.getRanking(season.id)),
+      // ranking **不传**：进行中的期首页整节不渲染「本期排名」（2026-10-14 用户的口径 ——
+      // 结算以前没有名次，那一节只会剩一句"还没有人交积分"）。名次去 /seasons/:id 看。
+      // 和 eye 一样：只被另一条分支用到的 local，就不在这条分支里查、也不传。
+      // 反过来说 —— 要在这条分支里再摆一张排名表，得先把 local 传回来：模板里引用一个
+      // 没传进来的名字是 ReferenceError（整页 500），而这条分支是开发站天天在走的那条，
+      // 一改就能撞出来。
       lineups: lineupWall(req, season, req.user.id),
       // 本期我的打分名额（只含有限额的档位）。阵容墙用它把投满的档位按钮灰掉、
       // 在标题下面列一行"还剩几个"。没在打分的人也会看到，但那是他自己的数，无妨。

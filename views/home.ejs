@@ -28,59 +28,14 @@
     </article>
   <% } %>
 
-  <h3>本期排名</h3>
-  <% if (!ranking.length) { %>
-    <p class="muted">还没有人交积分，快去抢第一名。</p>
-  <% } else { %>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th class="w-rank">名次</th>
-            <th>昵称</th>
-            <th class="w-score">积分</th>
-            <th class="w-time">提交时间</th>
-            <th>积分截图</th>
-            <th>阵容截图</th>
-          </tr>
-        </thead>
-        <tbody>
-          <% ranking.forEach((r, i) => { %>
-            <tr class="<%= i === 0 ? 'row-first' : '' %>">
-              <td class="num"><%= i + 1 %></td>
-              <td>
-                <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
-                <%- include('partials/eye', { uid: r.uid }) %>
-                <% if (i === 0) { %><span class="badge badge-first">暂列第一</span><% } %>
-              </td>
-              <td class="num"><strong><%= r.score %></strong></td>
-              <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
-              <td>
-                <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
-                  <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
-                </a>
-              </td>
-              <td>
-                <% if (r.images.length) { %>
-                  <div class="thumb-row">
-                    <%# data-shots 是这个人的全部阵容截图，给 public/lightbox.js 的弹层翻页用 %>
-                    <% const shots = r.images.map((i) => `/uploads/${i.filename}`).join(' '); %>
-                    <% r.images.forEach((img) => { %>
-                      <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
-                        <img class="thumb" src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
-                      </a>
-                    <% }) %>
-                  </div>
-                <% } else { %>
-                  <small class="muted">没传</small>
-                <% } %>
-              </td>
-            </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
-  <% } %>
+  <%# 进行中的期**不出「本期排名」那一节**（2026-10-14 用户的口径：结算以前没有名次）。
+      这一期 21 套阵容、0 条积分，那一节渲染出来只有一句"还没有人交积分" —— 一个空壳
+      标题占着首屏，看着像功能坏了。
+      两个连带后果：① 进行中的名次现在只能在 /seasons/:id 看（那儿照旧列交了积分的人），
+      routes/main.js 也就不再给这一条分支查 ranking 了（跟 eye 一样只有回退分支传）；
+      ② 下面那句 "还没交积分（N）" 名单**留着** —— 它说的是交没交，不是名次。
+      结算之后走下面「没有进行中的期」那个分支，排名表照旧出来（那时名次才定下来）。
+      ⚠️ 要在这儿把排名表加回来，先去 routes/main.js 把 ranking 传回来。 %>
 
   <%# canRate / quota / rateLockAt 都是 routes/main.js 查好的：能打分 = 进行中且还没过截止点
       （每期开期后第一个周四 12:00）；quota 是**我自己**还剩的名额（封盘后是空的）；
