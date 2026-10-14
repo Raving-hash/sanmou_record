@@ -106,9 +106,12 @@
               在公开页面上那是个"点了像坏了"的死链接，所以给他一段纯文字。 %>
           <%- include('./title', { uid: r.uid }) %><% if (locals.me) { %><a class="shot-who" href="/u/<%= r.uid %>"><%= r.nickname %></a><% } else { %><span class="shot-who"><%= r.nickname %></span><% } %>
           <%- include('./eye', { uid: r.uid }) %>
-          <% if (r.images.length > 1) { %>
-            <span class="badge badge-wait">共 <%= r.images.length %> 张</span>
-          <% } %>
+          <%# 这儿从前挂着一枚「共 N 张」的 .badge-wait，2026-10-14 按用户的要求去掉了：
+              卡上只摊开第一张，那枚章报的"另外几张"得**点开图**才看得见，挂在卡上就只是
+              一块占地方的字（还跟积分那一格挤在同一条顶栏上）。
+              多图这件事现在只在点开之后说：弹层说明里的「2/3」和那句「方向键 ← → 翻页」。
+              页面级那句"点图在页面里放大看（能翻这个人的其它截图）"照旧留着。
+              **data-shots 一个字没动** —— 去掉的只是这枚章，翻页本身还在（见 lightbox.js）。 %>
           <%# 积分这一格游客整个不渲染（showScore=false）：#N 名次留着，分数不给。 %>
           <% if (showScore) { %>
             <% if (r.rank) { %>
@@ -119,8 +122,9 @@
           <% } %>
         </figcaption>
         <%# data-shots 是给 public/lightbox.js 的：这个人的**全部**阵容截图，
-            弹层里能 ‹ › 翻。卡上只摊开第一张，所以「共 N 张」那句从前是个
-            看不到的死信息。href 仍然照旧 —— 没 JS 时它就是原图链接。 %>
+            弹层里能 ‹ › 翻。卡上只摊开第一张，"另外几张"全靠这一条属性 + 弹层，
+            卡面上不再有任何提示（顶栏那枚「共 N 张」2026-10-14 去掉了）。
+            href 仍然照旧 —— 没 JS 时它就是原图链接。 %>
         <%# 卡上显示的是**缩略图**（长边 640，约 25KB），原图 350KB 只在点开看大图时才下。
             这一格显示出来只有 200×160，喂原图等于让整面墙把带宽吃光（见 upload.js）。 %>
         <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener"
