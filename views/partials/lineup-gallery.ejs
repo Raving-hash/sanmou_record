@@ -112,9 +112,11 @@
         <%# data-shots 是给 public/lightbox.js 的：这个人的**全部**阵容截图，
             弹层里能 ‹ › 翻。卡上只摊开第一张，所以「共 N 张」那句从前是个
             看不到的死信息。href 仍然照旧 —— 没 JS 时它就是原图链接。 %>
+        <%# 卡上显示的是**缩略图**（长边 640，约 25KB），原图 350KB 只在点开看大图时才下。
+            这一格显示出来只有 200×160，喂原图等于让整面墙把带宽吃光（见 upload.js）。 %>
         <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener"
            data-shots="<%= r.images.map((i) => `/uploads/${i.filename}`).join(' ') %>">
-          <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图"
+          <img src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图"
                loading="lazy" decoding="async">
         </a>
         <% if (r.lineup_note) { %>

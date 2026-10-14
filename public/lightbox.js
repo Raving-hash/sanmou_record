@@ -36,6 +36,8 @@
   var imgEl, mainEl, hintEl, prevEl, nextEl;
   var group = [];                  // 当前这一组图的 href
   var at = 0;                      // 正在看第几张
+  var startAt = 0;                 // 点开时落在第几张（见 render 里的缩略图占位）
+  var thumbSrc = '';               // 点开的那一张在页面上显示着的缩略图（已进缓存）
   var capBase = '';                // 说明的固定部分（img 的 alt）
   var opener = null;               // 是哪个 <a> 打开的，关掉时把焦点还给它
 
@@ -109,7 +111,21 @@
   }
 
   function render() {
-    imgEl.src = group[at];
+    var full = group[at];
+    // 页面上那一格放的是**缩略图**（约 25KB，早就在本地了），点开要看的却是原图
+    // （约 350KB，走隧道两三秒）。这两三秒里弹层不该是一片空白：先把已经在本地的缩略图
+    // 顶上去，原图下完再换。只有"点开的这一张"手边有缩略图，‹ › 翻到的其它张照旧直接加载。
+    var ph = at === startAt ? thumbSrc : '';
+    imgEl.src = ph || full;
+    if (ph) {
+      var pre = new Image();
+      pre.onload = function () {
+        // 等原图这几秒里人可能已经翻走、或者关掉又点了别的 —— 只换还在看的那一张
+        if (box.classList.contains('is-on') && group[at] === full) imgEl.src = full;
+      };
+      pre.onerror = function () { imgEl.src = full; };   // 原图真没了，交给下面 imgEl 的 error 说话
+      pre.src = full;
+    }
     // 说明 = alt（模板里已经带了昵称）+ 组内序号。用 textContent 拼，绝不用 innerHTML：
     // alt 里是用户自己起的昵称，拼进 HTML 就不是文本了。
     mainEl.textContent = capBase + (group.length > 1 ? `（${at + 1}/${group.length}）` : '');
@@ -126,6 +142,8 @@
     at = Math.max(0, group.indexOf(a.getAttribute('href')));
     var im = a.querySelector('img');
     capBase = (im && im.alt) || '';
+    startAt = at;                                             // 见 render()：这一张手边有缩略图
+    thumbSrc = (im && im.getAttribute('src')) || '';
     opener = a;
 
     box.classList.toggle('is-solo', group.length < 2);

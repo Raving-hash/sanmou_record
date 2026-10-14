@@ -13,7 +13,7 @@
     <% images.forEach((img) => { %>
       <figure>
         <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
-          <img src="/uploads/<%= img.filename %>" alt="阵容截图" loading="lazy">
+          <img src="<%= thumbUrl(img.filename) %>" alt="阵容截图" loading="lazy">
         </a>
         <form method="post" action="/lineup/<%= img.id %>/delete">
           <button type="submit" class="outline secondary btn-sm">删除</button>

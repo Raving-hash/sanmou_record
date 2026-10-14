@@ -47,7 +47,7 @@
         <div class="entry-shots">
           <figure>
             <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
-              <img src="/uploads/<%= r.score_image %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
+              <img src="<%= thumbUrl(r.score_image) %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
             </a>
             <figcaption>积分截图</figcaption>
           </figure>
@@ -56,7 +56,7 @@
           <% r.images.forEach((img) => { %>
             <figure>
               <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
-                <img src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+                <img src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
               </a>
               <figcaption>
                 阵容截图

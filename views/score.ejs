@@ -13,7 +13,7 @@
       <small class="muted">（提交于 <%= fmt(entry.score_submitted_at) %>）</small></p>
     <p>
       <a href="/uploads/<%= entry.score_image %>" target="_blank" rel="noopener">
-        <img class="thumb-lg" src="/uploads/<%= entry.score_image %>" alt="当前积分截图">
+        <img class="thumb-lg" src="<%= thumbUrl(entry.score_image) %>" alt="当前积分截图">
       </a>
     </p>
     <p class="muted small">改分或换截图会刷新提交时间，同分时排名会靠后。</p>

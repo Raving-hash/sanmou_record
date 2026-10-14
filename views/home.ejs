@@ -57,7 +57,7 @@
               <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
               <td>
                 <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
-                  <img class="thumb" src="/uploads/<%= r.score_image %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
+                  <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="<%= r.nickname %> 的积分截图" loading="lazy">
                 </a>
               </td>
               <td>
@@ -67,7 +67,7 @@
                     <% const shots = r.images.map((i) => `/uploads/${i.filename}`).join(' '); %>
                     <% r.images.forEach((img) => { %>
                       <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
-                        <img class="thumb" src="/uploads/<%= img.filename %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+                        <img class="thumb" src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
                       </a>
                     <% }) %>
                   </div>
@@ -149,7 +149,7 @@
                 <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
                 <td>
                   <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
-                    <img class="thumb" src="/uploads/<%= r.score_image %>" alt="积分截图" loading="lazy">
+                    <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="积分截图" loading="lazy">
                   </a>
                 </td>
                 <td>
@@ -159,7 +159,7 @@
                       <% const shots = r.images.map((i) => `/uploads/${i.filename}`).join(' '); %>
                       <% r.images.forEach((img) => { %>
                         <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
-                          <img class="thumb" src="/uploads/<%= img.filename %>" alt="阵容截图" loading="lazy">
+                          <img class="thumb" src="<%= thumbUrl(img.filename) %>" alt="阵容截图" loading="lazy">
                         </a>
                       <% }) %>
                     </div>
