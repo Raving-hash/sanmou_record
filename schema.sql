@@ -95,9 +95,33 @@ CREATE TABLE IF NOT EXISTS eye_adjustments (
   UNIQUE (season_id, user_id)          -- 顺便充当按赛期查的索引，不再另建
 );
 
+-- 阵容卡下面的短留言（每期每套阵容都能留，每条最多 20 字）。
+-- 和 ratings 是**两张表、两件事**：打分是"评价这套阵容"，一票一名额、参与慧眼等级结算；
+-- 评论只是围观的人留一句话，不占名额、不进任何名次、也不跟结算一起冻结。
+-- 字数上限由路由管，**故意不写 CHECK** —— 和 ratings.value 同一性质：上限是产品参数、
+-- 多半还会调，而 SQLite 改 CHECK 要整表重建（上面 entries 的 R4 CHECK 守的是不变量，
+-- 三个字段同生共死，性质不同）。
+-- 跟**阵容卡**走（entry_id），所以删赛期会把评论连卡一起带走，和阵容图同一条路径。
+CREATE TABLE IF NOT EXISTS comments (
+  id         INTEGER PRIMARY KEY,
+  entry_id   INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  -- 成员发的 → users.id；游客发的 → NULL。**故意可空**，是全库唯一一个可空的成员外键：
+  -- 游客在库里没有身份（没有账号，也不给他填名字，一律署名「游客」）。
+  -- 删除权限也靠它认人：NULL 就只认管理员（见 routes/public.js）。
+  user_id    INTEGER REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  -- 故意不存 IP：全库到现在没有第二个 IP 字段，不想为了留言新引入一份隐私数据。
+  -- 防刷走内存限流（limiter.js 的游客那一段），不靠事后照着 IP 追查。
+);
+
 -- 常用索引
 CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
 CREATE INDEX IF NOT EXISTS idx_entries_user   ON entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_entry   ON lineup_images(entry_id);
 CREATE INDEX IF NOT EXISTS idx_ratings_entry  ON ratings(entry_id);
 CREATE INDEX IF NOT EXISTS idx_ratings_rater  ON ratings(rater_id);
+CREATE INDEX IF NOT EXISTS idx_comments_entry ON comments(entry_id);
+-- 游客取 /uploads 下的图时**逐文件查库**（app.js 的 canSeeUpload）：一期阵容墙一页
+-- 要问几十次，所以给这个平时只按 entry_id 用的列补一条索引。
+CREATE INDEX IF NOT EXISTS idx_lineup_filename ON lineup_images(filename);

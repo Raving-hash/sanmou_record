@@ -1310,7 +1310,133 @@ footer.container {
 }
 
 /* --------------------------------------------------------------------------
-   15. 图片弹层（点图看大图）
+   15. 阵容卡的评论（原生 <details> 折叠，见 views/partials/comments.ejs）
+   -------------------------------------------------------------------------- */
+/* 卡最下面的留言区。**默认折叠**：不点开时整面墙和从前一样整齐，点开才铺开。
+   ⚠️ 三处必须这么写，否则会被 pico.min.css **静默压过**（都是实测出来的）：
+     1) 选择器一律带 `details.` 前缀。Pico 的 `details summary:not([role])` 特异性是
+        (0,1,2)，只写 `.cmt > summary`（0,1,1）会输；`details.cmt > summary`（0,1,2）
+        才打平，再靠 style.css 在 pico 之后加载取胜。
+     2) Pico 的 `details{display:block;margin-bottom:var(--pico-spacing)}` 要顶掉 ——
+        不顶的话每张卡底下白多一截（卡是 overflow:hidden，看起来就是一条空边）。
+     3) 展开时 Pico 又给 summary 补了一次 margin-bottom，同样要顶掉。
+   颜色**故意不自己写**：style.css 的 Pico 令牌区已经把 --pico-accordion-close/open-summary-color
+   都映射成 --yw-text 了，Pico 自己的配色就是对的；而展开态那条
+   `details[open]>summary:not([role]):not(:focus)` 是 (0,3,2)，自己写多半输。
+   右侧那个 ▾ 箭头也不用自己画：Pico 的 `details summary::after` 已经有一个
+   （和 /admin 里那些折叠是同款），少一处跨浏览器的坑。 */
+details.cmt {
+  margin: 0;
+}
+details.cmt > summary {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.72rem;          /* 和 .rate-who / .rate-k 同一档，不新造第四套小标签 */
+  line-height: 1.4;
+  white-space: nowrap;         /* 「💬 3 条评论」不许折成两行 */
+  overflow: hidden;
+}
+details.cmt[open] > summary {
+  margin-bottom: 0;
+}
+.cmt-body {
+  padding: 0 0.5rem 0.55rem;
+}
+/* 留言攒多了不能把整行卡片一起顶高（grid 会把同一行的卡拉成等高），
+   超过 12rem 就在卡片内部滚。 */
+.cmt-list {
+  max-height: 12rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;   /* 滚到底别把整页带着一起滚 */
+  margin: 0 0 0.4rem;
+  padding: 0;
+  list-style: none;
+}
+.cmt-item {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.cmt-item:last-child {
+  margin-bottom: 0;
+}
+.cmt-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  /* 署名 + 时间 + 删按钮挤在 182px（手机 132px）里，装不下就整块换行，
+     不能让它横向溢出 —— 卡是 overflow:hidden，溢出的部分直接看不见。 */
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--yw-text-mute);
+}
+.cmt-who {
+  font-weight: 600;
+  color: var(--yw-text-dim);
+}
+.cmt-when {
+  font-variant-numeric: tabular-nums;
+}
+/* 删按钮（只有管理员和本人看得到）。Pico 给 button[type=submit] 默认 width:100%
+   —— 和 .rate-tier 同一个坑，这里必须 width:auto，否则它独占一整行。 */
+.cmt-del {
+  flex: 0 0 auto;
+  margin: 0 0 0 auto;
+}
+.cmt-del button {
+  width: auto;
+  margin: 0;
+  padding: 0 0.2rem;
+  font-size: 0.66rem;
+  line-height: 1.5;
+  color: var(--yw-text-mute);
+  background: none;
+  border: none;
+}
+.cmt-del button:hover {
+  color: var(--yw-cinnabar-lt);
+}
+/* 留言正文。长中文 / 长英文 / 长 URL 都不许撑破 182px（手机 132px）的卡，
+   先例是 .shot-note。pre-wrap 让折过的连续空白照原样显示。 */
+.cmt-text {
+  margin: 0.1rem 0 0;
+  color: var(--yw-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;      /* 老 Safari 兜底 */
+}
+.cmt-empty {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  color: var(--yw-text-mute);
+}
+.cmt-form {
+  margin: 0;
+}
+/* 输入框：宽度显式写死，并补 min-width:0（窄卡里 flex/grid 子项溢出的经典来源）。
+   下边距压到 0.3rem —— Pico 默认给输入框一整个 --pico-spacing 的下边距。 */
+.cmt-form input {
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 0.3rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.cmt-form button {
+  width: 100%;
+  margin: 0;
+  padding: 0.25rem 0;
+  font-size: 0.7rem;
+}
+.cmt-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.66rem;
+  color: var(--yw-text-mute);
+}
+
+/* --------------------------------------------------------------------------
+   16. 图片弹层（点图看大图）
    -------------------------------------------------------------------------- */
 /* 点阵容图 / 积分图不再跳新标签页，改成盖一层（public/lightbox.js）。
    这一层和里面的零件**全部由那个脚本现建**，模板里没有它们的 DOM ——
@@ -1427,7 +1553,7 @@ html.lb-lock {
 }
 
 /* --------------------------------------------------------------------------
-   16. 窄屏
+   17. 窄屏
    -------------------------------------------------------------------------- */
 @media (max-width: 640px) {
   h2 {
@@ -1482,6 +1608,17 @@ html.lb-lock {
   }
   .rate-form button.rate-tier {
     font-size: 0.66rem;
+  }
+  /* 评论：同样是 150px 的卡，标题行和输入框都再收一档 */
+  details.cmt > summary {
+    padding: 0.35rem 0.4rem;
+    font-size: 0.68rem;
+  }
+  .cmt-body {
+    padding: 0 0.4rem 0.45rem;
+  }
+  .cmt-form input {
+    font-size: 0.7rem;
   }
   .stat-num {
     font-size: 1.25rem;

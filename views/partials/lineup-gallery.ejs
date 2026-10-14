@@ -24,9 +24,19 @@
                 页面上就两处用它：标题下面列一行"还剩几个"，以及把投满的那档按钮灰掉。
                 **这是"我"的名额，不是被评分人的**，所以只在墙上说一次，
                 不塞进每张卡里重复十几遍。
+    showScore   卡顶栏要不要印积分（那个「4800 分」/「未交积分」）。**默认 true**，
+                只有给游客看的那一版（views/wall.ejs）传 false —— 用户定的口径是
+                游客看不到任何积分，连卡上这一格也不给（#N 名次还留着）。
+    backTo      发完/删完评论之后回哪一页：'/'（首页）或 '/wall'（游客那页）。
+                成员在首页的墙上看、游客在 /wall 上看，回跳不能把人甩到另一个页面去。
+    **上面这两个都只能用 locals. 读**（和 quota / rateLockAt 同一个道理）：
+    home.ejs 的两处调用都不传它们，而 EJS 里引用一个没传进来的名字是 ReferenceError，
+    整页 500 —— 而且只有"没有进行中的期"那条分支才会撞上，最不容易发现。
 
   另外卡上昵称前面那两枚**称号章**（演武王 / 慧眼王）不在入参里：它由 db.getTitles()
   现算、app.js 塞进 locals，模板用 titleOf(uid) 取，见 views/partials/title.ejs。
+  卡下面的**评论**（views/partials/comments.ejs）也不在入参里：它跟着 rows 走 ——
+  db.getLineupWall 已经把每行的 comments 挂好了。
 %>
 <%
   // value → 还剩几个。查不到的档位（50 / 200）就是不限，按钮照常出。
@@ -36,16 +46,22 @@
   const quota = locals.quota || [];
   const quotaLeft = new Map(quota.map((q) => [q.value, q.left]));
   const rateLockAt = locals.rateLockAt ?? null;
+  // 同上，首页那两处调用不传它们。showScore 要写 `!== false`：写成
+  // `locals.showScore || true` 恒为 true，等于没兜 —— 游客照样看到分数。
+  const showScore = locals.showScore !== false;
+  const backTo = locals.backTo || '/';
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
   <p class="muted small">
     每人只展示第一张阵容截图（按上传顺序，不是按文件名）和阵容说明。
-    顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次，和上面的排名表一致。
+    顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次<% if (showScore) { %>，和上面的排名表一致<% } %>。
+    <% if (!showScore) { %>没登录看不到积分；<% } %>
     <% if (rows.some((r) => r.ace)) { %>
       <strong>上一期</strong>积分第一 / 第二 的阵容卡分别描亮蓝 / 亮银边。
     <% } %>
     点图在页面里放大看（能翻这个人的其它截图，见 public/lightbox.js）；说明超过 5 行会被截断。
+    卡下面点了 💬 就能留一句话（20 字以内）。
   </p>
   <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
   <% if (canRate && quotaLeft.size) { %>
@@ -77,15 +93,20 @@
           <%# 称号章（演武王 / 慧眼王）紧贴昵称**前面**，和 eye.ejs 一样是"跟着卡走"的：
               这人这一期没传阵容、墙上就没他的卡，称号也就不出现。
               include 写成 './title'、且和下一行的 <a> 之间不留空白，和 eye 那行同一个道理 %>
-          <%- include('./title', { uid: r.uid }) %><a class="shot-who" href="/u/<%= r.uid %>"><%= r.nickname %></a>
+          <%# 昵称只在登录之后才是链接：游客点 /u/<uid> 只会被弹到登录页，
+              在公开页面上那是个"点了像坏了"的死链接，所以给他一段纯文字。 %>
+          <%- include('./title', { uid: r.uid }) %><% if (locals.me) { %><a class="shot-who" href="/u/<%= r.uid %>"><%= r.nickname %></a><% } else { %><span class="shot-who"><%= r.nickname %></span><% } %>
           <%- include('./eye', { uid: r.uid }) %>
           <% if (r.images.length > 1) { %>
             <span class="badge badge-wait">共 <%= r.images.length %> 张</span>
           <% } %>
-          <% if (r.rank) { %>
-            <span class="shot-score"><%= r.score %> 分</span>
-          <% } else { %>
-            <span class="shot-score is-pending">未交积分</span>
+          <%# 积分这一格游客整个不渲染（showScore=false）：#N 名次留着，分数不给。 %>
+          <% if (showScore) { %>
+            <% if (r.rank) { %>
+              <span class="shot-score"><%= r.score %> 分</span>
+            <% } else { %>
+              <span class="shot-score is-pending">未交积分</span>
+            <% } %>
           <% } %>
         </figcaption>
         <%# data-shots 是给 public/lightbox.js 的：这个人的**全部**阵容截图，
@@ -156,6 +177,10 @@
             <p class="rate-note">打分已截止，改不了</p>
           <% } %>
         </div>
+
+        <%# 卡最下面的评论区（原生 <details> 折叠，见 partials/comments.ejs）。
+            数据是 db.getLineupWall 挂在这一行上的 r.comments，不用在这儿另查。 %>
+        <%- include('./comments', { entryId: r.id, list: r.comments, backTo }) %>
       </figure>
     <% }) %>
   </div>

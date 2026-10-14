@@ -1,0 +1,57 @@
+<%#
+  公开版首页 —— 游客（没登录的人）看到的那一页。**只有阵容墙**。
+  排名表、积分、积分截图、「还没交积分」名单、上传入口、打分按钮统统没有，
+  那是用户定的游客可见范围（「只能参观公布的阵容」）。
+  数据由 routes/public.js 查好传来：
+    season   进行中的期（有就是本期）
+    last     没有进行中的期时，最近一个**已结算**的期（镜像 home.ejs 的回退分支）
+    lineups  上面那一期的阵容墙（db.getLineupWall 的结果，已按互评均分排好）
+  season / last 都可能是 null（一期都没办过）。
+
+  阵容墙那段和首页共用 partials/lineup-gallery.ejs，所以卡片本身的样子、称号章、
+  上期名次描边、卡下的评论都跟着一起走，不用在这儿重写一遍。三处不一样：
+    canRate: false    打分按钮和名额行都不出（游客打分要登录）
+    showScore: false  卡顶栏不印积分，也不出「未交积分」—— 积分是登录后才看得到的
+    backTo: '/wall'   发完评论落回这一页的那张卡，而不是首页
+%>
+<%- include('partials/header') %>
+
+<% if (season || last) { const s = season || last; %>
+
+  <hgroup class="page-head">
+    <h2><%= s.name %>
+      <% if (season) { %><span class="badge badge-open">进行中</span>
+      <% } else { %><span class="badge badge-settled">已结算</span><% } %>
+    </h2>
+    <p class="muted">
+      阵容墙 · 这里只有阵容<% if (locals.me) { %>（完整看板在<a href="/">首页</a>）<% } %>
+    </p>
+  </hgroup>
+
+  <%- include('partials/lineup-gallery', {
+        rows: lineups,
+        heading: season ? '本期阵容' : `${s.name} 阵容`,
+        canRate: false,
+        showScore: false,
+        backTo: '/wall',
+      }) %>
+
+  <%# 阵容墙自己在 rows 为空时整段不渲染（连标题也不出），所以空态在这儿说 %>
+  <% if (!lineups.length) { %>
+    <p class="muted"><%= season ? '本期还没有人传阵容。' : '这一期没有人传阵容。' %></p>
+  <% } %>
+
+  <% if (!locals.me) { %>
+    <p><small class="muted">积分、名次、历史战绩和打分要<a href="/login">登录</a>之后才能看。</small></p>
+  <% } %>
+
+<% } else { %>
+
+  <hgroup class="page-head">
+    <h2>阵容墙</h2>
+    <p class="muted">还没有办过任何一期</p>
+  </hgroup>
+
+<% } %>
+
+<%- include('partials/footer') %>

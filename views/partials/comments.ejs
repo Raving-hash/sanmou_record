@@ -1,0 +1,64 @@
+<%#
+  阵容卡下面的留言区。原生 <details>，**默认折叠** —— 不点开时整面墙和从前一样整齐
+  （用 <details> 而不是自己写 JS，是因为没 JS 也要能用：手点一下照常展开）。
+
+  入参：
+    entryId  这张卡的 entry id。发表用 /entries/<id>/comments，回跳用 #e<id>
+    list     db.getLineupWall 给这张卡挂上的 comments（db.getWallComments 的结果）
+    backTo   '#' 之前那一截，'/' 或 '/wall'。写进 hidden 交给服务端（白名单认，
+             不拿它拼任意地址）—— 成员在首页的墙上看、游客在 /wall 上看，
+             发完都要落回**刚才那张卡**，不能把人甩到另一个页面
+  me / fmtShort / eyeLevel 这些从 locals 继承（include 传的数据是并进当前 locals 的，
+  不是替换掉 —— eye.ejs 一直是这么用的）。
+
+  **署名**：成员显示昵称 + 慧眼圆框，登录了才给个人页链接（没登录点过去只会跳登录页）；
+  游客一律「游客」，没有圆框也没有链接 —— 他在库里没有身份。
+  **正文必须用转义输出**（等号那个写法，不是减号那个）：这是全站唯一一处由
+  **没有账号的人**直接写进来的文本，用不转义的那个就是存储型 XSS。
+  ⚠️ 上面这几行注释里**不能出现 EJS 标记的字面写法**（尖括号加百分号那种，哪怕在注释里）：
+  EJS 是先按标记把整份文本切碎再解析的，注释里混进一个起头标记就会把这条注释截断，
+  报出来的是「Could not find matching close tag」，而且整页 500（2026-10-14 实测踩过）。
+%>
+<details class="cmt">
+  <summary>💬 <% if (list.length) { %><%= list.length %> 条评论<% } else { %>还没有人评论<% } %></summary>
+  <div class="cmt-body">
+    <% if (list.length) { %>
+      <ul class="cmt-list">
+        <% list.forEach((c) => { %>
+          <li class="cmt-item">
+            <%# 这一行是 <div> 不是 <p>：里面装着「删」那个 <form>，而 HTML 不允许 <p> 里放表单 ——
+                浏览器会自动闭合 <p>，表单就被挪到这一行**外面**去了：CSS 里那些 flex 规则
+                一条都不生效，删按钮掉到下一行左对齐（2026-10-14 实测踩过）。
+                浏览器断言里有一条专门盯这个结构。 %>
+            <div class="cmt-meta">
+              <% if (c.is_guest) { %>
+                <span class="cmt-who">游客</span>
+              <% } else { %>
+                <span class="cmt-who"><% if (locals.me) { %><a href="/u/<%= c.uid %>"><%= c.nickname %></a><% } else { %><%= c.nickname %><% } %></span><%- include('./eye', { uid: c.uid }) %>
+              <% } %>
+              <span class="cmt-when"><%= fmtShort(c.created_at) %></span>
+              <%# 删按钮只有管理员和本人（成员）看得到。真正的判据在服务端
+                  （routes/public.js），这里只是不渲染一个注定 403 的按钮。 %>
+              <% if (locals.me && (locals.me.is_admin || locals.me.id === c.user_id)) { %>
+                <form method="post" action="/comments/<%= c.id %>/delete" class="cmt-del">
+                  <input type="hidden" name="back" value="<%= backTo === '/wall' ? 'wall' : 'home' %>">
+                  <button type="submit" title="删掉这条评论" aria-label="删掉这条评论">删</button>
+                </form>
+              <% } %>
+            </div>
+            <p class="cmt-text"><%= c.body %></p>
+          </li>
+        <% }) %>
+      </ul>
+    <% } else { %>
+      <p class="cmt-empty">还没有人评论。</p>
+    <% } %>
+    <form method="post" action="/entries/<%= entryId %>/comments" class="cmt-form">
+      <input type="hidden" name="back" value="<%= backTo === '/wall' ? 'wall' : 'home' %>">
+      <input name="text" maxlength="20" required autocomplete="off"
+             placeholder="说一句（20 字内）" aria-label="评论内容，20 字以内">
+      <button type="submit">发表</button>
+    </form>
+    <p class="cmt-hint">以「<%= locals.me ? me.nickname : '游客' %>」署名 · 最多 20 字</p>
+  </div>
+</details>

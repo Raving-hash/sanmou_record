@@ -133,6 +133,9 @@ db.getLineupWall = (seasonId, viewerId) => {
   // 一期的打分一次全查回来，在 JS 里按 entry_id 归并（见 summarizeRatings）。
   // 打分是「人数 × 阵容数」，量级很小，不值得为它写一堆 GROUP BY、再逐个回查打分人。
   const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId);
+  // 评论同理，一次查回来挂到卡上。挂在这一层（而不是让 / 和 /wall 各自去查）
+  // 是为了两侧永远一致：首页的墙和游客的墙引的是同一份 rows。
+  const comments = db.getWallComments(seasonId);
 
   // 只有交了积分的才有名次；没交的排最后且 rank 为 null。
   // rank 按上面那条 SQL 的顺序（= 积分序）数出来，所以它始终是积分名次，
@@ -147,6 +150,7 @@ db.getLineupWall = (seasonId, viewerId) => {
     ace: aces.get(r.user_id) || null,
     images: db.getLineupImages(r.id),
     rating: ratings.get(r.id) || db.EMPTY_RATING,
+    comments: comments.get(r.id) || [],
   }));
 
   // 互评均分高的在前。没人打分的 avg 是 null，一律沉底。
@@ -357,6 +361,59 @@ db.getMyRatings = (userPk) => db.prepare(`
   WHERE r.rater_id = ?
   ORDER BY s.id DESC, r.created_at DESC, r.id DESC
 `).all(userPk);
+
+// ---------- 评论（阵容卡下面的短留言，每条 ≤20 字） ----------
+// 一期一次全查回来、在 JS 里按 entry_id 归并，和打分那边（getSeasonRatings →
+// summarizeRatings）是同一个套路：留言是「人数 × 阵容数」，量级很小，
+// 不值得为它写一堆 GROUP BY、再逐个回查留言人。
+// **LEFT JOIN users**：游客那一行压根没有 user，JOIN 出来是 NULL ——
+// 库里存的是事实（没有这个人），显示成「游客」是模板的事，不在这层编字符串。
+// 返回 Map<entry_id, [{ id, body, created_at, uid, nickname, is_guest }]>，老留言在前。
+db.getWallComments = (seasonId) => {
+  const rows = db.prepare(`
+    SELECT c.id, c.entry_id, c.body, c.created_at, c.user_id,
+           u.user_id AS uid, u.nickname
+    FROM comments c
+    JOIN entries e ON e.id = c.entry_id
+    LEFT JOIN users u ON u.id = c.user_id
+    WHERE e.season_id = ?
+    ORDER BY c.created_at ASC, c.id ASC
+  `).all(seasonId);
+
+  const byEntry = new Map();
+  for (const r of rows) {
+    if (!byEntry.has(r.entry_id)) byEntry.set(r.entry_id, []);
+    byEntry.get(r.entry_id).push({
+      id: r.id,
+      body: r.body,
+      created_at: r.created_at,
+      uid: r.uid,
+      nickname: r.nickname,
+      // user_id 也带上：模板要靠它判「这条是不是我发的」（能不能删）。
+      // 别拿昵称去比 —— 昵称是成员自己填的，可以重名。
+      user_id: r.user_id,
+      // 「这条是不是游客发的」的判据只放这一处，别让每个模板各自去比 null
+      is_guest: r.user_id === null,
+    });
+  }
+  return byEntry;
+};
+
+// 发表。userId 传 null 就是游客（发布的人没登录）。20 字的上限在路由里管，这儿不重复校验。
+db.addComment = (entryId, userId, body) => db.prepare(
+  `INSERT INTO comments (entry_id, user_id, body) VALUES (?, ?, ?)`
+).run(entryId, userId ?? null, body).lastInsertRowid;
+
+db.getComment = (id) => db.prepare(`SELECT * FROM comments WHERE id=?`).get(id);
+
+db.deleteComment = (id) => db.prepare(`DELETE FROM comments WHERE id=?`).run(id).changes;
+
+// 这个文件名是不是一张阵容图 —— 游客取 /uploads 下的图时逐个按它放行（app.js 的 canSeeUpload）。
+// 「哪些文件算阵容图」是数据层的事，所以判定放这儿，不写在 app.js 里。
+// 走 idx_lineup_filename。
+db.isLineupImage = (filename) => !!db.prepare(
+  `SELECT 1 FROM lineup_images WHERE filename=?`
+).get(filename);
 
 // ---------- 统计（只算已结算的期，有积分才算参赛） ----------
 const STATS_SQL = `

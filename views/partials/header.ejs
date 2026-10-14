@@ -37,6 +37,7 @@
         </form>
       </li>
     <% } else { %>
+      <li><a href="/wall" class="<%= path === '/wall' ? 'active' : '' %>">阵容墙</a></li>
       <li><a href="/login" class="<%= path === '/login' ? 'active' : '' %>">登录</a></li>
       <li><a href="/register" class="<%= path === '/register' ? 'active' : '' %>">注册</a></li>
     <% } %>

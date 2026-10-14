@@ -5,5 +5,9 @@
 <%# 点图在页面里放大（public/lightbox.js）。放在全站页脚而不是逐个页面引：
     首页、赛期详情、/lineup、/score 都有图链接，模板里靠 href 前缀认，挂一处就够。 %>
 <script src="/public/lightbox.js?v=<%= assetVer.lightbox %>"></script>
+<%# 评论区的自动展开（public/comments.js）：发完评论会跳回 /#e<id>，那张卡的评论区得自己打开，
+    否则看着就像"评论没发出去"。和 lightbox 一样挂页脚 —— 它直接找元素、不等 DOMContentLoaded，
+    所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。 %>
+<script src="/public/comments.js?v=<%= assetVer.comments %>"></script>
 </body>
 </html>

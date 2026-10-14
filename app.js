@@ -33,12 +33,27 @@ app.use((req, res, next) => {
     style: assetVer('style.css'),
     upload: assetVer('upload.js'),
     lightbox: assetVer('lightbox.js'),
+    comments: assetVer('comments.js'),
   };
   // 时间格式化。入参是 ISO 字符串或毫秒时间戳（Date 两种都吃）——
   // 打分截止那种现算出来的时间就是个毫秒数，模板里不用再包一层 new Date()。
   res.locals.fmt = (t) => t
     ? new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
     : '';
+  // 短的日期时间，只有阵容卡下面那条评论在用。fmt 出来是「2026/10/14 14:56」，
+  // 塞进 200px 宽的卡里（手机 150px）会把「署名 + 时间 + 删按钮」那一行挤到折行，
+  // 所以**当天的只写时分**（「14:56」，和聊天窗口一个习惯），不是当天才带上月日。
+  res.locals.fmtShort = (t) => {
+    if (!t) return '';
+    const d = new Date(t);
+    const day = (x) => x.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    const hm = d.toLocaleTimeString('zh-CN', {
+      timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    if (day(d) === day(new Date())) return hm;
+    const md = d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit' });
+    return `${md} ${hm}`;
+  };
   // 还剩多久（打分截止的倒计时）。**精度到小时**：没人关心还剩多少分钟，
   // 但"还剩 3 小时"和"还剩 3 天"完全是两种心情，所以超过一天时把天数一起说出来。
   // 传进来的可能是负数（页面渲染的那一瞬间刚过点），统一说「已截止」。
@@ -103,9 +118,39 @@ const requireLogin = (req, res, next) => (req.user ? next() : res.redirect('/log
 const requireAdmin = (req, res, next) => (req.user?.is_admin ? next() : res.status(403).send('无权限'));
 
 app.use('/public', express.static(path.join(__dirname, 'public')));
-app.use('/uploads', requireLogin, express.static(UPLOAD_DIR));   // 登录后才能看图
+
+// /uploads 下的图分两类，而且**物理同层**：阵容图和积分截图都是 uploads/<uuid>.jpg，
+// URL 空间里分不出谁是谁（那个目录下只有一个点开头的 .incoming，static 不发它）。
+// 所以「游客能看阵容图、不能看积分截图」只能逐文件查库：名字在 lineup_images 里就放行，
+// 其余（entries.score_image、没人引用的孤儿文件）照旧只有登录能取。
+// 用 404 而不是 403 —— 403 等于告诉对方"这里确实有一张积分截图"。
+// **不缓存这份白名单**（不做 Set）：有人刚传完阵容就该立刻能看到，一次带索引的微查询
+// 在这个量级上直接忽略。
+// 注意 req.path 在这个挂载点里已经被 Express 切掉了 /uploads 前缀（只剩一个前导斜杠），
+// 完整路径在 req.originalUrl；req.path 也不 decode，所以坏编码要自己兜。
+const canSeeUpload = (req, res, next) => {
+  if (req.user) return next();                     // 登录了照旧全放行
+  let name = req.path.replace(/^\//, '');
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    return res.status(404).send('没有这张图');      // 坏的百分号编码（比如 /uploads/%）就是个 404
+  }
+  if (!name || /[/\\\0]/.test(name)) return res.status(404).send('没有这张图');
+  if (!db.isLineupImage(name)) return res.status(404).send('没有这张图');
+  next();
+};
+// 末尾那个 404 兜底不能省：白名单放行的名字、磁盘上却没有这张图（换图/删图之后留下的
+// 老链接）时，express.static 会 next() 出去，一路穿到后面的 requireLogin ——
+// 游客于是拿到一个"跳登录页"，而不是一张图的 404。登录的人原本就是 404，两边对齐。
+app.use('/uploads', canSeeUpload, express.static(UPLOAD_DIR), (req, res) => {
+  res.status(404).send('没有这张图');
+});
 
 app.use(require('./routes/auth'));
+// 游客可见的那一页 + 评论。**必须挂在 main 前面**：GET / 要先落到它手里，
+// 未登录的改道去 /wall、登录了的 next() 落回 main（见 routes/public.js 的头注释）。
+app.use(require('./routes/public'));
 app.use('/admin', requireLogin, requireAdmin, require('./routes/admin'));
 app.use(requireLogin, require('./routes/main'));
 
