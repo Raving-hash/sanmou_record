@@ -120,7 +120,15 @@ db.getPrevAces = (seasonId) => {
 // 卡片只有 200px 宽，1000 字的说明全摊开会把整行卡片顶得老高）。
 // viewerId 用来认出「我给他打了多少」，卡上要把这一档标出来（别人打的不用管）。
 // ace 是「上一期的积分第一/第二」（1 / 2），模板据此给卡描亮蓝/亮银边；其余人是 null。
-db.getLineupWall = (seasonId, viewerId) => {
+//
+// freezeIds 是**可选**的第三参：一串 entry id，来自"上一次渲染这面墙时的顺序"。
+// 只有一处会传它 —— 首页那条 GET / 在"刚从打分 POST 跳回来"的那一次（见 routes/main.js）。
+// 用户 2026-10-14 的口径是「打分以后不动，刷新网页再重排」：投一票会改均分、均分决定顺序，
+// 整页重刷回来的那份顺序要是变了，人正在看的卡片当场跳走、还得重新找。所以那一跳照原样排，
+// 用户自己刷新时（session 里的标记已经用掉）自然就按最新的均分重排了。
+// ⚠️ 默认排序（下面那条）**一个字都不能改**：`/wall`（routes/public.js）和结算战报
+// （routes/main.js 的 buildReport）都读这条默认顺序，冻结只是首页那一次的特例。
+db.getLineupWall = (seasonId, viewerId, freezeIds) => {
   const rows = db.prepare(`
     SELECT e.id, e.user_id, e.score, e.score_submitted_at, e.lineup_note, u.user_id AS uid, u.nickname
     FROM entries e JOIN users u ON u.id = e.user_id
@@ -157,7 +165,19 @@ db.getLineupWall = (seasonId, viewerId) => {
   // 均分相同的保持前面的积分序（sort 稳定），等于回落到「积分高者在前」，
   // 不再另立一套同分规则。
   const avgOf = (r) => (r.rating.avg === null ? -1 : r.rating.avg);
-  return wall.sort((a, b) => avgOf(b) - avgOf(a));
+  const sorted = wall.sort((a, b) => avgOf(b) - avgOf(a));
+
+  // 上面那套是默认顺序。freezeIds 只被"刚投完票跳回来的那一次"用到（见函数头的注释）。
+  if (!freezeIds || !freezeIds.length) return sorted;
+
+  // 「冻结」= 名单里的行按那份顺序提到前面，其余（这一版新传的卡、或者认不出来的 id）
+  // 保持默认顺序跟在后面。
+  // ⚠️ 落到名单外的哨兵要写 `freezeIds.length` 这个**有限的数**，不能写 Infinity：
+  // 两个都在名单外时 `Infinity - Infinity` 是 NaN，比较函数返回 NaN 的行为由引擎定，
+  // 那一段的顺序就成了随机的。
+  const pos = new Map(freezeIds.map((id, i) => [id, i]));
+  const rankOf = (r) => (pos.has(r.id) ? pos.get(r.id) : freezeIds.length);
+  return sorted.sort((a, b) => rankOf(a) - rankOf(b));
 };
 
 // 还没交积分的启用成员（R12：被禁用的不列出）

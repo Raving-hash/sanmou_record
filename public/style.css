@@ -846,6 +846,27 @@ nav ul li,
   justify-content: start;
   margin-bottom: 1.8rem;
 }
+/* ★ 上面那套 grid 规则是**没 JS 时的回退**，别再往上加东西。
+   public/wall.js 跑起来之后会给 .shot-grid 加 .is-cols，把版面换成"一列一列往下排"：
+   grid 的行高是整排共享的 —— 点开一张卡的评论区，那一排（以及下面每一排）都会被顶下去，
+   正在看的东西当场跳走（用户 2026-10-14 的要求是"展开只顶同一列，别动同一排"）。
+   拆成 N 个独立的竖列之后，撑开一张卡只顶它自己那一列。
+   **顺序仍然是"从左往右、满行换行"**：脚本按"第 i 张进第 i % 列数 列"分列，
+   于是第 1 张在第一列、第 N+1 张落到第一列的第二格。纯 CSS 的 columns 会把顺序
+   变成竖着念（第一列从上到下是第 1、2、3 名），所以没用它。
+   列数、每列装哪些卡、以及"同一排各块等高"的 min-height 全在 public/wall.js 里。 */
+.shot-grid.is-cols {
+  display: flex;
+  align-items: flex-start;    /* 列不拉伸：每列各长各的，正是"只顶自己这一列"的前提 */
+  gap: 0.75rem;               /* 列间距 = grid 那套的 column-gap */
+  justify-content: start;
+}
+.shot-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;                /* 列内卡片间距 = grid 那套的 row-gap */
+  flex: 0 0 auto;
+}
 /* 本期我的打分名额（views/partials/lineup-gallery.ejs，只在能打分的期出现）。
    名额是「我」的、不是某张卡的，所以在标题下面说一次，不塞进卡里重复十几遍。
    投满的那档加 .is-out：压暗 + 删除线，和卡上那几个变灰的按钮对应得上。
@@ -989,6 +1010,15 @@ nav ul li,
   -webkit-line-clamp: 5;
   line-clamp: 5;
   overflow: hidden;
+}
+/* 没写说明的那一格（模板里永远渲染，空的加 is-blank）：没 JS 时整格收起来 ——
+   和从前"不渲染这一块"看起来一模一样。
+   脚本分列之后要让它显形，因为 wall.js 要靠这一格把每一排撑齐（见 .shot-grid.is-cols）。 */
+.shot-note.is-blank {
+  display: none;
+}
+.shot-grid.is-cols .shot-note.is-blank {
+  display: block;
 }
 
 /* --------------------------------------------------------------------------
@@ -1190,11 +1220,28 @@ footer.container {
    已结算的期模板干脆不渲染按钮，所以这里不用管禁用态。 */
 /* margin-top:auto 把打分区（连同它下面的评论区）顶到卡片底部。
    图框是固定 160px 之后，同一排里高矮不齐的那部分高度总得有人吃 —— 给打分区吃，
-   于是每张卡的「均分/最高/最低」和「💬 评论」都落在同一条水平线上（见 .shot-frame）。 */
+   于是每张卡的「均分/最高/最低」和「💬 评论」都落在同一条水平线上（见 .shot-frame）。
+
+   2026-10-14 起打分区内部也分了上下两截（`.rate-tail` 那一截贴底）：三行数字留在顶部，
+   按钮和「你打了 X」那几行贴住底部。因为 public/wall.js 会把**同一排**的 .shot-rate
+   设成一样高（min-height），而"我打过分的卡"比旁边多两行 —— 不分截的话，多出来的
+   高度全堆在下面，同一排的「均分」就错开 35px（实测第 2 排 1075 vs 1145）。
+   分截之后，多出来的那点高度落在三行数字与按钮**之间**的空白里，两头都对齐。 */
 .shot-rate {
+  display: flex;
+  flex-direction: column;
   margin-top: auto;
   padding: 0.45rem 0.5rem 0.55rem;
   border-top: 1px solid var(--yw-line-soft);
+}
+/* 打分区下半截：点了别的档位就改分那句提示 + 五个按钮（封盘时是没有 form 的
+   「打分已截止，改不了」）。margin-top:auto 把它按到分区底部。
+   **自己也必须是 flex**：普通块的话，里面第一个子元素（.rate-mine）的 margin-top
+   会和这里的 margin-top:auto 折叠在一起，算出来的位置很脆（浏览器之间的表现也不一致）。 */
+.rate-tail {
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
 }
 
 .rate-line {
@@ -1213,7 +1260,11 @@ footer.container {
      不是把名字挤到下一行去。 */
   flex-wrap: nowrap;
 }
-.rate-line:last-child {
+/* 三行里的最后一行不留底边距。
+   ⚠️ 是 `:last-of-type` 不是 `:last-child`：2026-10-14 起 .shot-rate 的最后一个子元素
+   是 .rate-tail（一个 <div>），`:last-child` 从此谁也匹配不上「最低」那一行，
+   它会白留 0.15rem。三行都是 <p>，用 last-of-type 仍然只命中第三行。 */
+.rate-line:last-of-type {
   margin-bottom: 0;
 }
 .rate-line.is-empty {

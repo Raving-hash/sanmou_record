@@ -3,8 +3,15 @@
   「第一张」按上传顺序（getLineupImages 是 ORDER BY id），不是按文件名——
   想换展示哪张，去 /lineup 把第一张删掉，后面的会顶上来。
 
+  **卡片的摆法不只是 CSS 的事**：public/wall.js 会把这一整块拆成一列列的独立竖列
+  （`.shot-col`），再按排把顶栏/说明/打分区撑成一样高 —— 所以这里的结构有三处是给它看的：
+  说明那一格**永远渲染**（空的带 is-blank）、打分区下半截包在 `.rate-tail` 里、
+  每张卡的 id 是 `e<entry id>`。改结构之前先看一眼 README 的「阵容墙的版面」一节。
+
   入参：
     rows        db.getLineupWall() 的结果。**已按互评均分从高到低排好**（没人打分的在最后），
+                （**唯一的例外**：首页"刚投完票跳回来"的那一次按上一版的顺序渲染，
+                见 routes/main.js 的 lineupWall —— 那是"打分以后顺序不动"的实现）
                 每行已带 rank（积分名次，交了积分的才有，否则 null）、
                 score、lineup_note、images 和 rating（打分汇总，没人打过就是 EMPTY_RATING），
                 且只包含至少传了一张阵容的人，所以这里不用再筛。
@@ -119,9 +126,12 @@
           <img src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图"
                loading="lazy" decoding="async">
         </a>
-        <% if (r.lineup_note) { %>
-          <p class="shot-note"><%= r.lineup_note %></p>
-        <% } %>
+        <%# 说明这一格**永远渲染**（没写说明就是一格空的，加 is-blank）。
+            为什么要留个空盒子：public/wall.js 会按"排"把这一格撑到和邻卡一样高 ——
+            没有这个盒子就没法撑，同一排的「均分/最高/最低」和按钮就会因为
+            "一张卡写了五行说明、旁边没写"而错开。
+            **没 JS 时它是 display:none**（见 style.css），和从前一样不留空盒子。 %>
+        <p class="shot-note<% if (!r.lineup_note) { %> is-blank<% } %>"><%= r.lineup_note %></p>
 
         <div class="shot-rate">
           <% if (!r.rating.n) { %>
@@ -148,39 +158,46 @@
             </p>
           <% } %>
 
-          <%# 我打过的那一档：先一句金色色块，下面按钮行里那一格再高亮（.is-mine）。
-              「打分已截止」**单独一行**，不塞进色块里 —— 塞进去在 200px 卡上会被
-              折成「打分已 / 截止」，断得难看。 %>
-          <% if (r.rating.mine) { %>
-            <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
-          <% } %>
-
-          <% if (canRate) { %>
-            <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。没有 <input>，
-                value 直接挂在按钮上。**投过之后按钮照样出** —— 点别的档位就是改分
-                （服务端 UPDATE 那一行，见 routes/main.js），高亮的那格是我现在打的分。
-                本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
-                flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
-                这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
+          <%# 打分区下半截（.rate-tail）：贴住卡片底部；上面那三行数字留在顶部。
+              为什么要分出这一层：public/wall.js 会把**同一排**的 .shot-rate 设成一样高，
+              而"我打过分的卡"比旁边多「你打了 X」「点别的档位就是改分」两行 —— 不分开的话
+              多出来的高度全堆在下面，同一排的「均分」就错开 35px（见 style.css 的 .rate-tail）。
+              能打分 / 已封盘两个分支**都要**包进来，否则有的卡贴底、有的不贴。 %>
+          <div class="rate-tail">
+            <%# 我打过的那一档：先一句金色色块，下面按钮行里那一格再高亮（.is-mine）。
+                「打分已截止」**单独一行**，不塞进色块里 —— 塞进去在 200px 卡上会被
+                折成「打分已 / 截止」，断得难看。 %>
             <% if (r.rating.mine) { %>
-              <p class="rate-note">点别的档位就是改分</p>
+              <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
             <% } %>
-            <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
-              <% rateValues.forEach((v) => {
-                   const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
-                   const mine = r.rating.mine === v;  // 我给他打的就是这一档
-                   // 投满了**且不是我正占着的那一格**才灰。自己那格永远点得动：
-                   // 灰掉它等于告诉人"你这一票不算数"（老数据还可能超了，见 db.getMyQuota）。
-                   const out = left === 0 && !mine; %>
-                <button type="submit" name="value" value="<%= v %>" class="rate-tier<% if (mine) { %> is-mine<% } %>"
-                        aria-label="给 <%= r.nickname %> 打 <%= v %> 分<% if (mine) { %>（你打的就是这一档）<% } %>"
-                        <% if (mine) { %>title="你给他打的就是 <%= v %> 分，点它不会变"<% } else if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
-                        <% if (out) { %>disabled<% } %>><%= v %></button>
-              <% }) %>
-            </form>
-          <% } else if (r.rating.mine) { %>
-            <p class="rate-note">打分已截止，改不了</p>
-          <% } %>
+
+            <% if (canRate) { %>
+              <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。没有 <input>，
+                  value 直接挂在按钮上。**投过之后按钮照样出** —— 点别的档位就是改分
+                  （服务端 UPDATE 那一行，见 routes/main.js），高亮的那格是我现在打的分。
+                  本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
+                  flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
+                  这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
+              <% if (r.rating.mine) { %>
+                <p class="rate-note">点别的档位就是改分</p>
+              <% } %>
+              <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
+                <% rateValues.forEach((v) => {
+                     const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
+                     const mine = r.rating.mine === v;  // 我给他打的就是这一档
+                     // 投满了**且不是我正占着的那一格**才灰。自己那格永远点得动：
+                     // 灰掉它等于告诉人"你这一票不算数"（老数据还可能超了，见 db.getMyQuota）。
+                     const out = left === 0 && !mine; %>
+                  <button type="submit" name="value" value="<%= v %>" class="rate-tier<% if (mine) { %> is-mine<% } %>"
+                          aria-label="给 <%= r.nickname %> 打 <%= v %> 分<% if (mine) { %>（你打的就是这一档）<% } %>"
+                          <% if (mine) { %>title="你给他打的就是 <%= v %> 分，点它不会变"<% } else if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
+                          <% if (out) { %>disabled<% } %>><%= v %></button>
+                <% }) %>
+              </form>
+            <% } else if (r.rating.mine) { %>
+              <p class="rate-note">打分已截止，改不了</p>
+            <% } %>
+          </div>
         </div>
 
         <%# 卡最下面的评论区（原生 <details> 折叠，见 partials/comments.ejs）。

@@ -22,14 +22,17 @@ const buildReport = (season, rows, wall, eye) => {
 
   rows.forEach((r, i) => lines.push(`${i ? `${i + 1}. ` : '👑 '}${r.nickname}  ${r.score} 分`));
 
-  // 口碑最好 = 阵容墙上互评均分最高的那几位。**直接读现成排好序的 wall**，不另写一条 SQL：
+  // 口碑最好 = 阵容墙上互评均分最高的那几位。**读的是墙那份 rows**（不另写一条 SQL）：
   // 自己 GROUP BY 一遍的话，口径会和墙悄悄分家 —— 墙上还包含"传了阵容但没交积分"的人
   // （见 db.getLineupWall 的 WHERE），那样就会出现"墙上第一行是甲、战报却写乙"。
   // 并列的全列出来：只有五档，并列太常见，只挑一个是误导（同 maxBy / minBy 的处理）。
   // 均分和人数**逐个人各写一遍**：并列的几条投票数往往不一样，共用一个数就成了假话。
+  // ⚠️ 均分**自己取最大值**，不许写 `rated[0]`：那等于默认"wall 一定按均分降序"，
+  // 而 2026-10-14 起这个前提有了例外 —— 首页"刚投完票跳回来"的那一次是按冻结顺序排的
+  // （见下面 lineupWall）。反正战报只在已结算的期出，这里显式算一遍最稳。
   const rated = wall.filter((r) => r.rating.avg !== null);
   if (rated.length) {
-    const best = rated[0].rating.avg;
+    const best = Math.max(...rated.map((r) => r.rating.avg));
     const who = rated.filter((r) => r.rating.avg === best)
       .map((r) => `${r.nickname}（均分 ${r.rating.avg} · ${r.rating.n} 人打分）`);
     lines.push(`🏆 口碑最好：${who.join('、')}`);
@@ -42,6 +45,41 @@ const buildReport = (season, rows, wall, eye) => {
   }
 
   return lines.join('\n');
+};
+
+// ---------- 阵容墙的顺序（首页专用） ----------
+// 平常就是 db.getLineupWall 的默认顺序（互评均分降序）。只有一种例外：**刚从打分 POST
+// 跳回来的那一次**，按上一次渲染的顺序原样排一遍 —— 用户 2026-10-14 的口径是
+// 「打分以后不动，刷新网页再重排」。投一票会改均分，而均分决定顺序，不冻一下的话
+// 整页重刷回来顺序就变了：正在看的卡片当场跳走，还得重新找它在哪。
+//
+// 那个"上一次的顺序"记在 session 里（一张逗号分隔的 entry id），不是另建表 ——
+// 它只活到下一次页面渲染，没有留档的价值。**只生效一次**：读到的同时就把标记删掉，
+// 于是用户自己刷新（或者从导航点进来）时按最新的均分重排。
+// ⚠️ 顺序对不上期号时一律当没冻过（跨期之后那些 id 也不该再提位置）。
+//
+// 标记存的是**投出去的时刻**，不是 true：只认"刚投完"的那一跳（5 分钟以内）。投完直接
+// 关掉标签页、隔半天才回来的人也走得通 —— 那时旧顺序早没意义了，按最新的均分排才对。
+const WALL_HOLD_MS = 5 * 60 * 1000;
+
+const lineupWall = (req, season, viewerId) => {
+  const heldAt = Number(req.session.wallHold || 0);
+  delete req.session.wallHold;                       // 一次性，用完即清
+  const held = heldAt > 0 && Date.now() - heldAt < WALL_HOLD_MS;
+  const frozen = held && req.session.wallOrderSeason === season.id
+    ? String(req.session.wallOrder || '')
+      .split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+  const rows = db.getLineupWall(season.id, viewerId, frozen);
+
+  // 记下这一版的顺序，给"下次投完票跳回来"用。**只在真的变了才赋值**：cookie-session
+  // 把整个 session 塞在一张 cookie 里，每赋一次值都要重签一份 Set-Cookie。
+  const order = rows.map((r) => r.id).join(',');
+  if (req.session.wallOrder !== order || req.session.wallOrderSeason !== season.id) {
+    req.session.wallOrder = order;
+    req.session.wallOrderSeason = season.id;
+  }
+  return rows;
 };
 
 // ---------- 本期看板 ----------
@@ -62,7 +100,7 @@ router.get('/', (req, res) => {
       season,
       last: null,
       ranking: withImages(db.getRanking(season.id)),
-      lineups: db.getLineupWall(season.id, req.user.id),
+      lineups: lineupWall(req, season, req.user.id),
       // 本期我的打分名额（只含有限额的档位）。阵容墙用它把投满的档位按钮灰掉、
       // 在标题下面列一行"还剩几个"。没在打分的人也会看到，但那是他自己的数，无妨。
       // 封盘后不查了：那时一个按钮都不出，名额行也就没地方显示。
@@ -234,6 +272,12 @@ router.post('/score/withdraw', (req, res) => {
 // 两道时间关：这一期得是进行中，而且还没到截止点（每期开期后第一个周四 12:00 北京，
 // 见 db.getRateLockAt）。过了截止整期封盘，连改都不行；要撤掉某条票只能请管理员去 /admin 清。
 router.post('/entries/:id/rate', (req, res) => {
+  // 跳回墙上的那一次按**投票前的顺序**渲染（见上面的 lineupWall）：投出去的瞬间均分就变了，
+  // 顺序跟着变的话，人正在看的那张卡当场跳走。拒绝的分支也置上 —— 被拒的票一个字都没改，
+  // 更没理由让墙在眼前重排。用户自己刷新时这个标记早用掉了，按最新的均分重排。
+  // 存的是时刻而不是 true：跳回来时还要判"是不是刚投完的那一跳"（见 WALL_HOLD_MS）。
+  req.session.wallHold = Date.now();
+
   const entry = db.getEntry(Number(req.params.id));
   if (!entry) {
     req.session.flash = { type: 'err', msg: '没有这条记录' };

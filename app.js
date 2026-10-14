@@ -33,6 +33,7 @@ app.use((req, res, next) => {
     style: assetVer('style.css'),
     upload: assetVer('upload.js'),
     lightbox: assetVer('lightbox.js'),
+    wall: assetVer('wall.js'),
     comments: assetVer('comments.js'),
     report: assetVer('report.js'),
   };
