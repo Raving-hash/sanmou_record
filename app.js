@@ -74,6 +74,17 @@ app.use((req, res, next) => {
     if (lv >= 12) return 'silver';
     return 'dim';
   };
+  // 称号（演武王 / 慧眼王）。和慧眼等级同一套路：每请求一张 uid → 称号 的小表，
+  // 模板用 titleOf(uid) 取，取不到就是空数组（模板直接 forEach，不用判空）。
+  // **全站只有阵容墙引它**（views/partials/title.ejs）—— 这是用户定的显示范围：
+  // 称号是排面，阵容墙是唯一"看排面"的地方，别的页面昵称旁已经有慧眼圆框了。
+  // 所以这里**懒查**（第一次真被问到才算）：绝大多数请求（每个静态图、每个不渲染阵容墙的页面）
+  // 根本用不上它，没必要为一次 GROUP BY 买单 —— 慧眼那张表是每个页面都要，才放在上面直接查。
+  let titles = null;
+  res.locals.titleOf = (uid) => {
+    if (!titles) titles = db.getTitles();
+    return titles.get(String(uid ?? '').toLowerCase()) || [];
+  };
   // 一次性提示（重定向后显示）
   res.locals.flash = req.session ? req.session.flash || null : null;
   if (req.session) delete req.session.flash;

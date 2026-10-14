@@ -378,6 +378,62 @@ db.getRankBoard = () => db.prepare(`${STATS_SQL}
 
 db.getUserStats = (userPk) => db.prepare(`${STATS_SQL} AND u.id = ? GROUP BY u.id`).get(userPk);
 
+// ---------- 称号（演武王 / 慧眼王） ----------
+// 两枚称号**不落库**：它们是"现在谁是第一"的实时结论，存下来就得在结算、撤销结算、
+// 删赛期、清票……每一条路径上记得同步改一遍，漏一条就会出现"榜上第一换了人、王冠还戴在
+// 别人头上"。现算只要两条小查询（榜单 + 一眼 MAX），永远不会和 /rank 对不上。
+//
+//   演武王 —— 胜场最多的那批人里，胜率最高的（并列就一起封）。
+//              口径就是 /rank 排序的前两项，所以头名必定是排行榜第一行：
+//              不存在"只打过一期赢了就称王"（那样的人在排行榜上也不是第一）。
+//   慧眼王 —— 慧眼等级最高的那批人（并列一起封），但**等级还全停在初始 10 级时不封**：
+//              所有人都是 10 的时候严格按"同级都封"就是全员戴冠，等于没称号。
+//              等第一次结算把谁顶上去，王冠自己就出现了。
+//
+// **不排除已禁用的成员**：胜场和等级都照 /rank 与 users 表原样算。称号一旦和榜单
+// 分家（"排行榜第一"和"演武王"是两个人），就会有人拿着两个页面对不上。
+//
+// 返回 Map<uid（小写）, [{ key, label, tip }]>，key 只有 yanwu / huiyan 两种、顺序固定。
+// uid 转小写是为了和 app.js 的 eyeLevel 一个口径，调用处不用记大小写。
+const EYE_BASE = 10;                     // 初始等级，必须和 schema.sql 里 eye_level 的 DEFAULT 一致
+db.getTitles = () => {
+  const map = new Map();
+  const add = (uid, title) => {
+    const k = String(uid).toLowerCase();
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(title);
+  };
+
+  // 演武王。⚠️ 胜场为 0 时一个都不封：全站都没人赢过的时候"胜场最多"就是 0 胜，
+  // 那批人的胜率也全是 0 —— 不拦的话所有没赢过的人当场都成了演武王。
+  const board = db.getRankBoard();       // 已按 wins DESC, win_rate DESC, plays DESC 排好
+  if (board.length && board[0].wins > 0) {
+    const topWins = board[0].wins;
+    const best = Math.max(...board.filter((r) => r.wins === topWins).map((r) => r.win_rate));
+    for (const r of board) {
+      if (r.wins !== topWins || r.win_rate !== best) continue;
+      add(r.uid, {
+        key: 'yanwu',
+        label: '演武王',
+        tip: `演武王：胜场最多的人里胜率最高的（${r.wins} 胜 / ${r.plays} 场 · 胜率 ${r.win_rate}%）`,
+      });
+    }
+  }
+
+  // 慧眼王。只挑最高的那一档，并列的全给。
+  const top = db.prepare(`SELECT MAX(eye_level) AS lv FROM users`).get().lv;
+  if (top > EYE_BASE) {
+    for (const u of db.prepare(`SELECT user_id FROM users WHERE eye_level = ?`).all(top)) {
+      add(u.user_id, {
+        key: 'huiyan',
+        label: '慧眼王',
+        tip: `慧眼王：慧眼等级最高的（${top} 级）`,
+      });
+    }
+  }
+  return map;
+};
+
 db.getUserHistory = (userPk) => db.prepare(`
   SELECT s.id, s.name, s.created_at, e.score, e.final_rank, e.is_winner,
          (SELECT COUNT(*) FROM entries x WHERE x.season_id = s.id AND x.score IS NOT NULL) AS players

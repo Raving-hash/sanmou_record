@@ -44,6 +44,11 @@
   /* 亮银 —— 用在两处：慧眼等级 12–14 的小圆框、阵容墙上「上期积分第二」那张卡的描边 */
   --yw-silver:   #ccd6e2;
 
+  /* 朱砂 —— 目前只用在一处：「演武王」那枚称号章（2026-10-14）。
+     和 --yw-cinnabar 是同一个色系，但那一支是"危险 / 未交"的语义色（.badge-wait、
+     按钮的 danger 都在用）；称号是荣誉，得和它拉开：更亮、更饱和，暗底上才立得住。 */
+  --yw-vermilion: #ef6a5a;
+
   /* 文字（暖白，不用纯白，避免和墨底打架） */
   --yw-text:      #ece5d8;
   --yw-text-dim:  #a89b83;
@@ -443,6 +448,35 @@ a {
   border-color: rgba(200, 162, 74, 0.55);
   background: var(--yw-gold-a20);
   color: var(--yw-gold-lt);
+}
+
+/* 称号章：阵容卡顶栏、昵称**前面**那两枚（views/partials/title.ejs）。
+   演武王朱红（--yw-vermilion）、慧眼王亮蓝（--yw-azure-lt）—— 颜色是用户定的。
+   和 .badge（状态胶囊）刻意做得不一样：**方角、字重 600、颜色更饱和**，
+   因为它是荣誉不是状态 —— 同一张卡的顶栏上就挂着 .badge-wait 的「共 N 张」，
+   两枚章若做成同一种红、同一个圆角，看着就像三个并列的状态标签。
+   字号比 .eye 那档（0.72rem）再收一点（0.68rem），两枚章和昵称左右的圆框高度看着齐。
+   底色照 .badge 那套走（半透明色底 + 亮色字），暗底上比实心浅色块协调。 */
+.title {
+  display: inline-block;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.title-yanwu {
+  background: rgba(239, 106, 90, 0.16);
+  border-color: rgba(239, 106, 90, 0.55);
+  color: var(--yw-vermilion);
+}
+.title-huiyan {
+  background: rgba(56, 132, 214, 0.18);
+  border-color: rgba(96, 170, 240, 0.5);
+  color: var(--yw-azure-lt);
 }
 
 /* 慧眼等级变动榜（views/partials/eye-board.ejs）里的 +3 / +1。
