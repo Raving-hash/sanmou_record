@@ -944,19 +944,23 @@ nav ul li,
   font-size: 0.82rem;
   color: var(--yw-text-mute);
 }
-/* flex:1 + 纵向居中：顶栏换行导致同一行卡片高度不齐时，
-   多出来的高度均分到图上下，而不是在卡片底部留一条死白。
-   min-height 是给懒加载出图前占位的，免得边滚边跳。 */
+/* 图框**写死 160px，不参与弹性拉伸**（2026-10-14 起）。
+   从前这里是 `flex:1 + min-height:160px`：卡片被说明/打分区撑高时，多出来的高度
+   由这个框吃下去 —— 于是同一排里每张卡的图框高低不一（说明 5 行的那张把整排的框
+   都撑高，旁边的跟着一起变），整面墙看着是歪的。用户这天的要求是"严格控制每个
+   阵容图的尺寸"，所以改成固定高度：框永远 200×160，多出来的高度交给下面的打分区
+   （`.shot-rate` 的 `margin-top:auto`），每张卡的打分区和评论行因此也落在同一条水平线上。 */
 .shot-frame {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
+  height: 160px;
   background: var(--yw-ink-1000);
 }
 /* 和列表缩略图 .thumb 同尺寸、同 contain、同暗底：
-   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图放大（第 15 节）。 */
+   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图放大（第 15 节）。
+   contain 是**有意的**（cover 会把两侧的武将裁掉），见 README 的「显示尺寸」。 */
 .shot-frame img {
   display: block;
   width: 200px;
@@ -1184,7 +1188,11 @@ footer.container {
      我还没投   → 均分/最高/最低三行 + 五个档位按钮
      我投过了   → 均分/最高/最低三行 + 一行「你打了 X」，按钮不再出现
    已结算的期模板干脆不渲染按钮，所以这里不用管禁用态。 */
+/* margin-top:auto 把打分区（连同它下面的评论区）顶到卡片底部。
+   图框是固定 160px 之后，同一排里高矮不齐的那部分高度总得有人吃 —— 给打分区吃，
+   于是每张卡的「均分/最高/最低」和「💬 评论」都落在同一条水平线上（见 .shot-frame）。 */
 .shot-rate {
+  margin-top: auto;
   padding: 0.45rem 0.5rem 0.55rem;
   border-top: 1px solid var(--yw-line-soft);
 }
@@ -1192,13 +1200,18 @@ footer.container {
 .rate-line {
   display: flex;
   align-items: baseline;
-  gap: 0.3rem;
+  /* 0.3rem → 0.24rem（2026-10-14）：这一行是「最高 400 昵称(等级)」，
+     三格加两个间隙正好顶满 200px 卡的 178px 内宽 —— 实测 5 个字的名字
+     （「善｜赖酒王」）超出去 2px，圆框当场被省略号吃掉。省下的这 2.2px 就是给它留的。
+     再往上长（注册上限 12 字）怎么省都放不下，那时由 .rate-who 的省略号兜底。 */
+  gap: 0.24rem;
   margin: 0 0 0.15rem;
   font-size: 0.75rem;
   line-height: 1.4;
-  /* 一行装不下时让整块换行，别把「张三、李四」从中间劈开。
-     配合下面 .rate-who 的 nowrap：名字要么整段留在这一行，要么整段下移一行。 */
-  flex-wrap: wrap;
+  /* nowrap：均分/最高/最低**各占一行**就是排版的全部目的（用户 2026-10-14 的要求），
+     折成两行的话同一排卡的打分区又参差了。挤不下时由 .rate-who 自己省略，
+     不是把名字挤到下一行去。 */
+  flex-wrap: nowrap;
 }
 .rate-line:last-child {
   margin-bottom: 0;
@@ -1226,17 +1239,22 @@ footer.container {
 }
 .rate-v.is-hi { color: var(--yw-gold-lt); }
 .rate-v.is-lo { color: var(--yw-text-dim); }
-/* 打分人（views/partials/name-list.ejs）。名字最多两个 + 「等 N 人」。 */
+/* 打分人（views/partials/name-list.ejs）。**只印并列里的第一个名字**，
+   所以这就是一个名字 + 一个慧眼圆框。
+   nowrap + 省略号：这一行留给人名的只有 100px 上下（实测 5 个字的名字加圆框正好 99px），
+   而 12 个字的昵称（注册上限）加圆框要 200px 往上 —— 宁可把圆框切掉，也不许它折成
+   第二行，一行是这个版面的硬要求（见上面 .rate-line 的 nowrap）。 */
 .rate-who {
   min-width: 0;
   font-size: 0.7rem;
   color: var(--yw-text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 「昵称 + 慧眼圆框」是一个不可拆的单位：不能被 overflow-wrap 从名字中间切开
-   （「张三1」/「3」）。但 nowrap 得挂在**这个名字**上，不能像从前那样挂在
-   .rate-who 整行上 —— 每个名字后面多了一个圆框，一行宽出三四十像素，
-   整行 nowrap 只会横向溢出 178px 的卡；挂在这里则是整组掉到下一行。
-   顿号是独立的文本节点，断行规则不许在它前面断，所以不会出现「、」开头的行。 */
+   （「张三1」/「3」）。框上那一行虽然已经整行 nowrap 了，这里仍然留着 ——
+   护的是"名字和它那个圆框永远在一起"，跟行宽无关。 */
 .name-unit {
   white-space: nowrap;
 }
@@ -1642,7 +1660,8 @@ details.report[open] > summary {
     width: 120px;
     height: 96px;
   }
-  /* 阵容墙同理：桌面每张 200×160，手机上 150×120，一排两张正好铺满 375px 视口 */
+  /* 阵容墙同理：桌面每张 200×160，手机上 150×120，一排两张正好铺满 375px 视口。
+     图框同样是写死高度的（桌面那档的注释里有原因）。 */
   .shot-grid {
     grid-template-columns: repeat(auto-fill, 150px);
   }
@@ -1650,7 +1669,7 @@ details.report[open] > summary {
     width: 150px;
   }
   .shot-frame {
-    min-height: 120px;
+    height: 120px;
   }
   .shot-frame img {
     width: 150px;
@@ -1663,6 +1682,24 @@ details.report[open] > summary {
   }
   .rate-form button.rate-tier {
     font-size: 0.66rem;
+  }
+  /* 均分/最高/最低这三行也各收一档。桌面 178px 的行宽到这儿只剩 135px，
+     而「最高 400 昵称(等级)」是全卡最长的一行 —— 实测 5 个字的名字
+     （「善｜赖酒王」）在 375px 下超出去 7px，圆框当场被省略号吃掉。
+     四处各收一点点（数字 / 标签 / 名字 / 那个圆框）正好把这 7px 找回来：
+     名字和等级在手机上都能留住，超出的只剩 6 个字以上的长昵称。 */
+  .rate-k {
+    font-size: 0.68rem;
+  }
+  .rate-v {
+    font-size: 0.9rem;
+  }
+  .rate-who {
+    font-size: 0.66rem;
+  }
+  .rate-who .eye {
+    font-size: 0.64rem;
+    padding: 0 0.22em;
   }
   /* 评论：同样是 150px 的卡，标题行和输入框都再收一档 */
   details.cmt > summary {

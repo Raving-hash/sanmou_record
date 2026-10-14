@@ -74,8 +74,9 @@ app.use((req, res, next) => {
   res.locals.thumbUrl = (name) => `/uploads/${name}${THUMB_SUFFIX}`;
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
-  // 「最高 400 由谁打的」这类名单走 views/partials/name-list.ejs —— 从前是这里的一个
-  // nameList 助手，加慧眼圆框时挪进了模板：名单要逐个名字拼 HTML，光有字符串不够了。
+  // 「最高 400 由谁打的」那个名字走 views/partials/name-list.ejs —— 从前是这里的一个
+  // nameList 助手，加慧眼圆框时挪进了模板：要拼「昵称 + 圆框」的 HTML，光有字符串不够了。
+  // （2026-10-14 起它只印并列里的第一个名字，库里给的照样是全部的人。）
   // 慧眼等级：所有人初始 10 级，只在结算时按"有没有看准前两名"往上加（只涨不跌，
   // 50 / 200 不再扣，见 db.settleSeason 与 EYE_GAIN）。
   // 昵称出现的地方都要带那个小圆框（views/partials/eye.ejs），但各个列表查出来的字段
