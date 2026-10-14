@@ -135,6 +135,34 @@ router.post('/ratings/:id/delete', (req, res) => {
   res.redirect('/admin');
 });
 
+// 上面那条的批量版：整期投乱了、或者想让大家重投一轮时一下清干净。
+// 按 :id 圈定赛期而不是"清当前进行中的那一期"：从渲染管理页到点下按钮之间
+// 赛期理论上会变（另一处结算 / 撤销结算），带 id 才能保证清的是屏幕上写的那一期。
+//
+// 只清**进行中**的期。已结算期的记录看起来"没用"（名次早定了），其实两处都有用：
+// 慧眼等级是拿它算出来的（`eye_adjustments` 里存着结果），删了记录退不回等级，
+// 只会让两边对不上；而且那份记录本身是"当时谁投了谁"的痕迹。
+// 要动历史期就照老路先【撤销结算】，它成了进行中的期，自然能清。
+router.post('/seasons/:id/ratings/clear', (req, res) => {
+  const season = db.getSeason(Number(req.params.id));
+  if (!season) { err(req, '没有这一期'); return res.redirect('/admin'); }
+  if (season.status !== 'open') {
+    err(req, '只能清空进行中的赛期的打分（要动历史期先【撤销结算】）');
+    return res.redirect('/admin');
+  }
+
+  const n = db.clearSeasonRatings(season.id);
+  // 「本来就没有」走 err 而不是 ok：绿色是"干了件事"的意思，这里什么都没干。
+  // 正常路径上按钮根本不出（一条票都没有时不渲染），能撞见这条多半是手打地址。
+  if (!n) { err(req, `${season.name} 本来就没有打分记录`); return res.redirect('/admin'); }
+
+  // 提示和逐条删一样分两种情况：没过截止谁都能重投，过了就补不回来了 ——
+  // 批量删更容易忘掉这件事，所以这里一定要说。
+  ok(req, `已清空 ${season.name} 的全部 ${n} 条打分`
+    + (db.isRateLocked(season) ? '（本期打分已截止，谁都不能重投了）' : '（本期还没截止，大家都可以重新投）'));
+  res.redirect('/admin');
+});
+
 // ---------- 邀请码 ----------
 router.post('/invite/regenerate', (req, res) => {
   const code = db.genInviteCode();

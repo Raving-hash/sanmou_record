@@ -276,6 +276,16 @@ db.listSeasonRatings = (seasonId) => db.prepare(`
   ORDER BY target.id, r.value DESC, r.id
 `).all(seasonId);
 
+// 把某一期的打分**整批**清掉，返回删掉的条数（`/admin` 那个「清空本期全部打分」用）。
+// 和上面逐条删是同一件事，只是范围不同：名额是现数的（见 getMyQuota），
+// 所以删完所有人的名额当场满血，不用动别的表。
+// ratings 里没存 season_id，期由 entry 带出来（见 schema.sql），于是走一个子查询圈定范围。
+// 一条 DELETE 本身就是原子的，不用再包事务。
+db.clearSeasonRatings = (seasonId) => db.prepare(`
+  DELETE FROM ratings
+  WHERE entry_id IN (SELECT id FROM entries WHERE season_id = ?)
+`).run(seasonId).changes;
+
 // 本期我各档还剩几个名额：[{ value, quota, used, left }]，高档在前（400 → 300 → 250）。
 // 只列**有名额限制**的档位 —— 不限的档位没有"还剩几个"这回事，模板不用知道它们。
 // 期由 entry 带出来（ratings 表里没存 season_id，见 schema.sql）。

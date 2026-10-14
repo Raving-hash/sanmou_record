@@ -22,7 +22,7 @@
 
   <div class="actions">
     <form method="post" action="/admin/invite/regenerate"
-          onsubmit="return confirm('重新生成后旧邀请码立刻失效，确定吗？')">
+          data-confirm="重新生成后旧邀请码立刻失效，确定吗？">
       <button type="submit">重新生成邀请码</button>
     </form>
     <% if (invite) { %>
@@ -89,17 +89,17 @@
               <td class="row-actions">
                 <% if (s.status === 'open') { %>
                   <form method="post" action="/admin/seasons/<%= s.id %>/settle"
-                        onsubmit="return confirm('结束本期并结算？要至少 2 人交了积分。')">
+                        data-confirm="结束本期并结算？要至少 2 人交了积分。">
                     <button type="submit" class="btn-sm">结束本期</button>
                   </form>
                 <% } else { %>
                   <form method="post" action="/admin/seasons/<%= s.id %>/reopen"
-                        onsubmit="return confirm('撤销结算？这一期会变回进行中。')">
+                        data-confirm="撤销结算？这一期会变回进行中。">
                     <button type="submit" class="outline secondary btn-sm">撤销结算</button>
                   </form>
                 <% } %>
                 <form method="post" action="/admin/seasons/<%= s.id %>/delete"
-                      onsubmit="return confirm('删除这一期？连同所有积分和阵容截图一起删掉，不能恢复。')">
+                      data-confirm="删除这一期？连同所有积分和阵容截图一起删掉，不能恢复。">
                   <button type="submit" class="outline btn-danger btn-sm">删除</button>
                 </form>
               </td>
@@ -150,7 +150,7 @@
                   <td><small class="muted"><%= fmt(r.created_at) %></small></td>
                   <td class="row-actions">
                     <form method="post" action="/admin/ratings/<%= r.id %>/delete"
-                          onsubmit="return confirm('清掉 <%= r.rater_name %> 给 <%= r.target_name %> 打的 <%= r.value %> 分？删掉就没了。')">
+                          data-confirm="清掉 <%= r.rater_name %> 给 <%= r.target_name %> 打的 <%= r.value %> 分？删掉就没了。">
                       <button type="submit" class="outline btn-danger btn-sm">清除</button>
                     </form>
                   </td>
@@ -159,6 +159,20 @@
             </tbody>
           </table>
         </div>
+        <%# 整批清空。摆在表格**下面**而不是标题旁边：它是这一页唯一不可逆的批量操作，
+            贴着几十个逐条【清除】按钮容易被手滑点到；顺带让人先把名单扫过一遍。 %>
+        <div class="actions">
+          <form method="post" action="/admin/seasons/<%= openSeason.id %>/ratings/clear"
+                data-confirm="清空本期全部 <%= seasonRatings.length %> 条打分？<%= canRate ? '清掉之后大家都可以重新投（名额也一起回来）。' : '本期打分已截止，清掉就再也补不回来了。' %>">
+            <button type="submit" class="outline btn-danger btn-sm">
+              清空本期全部打分（<%= seasonRatings.length %> 条）
+            </button>
+          </form>
+        </div>
+        <p class="muted small">
+          整期重投用这个：清完所有人的名额会一并满血（名额是现数的，见 README「每期名额」一节）。
+          <%= canRate ? '本期还没截止，清掉之后大家都能重新投。' : '⚠️ 本期打分已截止，清掉之后谁都不能重投。' %>
+        </p>
       <% } %>
     </details>
   <% } %>
@@ -200,7 +214,7 @@
                 </form>
               <% } %>
               <form method="post" action="/admin/users/<%= u.id %>/reset"
-                    onsubmit="return confirm('重置 <%= u.nickname %> 的密码？会生成一个临时密码。')">
+                    data-confirm="重置 <%= u.nickname %> 的密码？会生成一个临时密码。">
                 <button type="submit" class="outline secondary btn-sm">重置密码</button>
               </form>
             </td>
@@ -212,6 +226,18 @@
 </section>
 
 <script>
+  // 确认框统一走 data-confirm，**不要**写回 onsubmit="return confirm('…把昵称拼进来…')"：
+  // 昵称是成员自己起的（1–12 个字，什么字符都行），转义把 ' 变成 &#39; 之后，
+  // 浏览器解析属性时又会还原成 '，于是那个引号能从 JS 字符串里跑出来执行。
+  // data-confirm 里的东西只是**数据**（dataset 读出来就是纯字符串），没有这个问题。
+  // 没有 JS 时这里不弹确认框，表单照旧提交 —— 和原先的 onsubmit 行为一样。
+  // （这段注释里不能出现 EJS 的开始标记：模板里**任何位置**的标记都会被求值，注释也一样。）
+  document.querySelectorAll('form[data-confirm]').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      if (!confirm(form.dataset.confirm)) e.preventDefault();
+    });
+  });
+
   document.querySelectorAll('[data-copy]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var el = document.getElementById(btn.dataset.copy);
