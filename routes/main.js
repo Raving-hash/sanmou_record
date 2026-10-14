@@ -7,6 +7,43 @@ const MAX_LINEUP = Number(process.env.MAX_LINEUP || 6);
 // 给排名行挂上各自的阵容截图
 const withImages = (rows) => rows.map((r) => ({ ...r, images: db.getLineupImages(r.id) }));
 
+// ---------- 结算战报（那段贴群里的纯文本） ----------
+// 每期结算完都要往群里发一次成绩，从前只能照着页面手打一遍。这里把它拼成一段纯文本，
+// 页面上摆进一个 <textarea readonly> 让人全选复制（见 views/season.ejs + public/report.js）。
+//
+// 为什么拼在服务端而不是模板里：模板要一格一格 <%= %> 拼十几行文本、还得自己管换行，
+// 而这本来就是"从数据里算出四个字"的活儿。放这儿一眼能看清最终长什么样。
+// 为什么不用 Markdown：QQ / 微信都不渲染，星号和井号只会变成噪声 —— 纯文本 + 两个 emoji 就够。
+//
+// rows 是 getFinalRanking 的结果（已结算，**只有交了积分的人**，也就是 R5 说的"参赛"）；
+// wall 是 getLineupWall 的结果（已按互评均分降序）；eye 是 getEyeAdjustments 的结果。
+const buildReport = (season, rows, wall, eye) => {
+  const lines = [`【${season.name} · 演武积分赛】${rows.length} 人参赛`];
+
+  rows.forEach((r, i) => lines.push(`${i ? `${i + 1}. ` : '👑 '}${r.nickname}  ${r.score} 分`));
+
+  // 口碑最好 = 阵容墙上互评均分最高的那几位。**直接读现成排好序的 wall**，不另写一条 SQL：
+  // 自己 GROUP BY 一遍的话，口径会和墙悄悄分家 —— 墙上还包含"传了阵容但没交积分"的人
+  // （见 db.getLineupWall 的 WHERE），那样就会出现"墙上第一行是甲、战报却写乙"。
+  // 并列的全列出来：只有五档，并列太常见，只挑一个是误导（同 maxBy / minBy 的处理）。
+  // 均分和人数**逐个人各写一遍**：并列的几条投票数往往不一样，共用一个数就成了假话。
+  const rated = wall.filter((r) => r.rating.avg !== null);
+  if (rated.length) {
+    const best = rated[0].rating.avg;
+    const who = rated.filter((r) => r.rating.avg === best)
+      .map((r) => `${r.nickname}（均分 ${r.rating.avg} · ${r.rating.n} 人打分）`);
+    lines.push(`🏆 口碑最好：${who.join('、')}`);
+  }
+
+  // 「+」自己带：虽然慧眼等级只涨不跌（db.js 的 EYE_GAIN 一个负数都没有），
+  // 但 /admin 的结算提示就是这么拼的，跟着它写，将来真出现负数也不会印成「-3」这种半截话。
+  if (eye.length) {
+    lines.push(`👁 慧眼等级：${eye.map((e) => `${e.nickname} ${e.delta > 0 ? '+' : ''}${e.delta}`).join('、')}`);
+  }
+
+  return lines.join('\n');
+};
+
 // ---------- 本期看板 ----------
 router.get('/', (req, res) => {
   const season = db.getOpenSeason();
@@ -299,14 +336,18 @@ router.get('/seasons/:id', (req, res) => {
 
   const settled = season.status === 'settled';
   const rows = withImages(settled ? db.getFinalRanking(season.id) : db.getRanking(season.id));
+  // 慧眼等级变动榜（只有已结算的期才有内容，模板里也只在 settled 时引它）
+  const eye = settled ? db.getEyeAdjustments(season.id) : [];
 
   res.render('season', {
     title: `${season.name} · 赛期详情`,
     season,
     rows,
     settled,
-    // 慧眼等级变动榜（只有已结算的期才有内容，模板里也只在 settled 时引它）
-    eye: settled ? db.getEyeAdjustments(season.id) : [],
+    eye,
+    // 贴群里那段纯文本。**只给已结算的期做**：进行中的期名次还会变，
+    // 发出去的"冠军"过两天就成了假消息。没做的时候传 null，模板据此整段不出。
+    report: settled ? buildReport(season, rows, db.getLineupWall(season.id, null), eye) : null,
     notSubmitted: settled ? [] : db.getNotSubmitted(season.id),
     players: db.countPlayers(season.id),
     // 打分截止。进行中的期才摆这一行：已结算的期传 null，模板就不出它。

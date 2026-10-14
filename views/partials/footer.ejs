@@ -9,5 +9,8 @@
     否则看着就像"评论没发出去"。和 lightbox 一样挂页脚 —— 它直接找元素、不等 DOMContentLoaded，
     所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。 %>
 <script src="/public/comments.js?v=<%= assetVer.comments %>"></script>
+<%# 「全选战报」那一下（public/report.js）：只有 /seasons/:id 有那段文本框，
+    脚本自己找不到元素就退出，所以跟 lightbox 一样全站引一份。 %>
+<script src="/public/report.js?v=<%= assetVer.report %>"></script>
 </body>
 </html>

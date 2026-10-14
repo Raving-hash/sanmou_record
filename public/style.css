@@ -1553,7 +1553,62 @@ html.lb-lock {
 }
 
 /* --------------------------------------------------------------------------
-   17. 窄屏
+   17. 结算战报（/seasons/:id 上那段贴群里用的纯文本，见 views/season.ejs）
+   -------------------------------------------------------------------------- */
+/* 又是原生 <details>，所以第 15 节那三条"必须带 `details.` 前缀、还要顶掉 Pico 给
+   details / summary 补的 margin-bottom"的规矩照旧适用 —— 不重复写在注释里了。
+   配色和右侧那个 ▾ 箭头也照旧交给 Pico（令牌区已经映射过）。 */
+details.report {
+  margin: 0 0 var(--pico-spacing);
+}
+details.report > summary {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+details.report[open] > summary {
+  margin-bottom: 0;
+}
+.report-body {
+  padding: 0 0.7rem 0.7rem;
+}
+.report-body p {
+  margin: 0 0 0.4rem;
+}
+/* 等宽：一是这段字本来就是拿来"照抄"的，等宽更像一份原文；二是 /admin 里那几个
+   临时密码框已经是等宽了 —— 同一个站里"给你复制的东西"长一个样，省得两套观感。 */
+.report-text {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.7rem;
+  font-family: var(--pico-font-family-monospace);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  /* **故意不写 white-space**：就用默认的软折行。战报每行都很短，宽屏上根本折不到；
+     手机上万一折了，也远比横向滚动好读。而复制出去的值不受显示折行影响 ——
+     换行还是原来那几个 \n（见 routes/main.js 的 buildReport）。 */
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+}
+/* Pico 默认把 button 撑成一整行宽（同一个坑见第 14 节），不收回来"全选这段"就会
+   独占一行、把旁边那句提示挤到下面去。 */
+.report-actions button {
+  width: auto;
+  margin: 0;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
+}
+.report-actions small {
+  font-size: 0.72rem;
+}
+
+/* --------------------------------------------------------------------------
+   18. 窄屏
    -------------------------------------------------------------------------- */
 @media (max-width: 640px) {
   h2 {
@@ -1619,6 +1674,17 @@ html.lb-lock {
   }
   .cmt-form input {
     font-size: 0.7rem;
+  }
+  /* 战报：手机上字号再收一档 —— 等宽字体比正文宽，同一行能塞下的字数少一截 */
+  details.report > summary {
+    padding: 0.45rem 0.55rem;
+    font-size: 0.8rem;
+  }
+  .report-body {
+    padding: 0 0.55rem 0.55rem;
+  }
+  .report-text {
+    font-size: 0.74rem;
   }
   .stat-num {
     font-size: 1.25rem;

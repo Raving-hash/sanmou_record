@@ -34,6 +34,7 @@ app.use((req, res, next) => {
     upload: assetVer('upload.js'),
     lightbox: assetVer('lightbox.js'),
     comments: assetVer('comments.js'),
+    report: assetVer('report.js'),
   };
   // 时间格式化。入参是 ISO 字符串或毫秒时间戳（Date 两种都吃）——
   // 打分截止那种现算出来的时间就是个毫秒数，模板里不用再包一层 new Date()。

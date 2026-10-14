@@ -22,6 +22,33 @@
   </p>
 </hgroup>
 
+<%# 结算战报：一段能直接贴群里的纯文本，拼法在 routes/main.js 的 buildReport。
+    **只有已结算的期才有**（进行中的期名次还会变，发出去的"冠军"过两天就成了假消息），
+    其余时候 report 是 null，整段不出。
+    **默认折叠**：它是"要用的时候才拿"的东西，摊开会把整页顶下去一大截；
+    而真要用它的人（刚点完结算、被 302 送到这一页的管理员）一眼就能看见这个标题。 %>
+<% if (report) { %>
+  <details class="report">
+    <summary>📋 复制战报（贴群里用）</summary>
+    <div class="report-body">
+      <p class="muted small">下面就是本期的成绩，全选复制就能贴到群里。</p>
+      <%# 内容整个塞进只读文本框：它是拿来照抄的，落在 <p> 里会被当成正文读，
+          还容易漏掉行尾。`rows` 按实际行数给，长战报进来就不用滚。
+          EJS 的转义会把 & < > 变成实体，textarea 解析时再还原 —— 内容一字不差，
+          顺手也堵死了"昵称里写个 </textarea>"这条路。
+          ⚠️ 这类注释里**绝不能写出 EJS 的取值标记本身**：注释遇到它中间那个
+          结束符号就当场截断，剩下半句会漏成页面上的正文（今天连踩两次）。 %>
+      <textarea id="report-text" class="report-text" readonly
+                rows="<%= report.split('\n').length %>"><%= report %></textarea>
+      <%# 全选那一下在 public/report.js。没加载时文本框照样能长按选中，少的是个按钮 %>
+      <div class="report-actions">
+        <button type="button" class="secondary" id="report-select">全选这段</button>
+        <small class="muted" id="report-hint">手机上长按文本框，再选「复制」</small>
+      </div>
+    </div>
+  </details>
+<% } %>
+
 <%# 慧眼等级变动榜放在战绩卡**上面**：它是结算的头条结论（"这期谁涨得最多"），
     塞在十几张截图卡下面就得滚很久才看得到。 %>
 <% if (settled) { %>
