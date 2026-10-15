@@ -3,8 +3,9 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
+// 图片自 2026-10-15 起存在 Cloudflare R2 上（浏览器直传），本地不再有任何图片目录，
+// 所以这里不再 mkdirSync('uploads') —— 建一个永远为空的目录只会让人以为图还在本地。
 fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
-fs.mkdirSync(path.join(__dirname, 'uploads'), { recursive: true });
 
 const db = new Database(path.join(__dirname, 'data/app.db'));
 db.pragma('journal_mode = WAL');
@@ -429,12 +430,24 @@ db.getComment = (id) => db.prepare(`SELECT * FROM comments WHERE id=?`).get(id);
 
 db.deleteComment = (id) => db.prepare(`DELETE FROM comments WHERE id=?`).run(id).changes;
 
-// 这个文件名是不是一张阵容图 —— 游客取 /uploads 下的图时逐个按它放行（app.js 的 canSeeUpload）。
-// 「哪些文件算阵容图」是数据层的事，所以判定放这儿，不写在 app.js 里。
-// 走 idx_lineup_filename。
+// 这个文件名是不是一张阵容图。
+// 从前它是给 app.js 的 canSeeUpload 用的（游客取 /uploads 下的图时逐个放行），
+// 那套白名单随"图片全公开"一起删了。现在改给 routes/main.js 的提交用：
+// **同一张图不该被引用两次**（见下面的 isImageInUse）。走 idx_lineup_filename。
 db.isLineupImage = (filename) => !!db.prepare(
   `SELECT 1 FROM lineup_images WHERE filename=?`
 ).get(filename);
+
+// 这个文件名有没有被**任何地方**引用（阵容图 或 积分截图）。
+// 提交阵容时用它跳过"已经在用的" —— 只看 lineup_images 不够：一个人完全可以拿自己
+// 积分截图的那张 key 再当阵容图提交（令牌是通用的、不做用途区分），那样删掉阵容那一行
+// 就会把他的积分截图一起删掉。要防的就是这种事。
+db.isImageInUse = (filename) => !!db.prepare(
+  `SELECT 1 FROM lineup_images WHERE filename=?
+   UNION ALL
+   SELECT 1 FROM entries WHERE score_image=?
+   LIMIT 1`
+).get(filename, filename);
 
 // ---------- 统计（只算已结算的期，有积分才算参赛） ----------
 const STATS_SQL = `

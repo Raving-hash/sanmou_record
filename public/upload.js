@@ -1,39 +1,43 @@
 /* ==========================================================================
-   上传页的两个增强。两半彼此独立：任何一半失效都不影响另一半，
-   也都不影响表单本身 —— 没有 JS、脚本没加载、浏览器太老，点选提交一切照旧。
+   上传页的两半。**它俩现在的关系变了，别再按从前那句话去理解**：
 
-   一、★提交前在浏览器里把图压小（所有设备，手机尤其需要）
-      手机原图动辄 3~5MB，六张就是 20MB+，全要挤那条很细的隧道，
-      传一半断掉是常事 —— 服务端日志里 "POST /lineup 400 0" 就是被截断的上传。
-      注意：服务端 upload.js 的 compressUploads 是**收完**才压的，
-      所以那边压得再好也省不下上传流量，必须在浏览器里先压。
+     从前：两半都是"增强"—— 脚本没加载、浏览器太老、JS 被关了，点选提交一切照旧。
+     现在：**没有 JS 就传不了图**。图片由浏览器直传 Cloudflare R2，服务端不再经手
+           字节，所以"用原生表单把文件 POST 给服务器"这条路已经不存在了。
+           这是本次改造的**已知功能降级**，页面上用 <noscript> 明说了（见 views/lineup.ejs）。
+           拖拽那半（第二节）仍然是纯增强，降级行为一个字没变。
 
-      做法是缩到长边 MAX_EDGE、重编码成 jpeg，通常 3MB → 300KB 上下，
-      服务端拿到后一般直接落在它压缩阶梯的第一档（4096/q84，不缩尺寸），
-      所以画质损失可以忽略。
+   第一节、提交前：压缩 → 签名 → 直传 R2
+     走的顺序是**先全压完 → 再要令牌 → 再统一 PUT**，三个理由：
+       · 压完才知道有没有解不开的图，失败时**一个对象都不会产生**（不产生孤儿）；
+       · 令牌有 10 分钟有效期，先签名再慢慢压会把有效期吃掉；
+       · 拿令牌的接口会顺便做**配额预检**（赛期在不在、阵容额度够不够），
+         放在压完之后调，就不会白压白传一批注定被拒的图。
 
-      ★方向：手机竖拍的照片方向记在 EXIF 里，canvas 重编码会把 EXIF 丢掉。
-      所以这里用 <img> 解码 —— 现代浏览器渲染 <img> 时默认就按 EXIF 摆正
-      （image-orientation 默认值 from-image），drawImage 拿到的已经是摆正的位图。
-      服务端 sharp 的 rotate() 因此无从下手，但也不再需要。
+     为什么必须在浏览器里压：手机原图 3~5MB，六张 20MB+。不过现在压的理由变了 ——
+     从前是"挤那条很细的隧道"，现在是"R2 的存储和流量虽然是钱但也是配额，
+     而且大图在阵容墙上打开很慢"。上传路径本身不再经过家里的宽带了。
 
-      任何一步出错（浏览器不支持、解码失败、压完反而更大）一律**退回原文件**放行，
-      最坏也就是回到今天的样子。
+     ★方向：手机竖拍照片的方向记在 EXIF 里，canvas 重编码会把 EXIF 丢掉。
+     所以这里用 <img> 解码 —— 现代浏览器渲染 <img> 时默认就按 EXIF 摆正
+     （image-orientation 默认值 from-image），drawImage 拿到的已经是摆正的位图。
 
-   二、拖拽（仅桌面）
-      做法：把拖进来的文件灌进那个**原生** <input type="file">，表单照原样提交 ——
-      路由层、multer、压缩流水线一行都不用改，服务端完全不知道有拖拽这回事。
-      （灌得进去是因为 input.files 允许赋一个 DataTransfer 的 FileList。）
+   ★它**不是**防"猜 UUID"：站上所有阵容图 URL 都是公开的（游客可见的阵容墙上就渲染着），
+     别人的 key 是公开信息。它防的是"甲拿乙的 key 提交进自己的阵容、再删掉那一行，
+     把乙的图删掉" —— 详见 upload.js 里那段注释。
 
-      所以这是**增强**，不是依赖：脚本没加载、浏览器太老、JS 被关了，
-      页面就退回原来的样子，点 input 选文件一切照旧。
+   第二节、拖拽（仅桌面）
+     做法：把拖进来的文件灌进那个**原生** <input type="file">。
+     （灌得进去是因为 input.files 允许赋一个 DataTransfer 的 FileList。）
 
-      给模板留的钩子只有 input 上的两个：
-        multiple      有 = 能拖多张；没有 = 只留第一张
-        data-max="N"  还能再选几张（阵容墙的剩余额度，见 views/lineup.ejs）。
-                      拖多了截到前 N 张并说明，免得白传 40MB 才被服务端打回。
-      其余 DOM —— 虚线框 .drop-field、说明 .drop-hint、结果 .drop-msg ——
-      全在这里生成，模板里没有：没 JS 的页面上不该出现「可以拖进来」这种做不到的承诺。
+     给模板留的钩子：
+       form[data-upload-kind]        lineup / score，决定要令牌时的用途
+       form[data-key-field]          提交时用哪个字段名承载令牌（images / image_key）
+       form[data-upload-max-bytes]   单张压完后的上限，服务端渲染进来（唯一真源在服务端）
+       input[multiple]               有 = 能拖多张；没有 = 只留第一张
+       input[data-max="N"]           还能再选几张（阵容墙的剩余额度，见 views/lineup.ejs）
+       ★ 文件 input **没有 name** —— 这是"字节不再经手服务端"的**结构性保证**：
+         没有名字，浏览器就不会把文件放进表单里去。不是靠 input.value='' 之类的技巧。
    ========================================================================== */
 (function () {
   'use strict';
@@ -44,8 +48,8 @@
     return n >= MB ? (n / MB).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   }
 
-  // 能不能把 DataTransfer 的文件灌进原生 input？两半都靠它：
-  // 拖拽靠它把文件塞进去，压缩靠它把压完的换回来。不能的话两半都不成立。
+  // 能不能把 DataTransfer 的文件灌进原生 input？**只有拖拽那半靠它**了 ——
+  // 上传那半现在是"读出 input.files 直接 PUT"，用不着往回灌。
   // 探针用一个**真的** input 去赋值，而不是查 API 表：Safari < 14.1、Firefox < 62
   // 是赋值时才抛，光看 prototype 上有没有 files 看不出来。
   function canAssignFiles() {
@@ -60,25 +64,28 @@
   }
 
   /* ==========================================================================
-     一、提交前压缩
-     这一半本身就要 Promise / canvas / DataTransfer，已经进不了老浏览器，
-     所以用现代语法写，不跟着下面那半用 var + function 绕。
+     一、压缩 → 签名 → 直传
+     这一半要 Promise / canvas / fetch，进不了老浏览器，所以用现代语法写，
+     不跟着下面那半用 var + function 绕。
      ========================================================================== */
 
-  const MAX_EDGE = 2560;            // 长边上限。截图里的字要看得清，别缩太狠
-  const QUALITY = 0.85;             // 比服务端第一档的 84 略高，给二次编码留余量
-  const WORTH_BYTES = 300 * 1024;   // 小于这个体积的不值得动
-  const SKIP_BYTES = 600 * 1024;    // 尺寸本来就不大、体积也还行 → 原样放过，免得白丢一次画质
+  var MAX_EDGE = 2560;              // 长边上限。截图里的字要看得清，别缩太狠
+  var THUMB_EDGE = 640;             // 缩略图长边。页面上最大的显示位是 .thumb-lg 320px
+  var THUMB_Q = 0.72;               // 缩略图质量（和服务端时代的 640/q72 对齐）
 
-  const COMPRESSIBLE = /^image\/(jpeg|png|webp)$/;
+  // 大图的压缩阶梯：[长边, 质量]，从上往下试，第一个压进上限的就用。
+  // 第一档不缩尺寸（withoutEnlargement 等价于原样），因为只重编码往往就够了 ——
+  // 实测 2844×1280 的游戏截图原尺寸 q85 只有约 300KB，没必要为体积去动人家的像素。
+  // 真正压不动的（大面积噪点的照片）才逐档降尺寸。
+  var LADDER = [
+    [2560, 0.85], [2560, 0.72],
+    [1920, 0.75], [1600, 0.70],
+    [1280, 0.65], [1024, 0.60],
+  ];
 
-  function worthCompressing(f) {
-    return !!f && COMPRESSIBLE.test(f.type || '') && f.size > WORTH_BYTES;
-  }
+  var COMPRESSIBLE = /^image\/(jpeg|png|webp)$/;
 
-  function jpgName(name) {
-    return String(name || 'image').replace(/\.[^.]+$/, '') + '.jpg';
-  }
+  var toBlob = (cv, q) => new Promise((resolve) => cv.toBlob(resolve, 'image/jpeg', q));
 
   // 解码成位图。走 <img> 是为了稳妥地拿到「已按 EXIF 摆正」的那一份（见文件头）
   function decode(file) {
@@ -91,81 +98,125 @@
         h: img.naturalHeight || img.height,
         release: () => URL.revokeObjectURL(url),
       });
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('解码失败')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('读不出这张图（可能不是图片或已损坏）')); };
       img.src = url;
     });
   }
 
-  // 压一张。返回压好的 File；判断不该压、或压不动，返回 null（调用方原样放行）
-  async function shrink(file) {
+  // 按长边 edge 画到 canvas 上（不放大）。png 的透明区填白底 —— 和服务端时代
+  // sharp 的 flatten({background:'#ffffff'}) 保持一致，不然透明处会变黑。
+  function scaleCanvas(img, w, h, edge) {
+    const scale = Math.min(1, edge / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * scale));
+    const ch = Math.max(1, Math.round(h * scale));
+    const cv = document.createElement('canvas');
+    cv.width = cw;
+    cv.height = ch;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(img, 0, 0, cw, ch);
+    return cv;
+  }
+
+  // 走阶梯，返回第一个 <= MAX_BYTES 的 Blob；都压不下去返回 null。
+  // 同一档长边只画一次（阶梯里 2560 出现两次，只换质量）
+  async function ladderToFit(d, maxBytes) {
+    let cv = null, cvEdge = -1;
+    for (const [edge, q] of LADDER) {
+      if (edge !== cvEdge) { cv = scaleCanvas(d.img, d.w, d.h, edge); cvEdge = edge; }
+      const b = await toBlob(cv, q);
+      if (b && b.size <= maxBytes) return b;
+    }
+    return null;
+  }
+
+  // 一张图 → { full, thumb } 两个 Blob。**压不出来就抛**，没有"原样放过"的退路 ——
+  // 除了下面那一处（本来就是合规 jpeg 才放行）。
+  async function renderVariants(file, maxBytes) {
     const d = await decode(file);
     try {
-      if (!d.w || !d.h) return null;
+      if (!d.w || !d.h) throw new Error('读不出这张图的尺寸');
+      const longest = Math.max(d.w, d.h);
 
-      const scale = Math.min(1, MAX_EDGE / Math.max(d.w, d.h));
-      if (scale === 1 && file.size <= SKIP_BYTES) return null;
+      // 已经是"合规的 jpeg"就**原样过**，不重编码 —— 重编码会白丢一代画质，
+      // 而这在"换一张阵容图""重新提交"这类场景里是常态。
+      // 安全性不受影响：对象上的 Content-Type 是**签进签名里**的 image/jpeg，
+      // 与文件真实内容无关，所以这条捷径开不出"往图片域名塞 HTML"的口子。
+      const passthrough = file.type === 'image/jpeg' && file.size <= maxBytes && longest <= MAX_EDGE;
 
-      const cw = Math.max(1, Math.round(d.w * scale));
-      const ch = Math.max(1, Math.round(d.h * scale));
-      const cv = document.createElement('canvas');
-      cv.width = cw;
-      cv.height = ch;
+      let full = passthrough ? file : await ladderToFit(d, maxBytes);
+      if (!full) throw new Error(`这张图压不到 ${bytes(maxBytes)} 以下，换一张试试`);
 
-      const ctx = cv.getContext('2d');
-      // png 的透明区落成白底 —— 和服务端 sharp 的 flatten({background:'#ffffff'}) 保持一致，
-      // 不然透明处会变黑
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.drawImage(d.img, 0, 0, cw, ch);
-
-      const blob = await new Promise((resolve) => cv.toBlob(resolve, 'image/jpeg', QUALITY));
-      // 压完反而更大就别换了（个别已经很优的图会这样）
-      if (!blob || blob.size >= file.size) return null;
-
-      return new File([blob], jpgName(file.name), { type: 'image/jpeg', lastModified: Date.now() });
+      const thumb = await toBlob(scaleCanvas(d.img, d.w, d.h, THUMB_EDGE), THUMB_Q);
+      if (!thumb) throw new Error('缩略图生成失败');
+      return { full, thumb };
     } finally {
       d.release();
     }
   }
 
-  // 一个 input 里的文件挨个压，压完把 FileList 换掉。
-  // 返回 { n, before, after }：n 是真换掉了几张，before/after 是那几张的字节数
-  async function compressInput(input, note, label) {
-    const picked = Array.from(input.files || []);
-    if (!picked.some(worthCompressing)) return { n: 0, before: 0, after: 0 };
-
-    const out = [];
-    let n = 0, before = 0, after = 0;
-
-    for (let i = 0; i < picked.length; i++) {
-      const f = picked[i];
-      if (worthCompressing(f)) {
-        note.textContent = `${label}正在压缩第 ${i + 1}/${picked.length} 张…`;
-        let small = null;
-        try {
-          small = await shrink(f);
-        } catch (e) {
-          small = null;                      // 压不动就原样传，别把人卡在这儿
-        }
-        if (small) { out.push(small); n++; before += f.size; after += small.size; continue; }
-      }
-      out.push(f);
+  // 要令牌。**用 urlencoded 而不是 JSON** —— 这样服务端不必为了它挂 express.json()。
+  async function signUploads(kind, count) {
+    let res;
+    try {
+      res = await fetch('/uploads/sign', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({ kind, count: String(count) }),
+      });
+    } catch (e) {
+      throw new Error('连不上服务器，检查一下网络');
     }
-
-    if (n) {
-      const dt = new DataTransfer();
-      out.forEach((f) => dt.items.add(f));
-      input.files = dt.files;
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* 不是 JSON 就走下面的通用报错 */ }
+    if (res.status === 401) throw new Error('登录状态已过期，刷新页面重新登录');
+    if (!res.ok) throw new Error((data && data.error) || `服务端拒绝了（${res.status}）`);
+    if (!data || !Array.isArray(data.items) || data.items.length !== count) {
+      throw new Error('服务端没给出上传地址');
     }
-    return { n, before, after };
+    return data;
   }
 
-  function wireCompress() {
-    Array.prototype.forEach.call(document.querySelectorAll('form'), (form) => {
+  // 直传一张。headers **原样用服务端下发的** —— 它们是签进签名里的，
+  // 改一个字（哪怕只是大小写或多余空格）都会 403 SignatureDoesNotMatch。
+  async function putObject(url, blob, headers) {
+    let res;
+    try {
+      res = await fetch(url, { method: 'PUT', body: blob, headers });
+    } catch (e) {
+      throw new Error('传到图床失败，检查一下网络');
+    }
+    if (!res.ok) throw new Error(`传到图床失败（${res.status}）`);
+  }
+
+  // 把令牌写成隐藏 input 塞进表单。**先清掉上一轮注入的** —— 提交失败后重试会再走
+  // 一遍这个函数，不清就会注入两份，同一张图被提交两次。
+  function injectTokens(form, field, tokens) {
+    form.querySelectorAll('[data-upload-token]').forEach((el) => el.remove());
+    for (const t of tokens) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = field;
+      inp.value = t;
+      inp.setAttribute('data-upload-token', '');
+      form.appendChild(inp);
+    }
+  }
+
+  function wireUpload() {
+    Array.prototype.forEach.call(document.querySelectorAll('form[data-upload-kind]'), (form) => {
       const inputs = Array.from(form.querySelectorAll('input[type="file"]'));
       if (!inputs.length) return;
 
-      // 压缩要花几秒（手机上更久），得让人看见在动，不然会以为按了没反应
+      const kind = form.dataset.uploadKind;
+      const field = form.dataset.keyField || 'images';
+      // 上限由服务端渲染进来（唯一真源在服务端），拿不到就退回 1MB。
+      // 服务端提交时还会用 HeadObject 复核一遍体积，所以这里只是个"别白传"的前置判断。
+      const maxBytes = Number(form.dataset.uploadMaxBytes) || MB;
+
+      // 压缩 + 上传要好几秒（手机上更久），得让人看见在动，不然会以为按了没反应
       const note = document.createElement('p');
       note.className = 'muted compress-msg';
       note.setAttribute('aria-live', 'polite');   // 读屏软件也念一句
@@ -173,42 +224,82 @@
       if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(note, anchor.nextSibling);
 
       let busy = false;
-      // 万一提交没走成（网络断了、用户按了停止），页面还在，busy 得放开，
-      // 否则他重选一批图再提交就不会被压了。换文件就重新武装。
-      inputs.forEach((inp) => inp.addEventListener('change', () => { busy = false; }));
+      const fail = (msg) => {
+        busy = false;                              // 失败要复位，否则重试时这个监听会直接放行
+        note.textContent = msg;
+        note.classList.add('is-warn');
+      };
+
+      // 万一提交没走成（网络断了、用户按了停止），页面还在，busy 得放开。
+      // 换文件就重新武装（拖拽那半 dispatchEvent 的 change 也会走到这儿）。
+      inputs.forEach((inp) => inp.addEventListener('change', () => {
+        busy = false;
+        note.textContent = '';
+        note.classList.remove('is-warn');
+      }));
 
       form.addEventListener('submit', (e) => {
-        if (busy) return;                          // 第二次进来是压缩完之后我们自己发的
-        if (!inputs.some((inp) => Array.from(inp.files || []).some(worthCompressing))) return;
-        if (!canAssignFiles()) return;             // 换不回去，那就别拦这一下
+        if (busy) return;                          // 第二次进来是我们自己 form.submit() 那一次
+
+        const files = [];
+        inputs.forEach((inp) => Array.from(inp.files || []).forEach((f) => files.push(f)));
+
+        // 没选图就**照常提交** —— /score 只改分数、/lineup 只改说明都走这条路。
+        // （旧代码这里判的是"值不值得压"，语义完全不同，别照抄。）
+        if (!files.length) return;
+
+        const notImage = files.find((f) => !COMPRESSIBLE.test(f.type || ''));
+        if (notImage) {
+          e.preventDefault();
+          fail(`只收 jpg / png / webp：${notImage.name}`);
+          return;
+        }
 
         e.preventDefault();
         busy = true;
+        note.classList.remove('is-warn');
+        note.textContent = '准备中…';
 
         (async () => {
-          let n = 0, before = 0, after = 0;
           try {
-            for (let i = 0; i < inputs.length; i++) {
-              const label = inputs.length > 1 ? `第 ${i + 1}/${inputs.length} 项 · ` : '';
-              const r = await compressInput(inputs[i], note, label);
-              n += r.n; before += r.before; after += r.after;
+            // 1. 先全压完 —— 失败了也一个对象都没产生
+            const variants = [];
+            for (let i = 0; i < files.length; i++) {
+              note.textContent = `正在压缩第 ${i + 1}/${files.length} 张…`;
+              variants.push(await renderVariants(files[i], maxBytes));
             }
-          } catch (e) {
-            /* 出什么事都别拦着提交，原样传 */
+            const before = files.reduce((n, f) => n + f.size, 0);
+            const after = variants.reduce((n, v) => n + v.full.size + v.thumb.size, 0);
+
+            // 2. 再要令牌（顺带做配额预检：赛期在不在、阵容额度够不够）
+            note.textContent = '正在上传…';
+            const { items } = await signUploads(kind, files.length);
+
+            // 3. 再 PUT：每张两个对象（原图 + 缩略图）
+            const tokens = [];
+            for (let i = 0; i < variants.length; i++) {
+              note.textContent = `正在上传第 ${i + 1}/${files.length} 张…`;
+              await putObject(items[i].url, variants[i].full, items[i].headers);
+              await putObject(items[i].thumbUrl, variants[i].thumb, items[i].headers);
+              tokens.push(items[i].token);
+            }
+
+            note.textContent = `传好了 ${variants.length} 张 · ${bytes(before)} → ${bytes(after)}，正在提交…`;
+            injectTokens(form, field, tokens);
+            // form.submit() 不触发 submit 事件，不会再绕回上面那个监听（busy 也还立着）
+            form.submit();
+          } catch (err) {
+            // ★ 和旧代码最大的语义差别：**失败不再放行提交**。
+            //   旧代码是"出什么事都别拦着提交，原样传"——那时服务端会收下文件。
+            //   现在服务端收不到字节，放行等于提交一个空表单（图静默地没了）。
+            fail(`上传失败：${err.message}。图片还在你手上，重试一次就行。`);
           }
-          if (n) {
-            note.textContent = `已压缩 ${n} 张 · ${bytes(before)} → ${bytes(after)}，正在上传…`;
-          } else {
-            note.textContent = '';
-          }
-          // form.submit() 不触发 submit 事件，不会再绕回上面那个监听
-          form.submit();
         })();
       });
     });
   }
 
-  wireCompress();
+  wireUpload();
 
   /* ==========================================================================
      二、拖拽（仅桌面，下面沿用原来的写法）
@@ -222,11 +313,11 @@
   // 以触摸为主（手机、平板）的设备上没有拖拽这回事，摆一个拖不动的虚线框
   // 外加一句「可以把图片拖进来」纯粹是添乱 —— 那边本来就是点一下从相册选。
   // 于是整段不启用，页面上不会多出任何东西，点选照旧。
-  // （注意：压缩那一半在上面，手机照样有，别把 return 提到它前面去。）
+  // （注意：上传那一半在上面，手机照样有，别把 return 提到它前面去。）
   if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
 
-  // 判据必须和 upload.js 里 multer 的 fileFilter（EXT 表）一致：
-  // 这里放行服务端会拒，这里误拦用户白拖一次。
+  // 判据必须和上面 COMPRESSIBLE 一致：这里放行、上面会拒，用户白拖一次。
+  // （从前它对应的是服务端 multer 的 EXT 表，那张表随直传一起没了。）
   var OK_TYPE = /^image\/(jpeg|png|webp)$/;
   var OK_EXT = /\.(jpe?g|png|webp)$/i;
 
@@ -287,6 +378,7 @@
     ok.forEach(function (f) { dt.items.add(f); });
     z.input.files = dt.files;
     // 有别的脚本挂了 change 的话也该收到；bubbles 是给外层监听用的
+    // （上面那个 change 监听会借它把 busy 复位、把提示清掉）
     z.input.dispatchEvent(new Event('change', { bubbles: true }));
 
     var total = ok.reduce(function (n, f) { return n + f.size; }, 0);

@@ -127,8 +127,8 @@
             href 仍然照旧 —— 没 JS 时它就是原图链接。 %>
         <%# 卡上显示的是**缩略图**（长边 640，约 25KB），原图 350KB 只在点开看大图时才下。
             这一格显示出来只有 200×160，喂原图等于让整面墙把带宽吃光（见 upload.js）。 %>
-        <a class="shot-frame" href="/uploads/<%= img.filename %>" target="_blank" rel="noopener"
-           data-shots="<%= r.images.map((i) => `/uploads/${i.filename}`).join(' ') %>">
+        <a class="shot-frame" href="<%= imgUrl(img.filename) %>" target="_blank" rel="noopener"
+           data-shots="<%= r.images.map((i) => imgUrl(i.filename)).join(' ') %>">
           <img src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图"
                loading="lazy" decoding="async">
         </a>

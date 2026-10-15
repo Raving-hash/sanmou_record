@@ -1,173 +1,177 @@
-const path = require('path');
-const fs = require('fs');
-const fsp = require('fs/promises');
 const crypto = require('crypto');
-const multer = require('multer');
-const sharp = require('sharp');
+const r2 = require('./r2');
 
-const DIR = path.join(__dirname, 'uploads');
-const STAGE = path.join(DIR, '.incoming');   // 原始上传先落这里，压完立刻删
-const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+/* ==========================================================================
+   图片的**命名 / 签名 / 删除策略**。（出网那一层在 r2.js，这里只管规矩。）
 
-const MAX_INPUT = 10 * 1024 * 1024;   // 玩家单张原图的体积上限
-const MAX_OUT = 1024 * 1024;          // ★ 压缩后的硬上限：1MB
+   2026-10-15 起图片存在 Cloudflare R2 上，**由浏览器直传**，后端不再经手字节。
+   于是从前"multer 收字节 → sharp 压到 <1MB → 落 uploads/"那条流水线整体没了，
+   压缩和缩略图都搬到 public/upload.js（浏览器里用 canvas 做）。
 
-// ---------- 缩略图 ----------
-// 页面上显示这些图的地方其实都很小：阵容卡 200×160（手机 150×120）、表格里的
-// .thumb 200×160、最大的 .thumb-lg 也就 320 宽。从前一律喂原图（350~390KB 一张），
-// 而隧道单程 1.1s —— 实测首页二十张图 5.19MB 要 35s，一屏小格子把整条带宽吃光了。
-//
-// 命名：原文件名后面**直接接**后缀 —— <uuid>.jpg → <uuid>.jpg.thumb.jpg。
-// 为什么不加在中缀（<uuid>.thumb.jpg）：那样反推不回原图（.jpg 还是 .png？），
-// 而 /uploads 的游客白名单正是靠"把后缀切掉再查库"来决定放不放行的（见 app.js）。
-// 为什么不另开一个 uploads/t/ 子目录：这样一来 uploads/ 仍然是**平铺一层**，
-// 删图时顺手删掉旁边那个 .thumb.jpg 就行，不用管目录、也不用清空目录。
-//
-// 640 / q72 是照着真图挑的：350~390KB → 23~30KB（约 13 倍），
-// 而最大那个显示位（.thumb-lg 320px）在 2 倍屏上也只需要 640。要调就改这两行。
+   这个文件仍然存在的理由，是保住从前那两条不变量（它们跟"图存在哪"无关）：
+     · **命名规则只有一处** —— 模板、lightbox、删除、迁移脚本都从这里取；
+     · **删图必须连缩略图一起删** —— 漏了就在桶里积一堆没人引用的 .thumb.jpg。
+
+   命名沿用改造前的：`<uuid>.jpg` 与它的 `<uuid>.jpg.thumb.jpg`。
+   ★ 后缀为什么接在原名**后面**（`x.jpg.thumb.jpg`）而不是中缀（`x.thumb.jpg`）：
+     中缀反推不回原图（`x.thumb.jpg` 切掉后缀剩 `x`，分不出 `.jpg` 还是 `.png`），
+     而老链接的 302 与全站的 thumbUrl 都要靠"切掉后缀折回原图"。
+     更要紧的是：**桶上已经躺着 58 个按这个规则命名的对象**（迁移时一个字节没改名），
+     所以这个规则现在是硬约束，不是可以顺手改掉的风格问题。
+   ========================================================================== */
+
 const THUMB_SUFFIX = '.thumb.jpg';
-const THUMB_EDGE = 640;
-const THUMB_Q = 72;
 
-// STAGE 必须以字符串形式传给 multer，所以得先建出来。
-// 目录名以点开头，express.static 默认 dotfiles:'ignore'，不会被 /uploads 暴露。
-fs.mkdirSync(STAGE, { recursive: true });
+// 单张图（压完）的体积上限。原来是服务端 sharp 保证的，现在由**浏览器**保证
+// （public/upload.js 压到 ≤ 这个值才发），服务端拿到 key 之后用 HeadObject 复核。
+// 两处必须一致 —— 所以它从这里出，由 /uploads/sign 随响应下发给前端。
+const MAX_OUT_BYTES = Number(process.env.MAX_OUT_BYTES || 1024 * 1024);
 
-// multer 只负责把原始文件收下来落到 STAGE。真正入库的是压缩后的那份，
-// 文件名在 compressUploads 里换成 <uuid>.jpg（见下）。
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: STAGE,
-    filename: (req, file, cb) => cb(null, crypto.randomUUID()),
-  }),
-  limits: { fileSize: MAX_INPUT },
-  fileFilter: (req, file, cb) =>
-    EXT[file.mimetype] ? cb(null, true) : cb(new Error('只支持 jpg / png / webp 图片')),
-});
+// 每人每期的阵容图上限。从前 routes/main.js 里有一份、app.js 的 locals 里又有一份，
+// 现在收到这里一处。
+const MAX_LINEUP = Number(process.env.MAX_LINEUP || 6);
 
-// 压缩阶梯：[长边上限, jpeg 画质]，从上往下试，第一个压进 1MB 的就用。
-//
-// 第一档特意不缩尺寸（4096 配上 withoutEnlargement 等于原样），
-// 因为只重编码往往就够了 —— 实测 2844×1280 的游戏截图，原尺寸 q84 只有约 300KB，
-// 没必要为了体积去动人家的像素。真正压不动的图（大面积噪点的照片）才逐档降尺寸。
-// 末尾几档是兜底：1000 万像素的纯噪声图要降到长边 1600 才能进 1MB。
-const LADDER = [
-  [4096, 84], [4096, 76],
-  [3200, 80], [3200, 72],
-  [2560, 78], [2560, 70],
-  [1920, 76], [1920, 66],
-  [1600, 72], [1600, 62],
-  [1280, 70],
-  [1024, 66],
-];
+// 签名令牌的有效期。只需覆盖"压缩 + 上传"这一段（前端是**先全压完再签名**，
+// 所以这期间不夹着几分钟的客户端压缩），10 分钟很宽裕。
+const SIGN_TTL = Number(process.env.SIGN_TTL || 600);
 
-// 压一张，写成 DIR/<outName>，返回压缩后的字节数
-async function compressOne(srcPath, outName) {
-  //    rotate() 无参 = 按 EXIF 方向摆正，手机竖拍的照片不会再躺着
-  //    failOn:'none' = 尾部截断的图也照压，不整个失败
-  //    limitInputPixels = 防解压炸弹（1 亿像素）
-  const base = sharp(srcPath, { failOn: 'none', limitInputPixels: 1e8 }).rotate();
+// 对象上的类型与缓存头。**必须在 PUT 的那一刻写进对象元数据** —— R2 不会自己加，
+// 而从前那条 `private, max-age=31536000, immutable` 是 app.js 现盖的（现在那层没了）。
+// 不写进去 = 浏览器拿到 R2 的默认策略，README 里量过的"重刷时图片请求是 0"当场回归
+// （20 张图逐张回问要 2.3s，并发挤一起实测到过 24.6s）。
+// public 而不是 private：图片现在对所有人一视同仁，不再有"积分截图只有登录能看"。
+// ★ 这两个头还要**签进 presigned URL 的签名头**里（routes/uploads.js 调 presignPut 时
+//   传的就是它），否则客户端能改 —— 尤其 content-type 不签的话，别人可以拿这张 URL
+//   往图片域名上传一个 text/html，**在自己的域名下挂钓鱼页**。
+const IMG_TYPE = 'image/jpeg';
+const CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const PUT_HEADERS = { 'Content-Type': IMG_TYPE, 'Cache-Control': CACHE_CONTROL };
 
-  for (const [edge, quality] of LADDER) {
-    let buf;
-    try {
-      buf = await base.clone()
-        .resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true })
-        .flatten({ background: '#ffffff' })   // png 的透明区落成白底，jpeg 不支持透明，不然会变黑
-        .jpeg({ quality, chromaSubsampling: '4:2:0' })
-        .toBuffer();
-    } catch {
-      // 走到这里说明 sharp 根本解不开这个文件：改了后缀的文本、损坏的图、等等
-      throw new Error('这个文件不是能识别的图片，或者已经损坏了');
-    }
-    if (buf.length <= MAX_OUT) {
-      await fsp.writeFile(path.join(DIR, outName), buf);
-      return buf.length;
-    }
-  }
-  throw new Error('这张图压不到 1MB 以下，换一张试试');
+if (!process.env.SESSION_SECRET) throw new Error('缺少 SESSION_SECRET，请检查 .env');
+
+/* ---------- 命名与 URL ---------- */
+
+// 图片的公开域名（.env 的 R2_PUBLIC_BASE_URL；r2.js 已经保证它存在）。
+// **全站拼图片 URL 的唯一出口**：模板里的 imgUrl/thumbUrl、老链接的 302 都走这里。
+const IMG_BASE = r2.PUBLIC_BASE;
+const imgUrl = (name) => `${IMG_BASE}/${name}`;
+const thumbUrl = (name) => `${IMG_BASE}/${name}${THUMB_SUFFIX}`;
+
+// 造一个新的 key。**必须由服务端造**，两个理由：
+//   ① 本站是纯 HTTP（用户硬性要求，见 README），浏览器里没有 secure context，
+//      `crypto.randomUUID()` 压根是 undefined；
+//   ② 服务端要能认出"这个名字是我刚发出去的"（见下面的令牌）。
+const mintKey = () => crypto.randomUUID() + '.jpg';
+
+/* ---------- 令牌：证明"这个 key 是我刚发给你的" ----------
+
+   ★ 这一层**不是**在防"猜 UUID"，是在堵一条真实的越权删除路径。
+     站上所有阵容图 URL 都是**公开的**（游客可见的阵容墙上就渲染着，见
+     views/partials/lineup-gallery.ejs），所以**别人的 key 是公开信息，不用猜**。
+     而没有令牌时：
+       甲把乙的 key 提交进自己的阵容 → 再删掉那一条 → removeFile(乙的 key)
+       → **乙的图被删掉**，而乙库里还留着一条指向空对象的记录。
+     `lineup_images.filename` 没有 UNIQUE 约束（schema.sql）、删图时无条件
+     removeFile，所以这条路是通的。`/score` + 撤回同构，删赛期时还会连坐。
+     结论：必须有"这个名字是不是**我**刚从**这台服务器**领到的"校验。
+
+   为什么不做成服务端的一张 pending 表：session 用的是 cookie-session，
+   **整个 session 存在签名 cookie 里**（app.js），把十几个 UUID 塞进去会撑爆 4KB。
+   所以走无状态 HMAC，复用已有的 SESSION_SECRET，不新增存储、不新增依赖。
+
+   为什么**逐 key 签**而不是整批签一个：6 张里有 1 张解码失败时，逐 key 允许
+   提交剩下 5 张；整批签则一张失败整批失效。也天然扛重复提交。 */
+const sigOf = (uid, key, exp) => crypto
+  .createHmac('sha256', process.env.SESSION_SECRET)
+  .update(`${uid}|${key}|${exp}`)
+  .digest('hex')
+  .slice(0, 32);
+
+// 发给前端的令牌串（放进隐藏 input 的值里）。key 里不含 `|`，用它分隔是安全的。
+const issueToken = (uid, key) => {
+  const exp = Math.floor(Date.now() / 1000) + SIGN_TTL;
+  return `${key}|${exp}|${sigOf(uid, key, exp)}`;
+};
+
+// key 的形状。**先卡形状再比签名，顺序不能反** —— 形状这关挡掉带 `/`、带 NUL 之类的
+// 怪东西，不让它们进到后面的比较里。它同时是"老链接 302"那条路由的判据。
+const KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/;
+const isKey = (s) => typeof s === 'string' && KEY_RE.test(s);
+
+// 校验一条令牌，通过返回 key，否则 null
+function checkToken(uid, token) {
+  if (typeof token !== 'string' || token.length > 200) return null;
+  const parts = token.split('|');
+  if (parts.length !== 3) return null;
+  const [key, expStr, sig] = parts;
+  if (!isKey(key)) return null;
+  const exp = Number(expStr);
+  if (!Number.isInteger(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+  const want = sigOf(uid, key, exp);
+  // timingSafeEqual 要求等长；长度不等直接判否（长度本身不是秘密）
+  if (sig.length !== want.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  return key;
 }
 
-// 生成（或确认已经存在）某张图的缩略图，返回缩略图的文件名。**幂等**：已经有了就直接返回。
-// name 是 uploads/ 里的文件名（<uuid>.jpg）。原图不在就让它抛 ENOENT，由调用方决定怎么办。
-// 原图是 compressOne 刚写出来的、已经摆正过的 jpg，所以这里不用再 rotate。
-async function makeThumb(name) {
-  const base = path.basename(name);
-  const out = base + THUMB_SUFFIX;
-  if (fs.existsSync(path.join(DIR, out))) return out;
+/* 从表单里读出一批令牌。Express 的 urlencoded 解析下重复字段名给出数组
+   （`images=a&images=b`）。返回 { keys, bad }：keys 是**校验通过且去重**的，
+   bad 是没通过的（调用方据此报错，别静默丢弃）。
 
-  const buf = await sharp(path.join(DIR, base), { failOn: 'none' })
-    .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: 'inside', withoutEnlargement: true })
-    .flatten({ background: '#ffffff' })
-    .jpeg({ quality: THUMB_Q, chromaSubsampling: '4:2:0' })
-    .toBuffer();
+   `field` 由模板决定：/lineup 用 `images`，/score 用 `image_key`。 */
+function readKeys(req, field) {
+  const raw = req.body ? req.body[field] : null;
+  const list = Array.isArray(raw) ? raw : (raw == null ? [] : [raw]);
+  const keys = [];
+  const bad = [];
+  for (const t of list) {
+    const k = checkToken(req.user && req.user.id, t);
+    if (k) { if (!keys.includes(k)) keys.push(k); } else bad.push(String(t).slice(0, 60));
+  }
+  return { keys, bad };
+}
 
-  // 先落 STAGE（以点开头的目录，express.static 不发它）再 rename 过去：
-  // rename 是原子的，并发的第二个请求不会读到半张图；中途失败也不会在 uploads/ 里留垃圾。
-  const tmp = path.join(STAGE, crypto.randomUUID());
-  await fsp.writeFile(tmp, buf);
+/* ---------- 删除 ----------
+   语义与改造前完全一致（**名字和签名都没变**，所以 routes/ 下的调用点几乎不用改）：
+   删一个名字，连它的缩略图一起删；对象不存在也不报错。
+
+   改成异步了：删的是**远端对象**，不像从前 unlinkSync 那样微秒级返回。
+   大多数调用点是"删完就去重定向"，不该被一次出网请求拖住，所以调用方**不 await**、
+   失败只记日志（删除幂等，漏一次还有 r2-gc 兜底）。
+   唯一例外是 routes/admin.js 删整个赛期那条 —— 它下面那句提示语报了张数，
+   必须 await 才不算撒谎。 */
+// 一个名字 → 它实际对应的**全部**对象（原图，以及不是缩略图时再加一个缩略图）。
+// 两处唯一的差别就是这个展开规则，所以抽出来，别在 removeFile/removeFiles 里各写一遍。
+function expand(names) {
+  const list = [];
+  for (const n of names || []) {
+    if (!n) continue;
+    const base = String(n).replace(/^.*\//, '');   // 防手滑传进来一个路径
+    list.push(base);
+    if (!base.endsWith(THUMB_SUFFIX)) list.push(base + THUMB_SUFFIX);
+  }
+  return [...new Set(list)];
+}
+
+async function deleteKeys(keys) {
+  if (!keys.length) return { deleted: [], errors: [] };
   try {
-    await fsp.rename(tmp, path.join(DIR, out));
-  } catch (err) {
-    await fsp.rm(tmp, { force: true });
-    throw err;
-  }
-  return out;
-}
-
-// 挂在 multer 之后。把 STAGE 里的原始文件逐个压成 <1MB 的 jpg，
-// 并把 file.filename 换成压缩后的名字 —— 路由层拿到的就是最终文件名，一行都不用改。
-async function compressUploads(req, res, next) {
-  const files = req.files || (req.file ? [req.file] : []);
-  const staged = files.map((f) => f.path);
-
-  try {
-    for (const f of files) {
-      const out = crypto.randomUUID() + '.jpg';
-      f.size = await compressOne(f.path, out);
-      f.filename = out;
-      f.mimetype = 'image/jpeg';
-      // 缩略图跟着原图一起做出来：页面第一次引用它时就是现成的，不用在请求路径上现压。
-      // **做不出来不算上传失败**（原图都已经压好了，几乎不可能）—— app.js 的 /uploads
-      // 那边有兜底，会在第一次被要到时补一张，用户顶多第一次点开慢一点。
-      await makeThumb(out).catch((e) => console.error('生成缩略图失败（不影响上传）：', out, e.message));
-    }
-    next();
-  } catch (err) {
-    // 中途失败：已经压好的那几张也不能留在库里（它们还没进数据库）。
-    // 走 removeFile 而不是直接 rm —— 它会把缩略图一起带走；漏了的话这里会留下
-    // 没人引用的 <uuid>.jpg.thumb.jpg（那几张的缩略图可能已经做好了）。
-    // 还没轮到的 f.filename 是 STAGE 里的临时名，removeFile 找不到就算了（下面 finally 收尾）。
-    for (const f of files) removeFile(f.filename);
-    next(err);
-  } finally {
-    await Promise.all(staged.map((p) => fsp.rm(p, { force: true })));
+    const r = await r2.removeKeys(keys);
+    if (r.errors.length) console.error('删图失败：', r.errors.join('、'));
+    return r;
+  } catch (e) {
+    console.error('删图出错：', keys.join('、'), e.message);
+    return { deleted: [], errors: [e.message] };
   }
 }
 
-// 删除文件；文件不存在也不报错。**缩略图跟着原图一起删** —— 它就在同一个目录里，
-// 漏删的话 uploads/ 会慢慢积一堆没人引用的 <uuid>.jpg.thumb.jpg。
-// 全站的删图都走这里（删单张阵容图、换积分截图、删赛期、上传失败回滚），所以只有这一处要管。
-// 改成同步 unlink：这些路径要的就是"回完响应它一定已经没了"，而且删的本就是本地小文件（微秒级）。
-function removeFile(name) {
-  if (!name) return;
-  const base = path.basename(name);
-  const list = base.endsWith(THUMB_SUFFIX) ? [base] : [base, base + THUMB_SUFFIX];
-  for (const n of list) {
-    try { fs.unlinkSync(path.join(DIR, n)); } catch { /* 本来就不在 */ }
-  }
-}
-
-// 批量删除（删除赛期 / 上传失败回滚时用）
-function removeFiles(names) {
-  for (const n of names || []) removeFile(n);
-}
+const removeFile = (name) => deleteKeys(name ? expand([name]) : []);
+const removeFiles = (names) => deleteKeys(expand(names));
 
 module.exports = {
-  upload, compressUploads, removeFile, removeFiles, compressOne,
-  makeThumb, THUMB_SUFFIX,
-  UPLOAD_DIR: DIR, ALLOWED_EXT: EXT,
-  MAX_INPUT_BYTES: MAX_INPUT, MAX_OUT_BYTES: MAX_OUT,
+  THUMB_SUFFIX, MAX_OUT_BYTES, MAX_LINEUP, SIGN_TTL,
+  IMG_TYPE, CACHE_CONTROL, PUT_HEADERS,
+  IMG_BASE, imgUrl, thumbUrl, mintKey,
+  issueToken, checkToken, readKeys, isKey,
+  removeFile, removeFiles,
 };
-// compressOne 导出给 scripts/recompress.js 用：老图的补压必须走同一套阶梯，
-// 抄一份到脚本里迟早会和这里改岔。

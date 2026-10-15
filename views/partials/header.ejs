@@ -1,8 +1,12 @@
 <!doctype html>
 <!-- data-theme="dark" 是墨金主题的前提：Pico 靠它切到暗色令牌分支。
      写死在这里（而不是跟随系统）是为了所有人看到的都是同一套配色。
-     style.css 里的 --pico-primary-inverse 等假设也建立在暗色分支上。 -->
-<html lang="zh-CN" data-theme="dark">
+     style.css 里的 --pico-primary-inverse 等假设也建立在暗色分支上。
+     data-img-base 是给 public/lightbox.js 判"这个链接是不是图"用的前缀：
+     图片自 2026-10-15 起在 Cloudflare R2 的公开域名上（.env 的 R2_PUBLIC_BASE_URL），
+     href 成了跨域的绝对地址，JS 里没法再靠相对路径判断。域名只从服务端来，
+     静态 JS 里一个字都不硬编码。 -->
+<html lang="zh-CN" data-theme="dark" data-img-base="<%= imgBase %>">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

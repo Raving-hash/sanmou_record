@@ -80,7 +80,7 @@ router.post('/seasons/:id/reopen', (req, res) => {
   res.redirect(`/seasons/${season.id}`);
 });
 
-router.post('/seasons/:id/delete', (req, res) => {
+router.post('/seasons/:id/delete', async (req, res) => {
   const season = db.getSeason(Number(req.params.id));
   if (!season) { err(req, '没有这一期'); return res.redirect('/admin'); }
 
@@ -90,10 +90,15 @@ router.post('/seasons/:id/delete', (req, res) => {
   // 所以必须先退、再删）。
   const reverted = db.revertEye(season.id);
   db.prepare('DELETE FROM seasons WHERE id=?').run(season.id);   // 级联删 entries / lineup_images
-  removeFiles(files);
+
+  // ★ 这里**必须 await**（全站唯一一处）：下一行那句提示语报了张数，异步的话它就是在撒谎。
+  //   而且这是全站最重的一次批量删除（一整期的图，还要连缩略图一起删），
+  //   值得让它的失败可见 —— 其余删图的地方都是"删完就重定向"，不 await 是怕拖慢用户。
+  const del = await removeFiles(files);
 
   ok(req, `已删除「${season.name}」，连同 ${files.length} 张图片`
-    + (reverted ? `，并退回 ${reverted} 人的慧眼等级` : ''));
+    + (reverted ? `，并退回 ${reverted} 人的慧眼等级` : '')
+    + (del.errors.length ? `（⚠ 有 ${del.errors.length} 个对象没删掉，稍后跑一次 r2-gc）` : ''));
   res.redirect('/admin');
 });
 

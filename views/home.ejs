@@ -103,7 +103,7 @@
                 <td class="num"><strong><%= r.score %></strong></td>
                 <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
                 <td>
-                  <a href="/uploads/<%= r.score_image %>" target="_blank" rel="noopener">
+                  <a href="<%= imgUrl(r.score_image) %>" target="_blank" rel="noopener">
                     <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="积分截图" loading="lazy">
                   </a>
                 </td>
@@ -111,9 +111,9 @@
                   <% if (r.images.length) { %>
                     <div class="thumb-row">
                       <%# data-shots 是这个人的全部阵容截图，给 public/lightbox.js 的弹层翻页用 %>
-                      <% const shots = r.images.map((i) => `/uploads/${i.filename}`).join(' '); %>
+                      <% const shots = r.images.map((i) => imgUrl(i.filename)).join(' '); %>
                       <% r.images.forEach((img) => { %>
-                        <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
+                        <a href="<%= imgUrl(img.filename) %>" target="_blank" rel="noopener" data-shots="<%= shots %>">
                           <img class="thumb" src="<%= thumbUrl(img.filename) %>" alt="阵容截图" loading="lazy">
                         </a>
                       <% }) %>

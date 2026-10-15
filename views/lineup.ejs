@@ -2,7 +2,7 @@
 
 <hgroup class="page-head">
   <h2>上传阵容 · <%= season.name %></h2>
-  <p class="muted">最多 <%= max %> 张，支持 jpg / png / webp，单张不超过 10MB</p>
+  <p class="muted">最多 <%= max %> 张，支持 jpg / png / webp，在浏览器里压缩后上传</p>
 </hgroup>
 
 <h3>已上传（<%= images.length %> / <%= max %>）</h3>
@@ -12,7 +12,7 @@
   <div class="gallery">
     <% images.forEach((img) => { %>
       <figure>
-        <a href="/uploads/<%= img.filename %>" target="_blank" rel="noopener">
+        <a href="<%= imgUrl(img.filename) %>" target="_blank" rel="noopener">
           <img src="<%= thumbUrl(img.filename) %>" alt="阵容截图" loading="lazy">
         </a>
         <form method="post" action="/lineup/<%= img.id %>/delete">
@@ -23,9 +23,17 @@
   </div>
 <% } %>
 
-<form method="post" action="/lineup" enctype="multipart/form-data">
+<%# ⚠ 这个表单**不能有 enctype="multipart/form-data"**：字节是由浏览器直传 R2 的，
+     表单本身只剩 lineup_note 一个文字字段。留着 enctype 的话浏览器按 multipart 发，
+     而服务端已经没有 multer（没有任何 multipart 解析器），lineup_note 会**静默丢失**
+     —— 表现是"说明保存不上"，特别难查。
+     ⚠ 文件 input **不能有 name**：没有名字它才不参与提交。这是"字节不再经手服务端"的
+     结构性保证，不是靠 input.value='' 之类的技巧。同一条也见 views/score.ejs。 %>
+<form method="post" action="/lineup"
+      data-upload-kind="lineup" data-key-field="images"
+      data-upload-max-bytes="<%= maxOutBytes %>">
   <label>继续上传
-    <input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple
+    <input type="file" accept="image/jpeg,image/png,image/webp" multiple
            data-max="<%= max - images.length %>">
     <small class="muted">可以一次多选，最多还能传 <%= max - images.length %> 张</small>
   </label>
@@ -34,6 +42,11 @@
               placeholder="这套阵容的思路、站位、克制谁……"><%= entry && entry.lineup_note ? entry.lineup_note : '' %></textarea>
   </label>
   <button type="submit">保存</button>
+  <%# 图片由浏览器直传图床，**这一步必须有 JS**（服务端不再收字节了）。
+      从前"脚本没加载也照旧"那条降级没有了，所以明说一句，别让人对着一个
+      点了没反应的按钮猜。 %>
+  <noscript><p class="flash flash-err">你的浏览器禁用了 JavaScript，传不了图。
+    请换个浏览器、或者把本站的 JS 放开——这是把图片直传图床所必需的。</p></noscript>
 </form>
 
 <p><small class="muted">只改阵容截图或说明，不会影响你的积分提交时间。</small></p>

@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const cookieSession = require('cookie-session');
 const db = require('./db');
-const { UPLOAD_DIR, THUMB_SUFFIX, makeThumb } = require('./upload');
+const { imgUrl, thumbUrl, IMG_BASE, MAX_OUT_BYTES } = require('./upload');
 
 if (!process.env.SESSION_SECRET) throw new Error('缺少 SESSION_SECRET，请检查 .env');
 
@@ -68,11 +68,23 @@ app.use((req, res, next) => {
     const rest = hours % 24;
     return rest ? `还剩 ${days} 天 ${rest} 小时` : `还剩 ${days} 天`;
   };
-  // 图片的缩略图地址。页面上真正需要原图的地方只有"点开看大图"（lightbox 和
+  // 图片地址。页面上真正需要原图的地方只有"点开看大图"（lightbox 和
   // <a target="_blank"> 的 href），其余全是小格子 —— 模板里一律写 thumbUrl(名字)，
-  // 那几个格子就只下几十 KB 而不是几百 KB（见 upload.js 的缩略图那段）。
-  // 命名规则只写在 upload.js 一处，模板不去拼那个后缀，省得将来改了大小对不上。
-  res.locals.thumbUrl = (name) => `/uploads/${name}${THUMB_SUFFIX}`;
+  // 那几个格子就只下几十 KB 而不是几百 KB。
+  //
+  // ★ 2026-10-15 起这两个助手返回的是**跨域的绝对地址**（Cloudflare R2 的公开域名），
+  //   不再是站内的 `/uploads/…`。命名规则与域名都只写在 upload.js / .env 一处。
+  // ★ `href` 与同一条上的 `data-shots` **必须都走 imgUrl** —— lightbox 要靠逐字节
+  //   相等在组里定位当前这张（public/lightbox.js），一个相对一个绝对就会出幻影「1/2」。
+  // ★ imgBase 是给 lightbox 判前缀用的（模板写到 <html data-img-base>），
+  //   这样 JS 里也不用硬编码域名。
+  res.locals.imgUrl = imgUrl;
+  res.locals.thumbUrl = thumbUrl;
+  res.locals.imgBase = IMG_BASE;
+  // 单张压完后的体积上限。给模板渲染进表单的 data-upload-max-bytes ——
+  // 浏览器要先知道这个数才好在本地压到合适（服务端提交时还会 HEAD 复核一遍）。
+  // 从 upload.js 取而不是在模板里写死：改一处就够。
+  res.locals.maxOutBytes = MAX_OUT_BYTES;
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
   // 「最高 400 由谁打的」那个名字走 views/partials/name-list.ejs —— 从前是这里的一个
@@ -127,72 +139,10 @@ const requireAdmin = (req, res, next) => (req.user?.is_admin ? next() : res.stat
 
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// /uploads 下的图分两类，而且**物理同层**：阵容图和积分截图都是 uploads/<uuid>.jpg，
-// URL 空间里分不出谁是谁（那个目录下只有一个点开头的 .incoming，static 不发它）。
-// 所以「游客能看阵容图、不能看积分截图」只能逐文件查库：名字在 lineup_images 里就放行，
-// 其余（entries.score_image、没人引用的孤儿文件）照旧只有登录能取。
-// 用 404 而不是 403 —— 403 等于告诉对方"这里确实有一张积分截图"。
-// **不缓存这份白名单**（不做 Set）：有人刚传完阵容就该立刻能看到，一次带索引的微查询
-// 在这个量级上直接忽略。
-// 注意 req.path 在这个挂载点里已经被 Express 切掉了 /uploads 前缀（只剩一个前导斜杠），
-// 完整路径在 req.originalUrl；req.path 也不 decode，所以坏编码要自己兜。
-// 「没有这张图」只有这一处出口。no-store 不是可有可无的：404 在 HTTP 里属于
-// **可以被启发式缓存**的状态码，游客这次没权限的 404 万一被浏览器记下，
-// 他登录之后照样是 404（现在没有 Last-Modified 多半不会发生，但不值得赌）。
-const noImage = (res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  return res.status(404).send('没有这张图');
-};
-
-const canSeeUpload = (req, res, next) => {
-  if (req.user) return next();                     // 登录了照旧全放行
-  let name = req.path.replace(/^\//, '');
-  try {
-    name = decodeURIComponent(name);
-  } catch {
-    return noImage(res);                           // 坏的百分号编码（比如 /uploads/%）就是个 404
-  }
-  // 缩略图认的是它对应的**原图**：/uploads/x.jpg.thumb.jpg 要求 x.jpg 本身在阵容图里。
-  // 非认这一下不可 —— 缩略图和原图躺在同一个平铺目录里，积分截图也有缩略图，
-  // 不折回原图去查就等于把积分截图的小图一起放出。
-  if (name.endsWith(THUMB_SUFFIX)) name = name.slice(0, -THUMB_SUFFIX.length);
-  if (!name || /[/\\\0]/.test(name)) return noImage(res);
-  if (!db.isLineupImage(name)) return noImage(res);
-  next();
-};
-
-// 缩略图现补：加这一版之前传的老图没做过缩略图，第一次被要到时现压一张（之后就是普通静态文件）。
-// 新图在 upload.js 里上传时就做好了，正常走不到这儿。压不出来就让 static 去 404 ——
-// 页面顶多少一张小图，不影响别的。
-const ensureThumb = (req, res, next) => {
-  const base = path.basename(req.path);
-  if (!base.endsWith(THUMB_SUFFIX)) return next();
-  const src = base.slice(0, -THUMB_SUFFIX.length);
-  if (!src || !fs.existsSync(path.join(UPLOAD_DIR, src))) return next();   // 原图都不在，没什么好压的
-  makeThumb(src).then(() => next()).catch((err) => {
-    console.error('缩略图生成失败：', base, err.message);
-    next();
-  });
-};
-
-// 图片一律长缓存。文件名是 randomUUID()，一张图写完就永不改（换图 = 换一个新文件名），
-// 所以一年 + immutable 是安全的：浏览器连"变了没"都不会再问一次。
-// ★ 这一条就是「投完分重刷很慢」的根治。打分是 POST → 302 → 回 /#e<id>，每次都要重刷整页，
-//   而从前这里吃的是 express.static 的默认值 max-age=0：页面上十来二十张图，张张都要
-//   回服务器问一遍，隧道单程 1.1s —— 实测重刷光这一项 2.3s，几路并发挤在一起时到过 24.6s。
-//   改成 immutable 之后，重刷时的图片请求是 0，剩下的只有那一趟 HTML。
-// private 而不是 public：同一个 URL 对登录的人 200、对游客 404（积分截图），
-// 不能让中间的共享缓存替别人下判断。
-// setHeaders 是唯一能改掉这个头的口子：send 先发 headers 事件、再看 Cache-Control
-// 有没有被设过，设过就不覆盖（node_modules/send/index.js:854 与 861）。
-app.use('/uploads', canSeeUpload, ensureThumb, express.static(UPLOAD_DIR, {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'private, max-age=31536000, immutable'),
-}), (req, res) => {
-  // 末尾那个 404 兜底不能省：白名单放行的名字、磁盘上却没有这张图（换图/删图之后留下的
-  // 老链接）时，express.static 会 next() 出去，一路穿到后面的 requireLogin ——
-  // 游客于是拿到一个"跳登录页"，而不是一张图的 404。登录的人原本就是 404，两边对齐。
-  noImage(res);
-});
+// 图片相关的那两条路由（发上传令牌 / 老链接 302）。**必须挂在 requireLogin 之前** ——
+// sign 要回的是 401 JSON 而不是登录页的 HTML，老链接也不该要登录（图现在全公开）。
+// 详见 routes/uploads.js 的头注释。
+app.use(require('./routes/uploads'));
 
 app.use(require('./routes/auth'));
 // 游客可见的那一页 + 评论。**必须挂在 main 前面**：GET / 要先落到它手里，
@@ -202,9 +152,10 @@ app.use('/admin', requireLogin, requireAdmin, require('./routes/admin'));
 app.use(requireLogin, require('./routes/main'));
 
 // 统一错误处理
+// （从前这里映射 multer 的 LIMIT_FILE_SIZE / LIMIT_UNEXPECTED_FILE —— 图片直传之后
+//   字节不再经过这个进程，那两条已经没有来源了。体积和类型的把关现在在
+//   routes/uploads.js 的 sign + 提交时的 HeadObject 复核两处。）
 app.use((err, req, res, next) => {
-  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).send('图片不能超过 10MB');
-  if (err.code === 'LIMIT_UNEXPECTED_FILE') return res.status(400).send('一次最多上传 6 张');
   console.error(err);
   res.status(400).send(err.message || '出错了');
 });

@@ -40,6 +40,32 @@ exports.noteGuestComment = (ip) => {
   HITS.set(ip, hits);
 };
 
+// ---------- 签发上传令牌的限流 ----------
+// 图片直传 R2 之后唯一能防"登录用户把桶当免费图床"的闸门：/uploads/sign 的配额预检
+// 挡的是"本期的阵容额度"，挡不住同一个人反复 sign 又不提交 —— 那些对象会变成孤儿
+// （GC 会清，但白白给桶灌垃圾、也白白占带宽）。
+//
+// 按 **uid** 而不是 IP：能 sign 的一定是登录用户，而不少成员共用一个出口 IP，
+// 按 IP 限他们等于连坐（和上面游客评论那条同一个理由）。
+// 语义也不同：那两张表记的是"失败次数"和"发表速率"，这张记的是"签出去的 key 数"。
+const SIGNS = new Map();                 // uid → 最近一小时内签出去的 key 时间戳
+const SIGN_MAX = Number(process.env.SIGN_HOUR_MAX || 120);
+
+// 放行返回 null；不放行返回一句直接给用户看的话。count = 这一次要签几个 key。
+exports.signWait = (uid, count) => {
+  const now = Date.now();
+  const hits = (SIGNS.get(String(uid)) || []).filter((t) => now - t < HOUR);
+  SIGNS.set(String(uid), hits);
+  if (hits.length + count > SIGN_MAX) return `一小时最多传 ${SIGN_MAX} 张，过会儿再来`;
+  return null;
+};
+// n 个 key 记 n 次（一次 sign 可能要点 6 张）
+exports.noteSign = (uid, n) => {
+  const hits = SIGNS.get(String(uid)) || [];
+  for (let i = 0; i < n; i++) hits.push(Date.now());
+  SIGNS.set(String(uid), hits);
+};
+
 // 顺手清掉过期条目，避免长时间运行内存里攒一堆 IP
 exports.sweep = () => {
   const now = Date.now();
@@ -47,6 +73,10 @@ exports.sweep = () => {
   for (const [ip, hits] of HITS) {
     const keep = hits.filter((t) => now - t < HOUR);
     if (keep.length) HITS.set(ip, keep); else HITS.delete(ip);
+  }
+  for (const [uid, hits] of SIGNS) {
+    const keep = hits.filter((t) => now - t < HOUR);
+    if (keep.length) SIGNS.set(uid, keep); else SIGNS.delete(uid);
   }
 };
 setInterval(exports.sweep, 30 * 60e3).unref();

@@ -2,8 +2,15 @@
    点图看大图：在页面里盖一层弹层，不再跳新标签页
    （手机浏览器里跳走一次就得按返回，很容易把看到一半的阵容弄丢）。
 
-   判据是 href + DOM，模板上不用挂类名：任何 <a> 只要 href 以 /uploads/ 开头、
+   判据是 href + DOM，模板上不用挂类名：任何 <a> 只要 href 以**图片域名**开头、
    里面又装了 <img>，点它就开弹层。全站十几处图片链接因此一行都不用改。
+
+   ★ 2026-10-15 起图片在 Cloudflare R2 上，href 是**跨域的绝对地址**，
+     不再是站内的 /uploads/…。域名从 <html data-img-base>（由
+     views/partials/header.ejs 渲染）读，静态文件里不硬编码 —— 换域名只改 .env 一处。
+     **保留 /uploads/ 兜底**：用户手上可能还有缓存的旧 HTML（nginx 给 /public/ 盖了
+     max-age=604800），那些页面里的链接还是老形状。老形状由 routes/uploads.js
+     的 302 送到 R2，图照样能显示。
 
    ★ 这是**增强**，不是依赖：脚本没加载、浏览器太老、JS 被关了，模板里那个
      <a target="_blank" rel="noopener"> 照旧把原图开在新标签页 —— 也就是今天的样子。
@@ -29,7 +36,7 @@
 (function () {
   'use strict';
 
-  var PREFIX = '/uploads/';        // 只拦这个前缀下的链接
+  var PREFIX = document.documentElement.getAttribute('data-img-base') || '/uploads/';
   var HINT = '点任意处或按 Esc 关闭';
   var HINT_NAV = ' · 方向键 ← → 翻页';
 
@@ -180,8 +187,11 @@
 
     var a = e.target.closest ? e.target.closest('a[href]') : null;
     if (!a || !a.querySelector('img')) return;                    // 只管"里面装了图的链接"
-    // 用 getAttribute 而不是 a.href：后者会被解析成绝对 URL（http://…/uploads/x.jpg），
-    // 前缀就比不上了。模板里写的都是站内绝对路径 /uploads/xxx。
+    // 用 getAttribute（拿到**原样写在模板里**的那个字符串）而不是 a.href。
+    // 从前这是必需的：模板写的是站内相对路径 /uploads/x.jpg，a.href 会被解析成
+    // 绝对 URL 就比不上了。现在 href 本身就是绝对的，两者等价 ——
+    // 但仍然留着 getAttribute：顺带躲开浏览器对 URL 的归一化
+    // （百分号编码的大小写、空路径段之类），免得又冒出一个"偶尔比不中"。
     if (String(a.getAttribute('href')).indexOf(PREFIX) !== 0) return;
 
     e.preventDefault();      // ← 就这一下拦掉新标签页；模板里的 target 留着给没 JS 的情况

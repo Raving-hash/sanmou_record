@@ -1,8 +1,50 @@
 const db = require('../db');
-const { upload, compressUploads, removeFile, removeFiles } = require('../upload');
+const r2 = require('../r2');
+const {
+  removeFile, removeFiles, readKeys, THUMB_SUFFIX, MAX_OUT_BYTES, MAX_LINEUP, IMG_TYPE,
+} = require('../upload');
 const router = require('express').Router();
 
-const MAX_LINEUP = Number(process.env.MAX_LINEUP || 6);
+/* 提交时的**对象复核**。图片是浏览器直传到 R2 的，服务端没见过那些字节，
+   所以入库前必须确认"确实传上去了，而且体积和类型都对"。
+
+   防的是什么：
+     · 客户端瞎报一个 key（Token 那关已经挡住了**别人的** key，但"我领了却没传"
+       是通的 —— 关掉标签页、网络断了都会这样）；
+     · 客户端撒谎说"我压到 1MB 以下了"（presigned PUT 管不住体积，
+       R2 也不支持 content-length-range 的 POST 策略，只能在事前签发 +
+       事后复核这两头夹）；
+     · 有人拿这张 URL 传了别的东西（content-type 签进签名了，理论上传不了
+       非 jpeg；复核是第二道）。
+
+   并发发出去（Promise.all）—— 6 张图 = 12 个请求，串行按每个 150ms 算就是 1.8s，
+   而这几个请求还要过宿主机那条代理。 */
+async function verifyUploaded(keys) {
+  const wanted = [];
+  for (const k of keys) { wanted.push(k); wanted.push(k + THUMB_SUFFIX); }
+  const heads = new Map();
+  await Promise.all(wanted.map(async (key) => {
+    try { heads.set(key, await r2.head(key)); }
+    catch (e) { heads.set(key, { exists: false, why: e.message }); }
+  }));
+
+  const ok = [];
+  const bad = [];
+  for (const k of keys) {
+    const a = heads.get(k) || {};
+    const b = heads.get(k + THUMB_SUFFIX) || {};
+    let why = null;
+    if (!a.exists) why = '原图没传上去';
+    else if (a.size > MAX_OUT_BYTES) why = `原图 ${(a.size / 1024 / 1024).toFixed(1)}MB，超过 ${MAX_OUT_BYTES / 1024 / 1024}MB 上限`;
+    else if (a.type !== IMG_TYPE) why = `原图类型是 ${a.type || '空'}，只收 jpeg`;
+    // 缩略图**必须**有：从前没有还能靠 ensureThumb 现补，现在服务端不碰字节了，
+    // 缺了就是阵容墙上一个永久的空格子。
+    else if (!b.exists) why = '缩略图没传上去';
+    else if (b.type !== IMG_TYPE) why = `缩略图类型是 ${b.type}`;
+    if (why) bad.push({ key: k, why }); else ok.push(k);
+  }
+  return { ok, bad };
+}
 
 // 给排名行挂上各自的阵容截图
 const withImages = (rows) => rows.map((r) => ({ ...r, images: db.getLineupImages(r.id) }));
@@ -156,36 +198,72 @@ router.get('/lineup', (req, res) => {
   });
 });
 
-router.post('/lineup', upload.array('images', MAX_LINEUP), compressUploads, (req, res) => {
-  const files = req.files || [];
-  const names = files.map((f) => f.filename);
+/* 提交阵容。字节已经由浏览器直传到 R2 了，这里只收到一批**令牌**
+   （`images` = "key|过期时间|签名"，见 upload.js）。
+
+   和从前的差别只有"文件名从哪来"：从前是 multer 收了字节之后服务端自己造的，
+   现在是**客户端回传 + 服务端验签**。所以多了一道 readKeys 的校验，
+   其余的业务逻辑（赛期、配额、事务）一行没动。 */
+router.post('/lineup', async (req, res) => {
+  const note = String(req.body.lineup_note || '').trim().slice(0, 1000);
+  const { keys, bad } = readKeys(req, 'images');
 
   const season = db.getOpenSeason();
   if (!season) {
-    removeFiles(names);
+    await removeFiles(keys);
     req.session.flash = { type: 'err', msg: '当前没有进行中的赛期' };
     return res.redirect('/');
   }
 
   const entry = db.getOrCreateEntry(season.id, req.user.id);
   const existing = db.getLineupImages(entry.id);
-  const note = String(req.body.lineup_note || '').trim().slice(0, 1000);
 
-  if (existing.length + names.length > MAX_LINEUP) {
-    removeFiles(names);
+  // 令牌没过（过期、被改过、或者根本不是这台服务器发的）→ 整批打回。
+  // 已经验过的那几个也一并删掉：它们进不了库，留着就是孤儿（r2-gc 也会清，
+  // 但没必要故意留给它）。
+  if (bad.length) {
+    await removeFiles(keys);
+    req.session.flash = { type: 'err', msg: '上传凭证无效或已过期，请刷新页面重传' };
+    return res.redirect('/lineup');
+  }
+
+  const { ok, bad: unverified } = await verifyUploaded(keys);
+  if (unverified.length) {
+    await removeFiles(keys);
+    req.session.flash = {
+      type: 'err',
+      msg: `有 ${unverified.length} 张没传成功（${unverified[0].why}），请重传`,
+    };
+    return res.redirect('/lineup');
+  }
+
+  // 已经在用的 key 跳过，不再插一行。两道：
+  //  · 批内去重 —— readKeys 已经做过；
+  //  · 库里已引用 —— `lineup_images.filename` **没有 UNIQUE 约束**（schema.sql），
+  //    同一张图被两行引用的话，删掉其中一行会把对象删掉、另一行就成了坏图。
+  //    回退按钮重发一次表单是能走到这儿的，所以这里安静跳过而不是报错，
+  //    只在提示语里说一声。
+  const fresh = ok.filter((k) => !db.isImageInUse(k));
+  const dup = ok.length - fresh.length;
+
+  if (existing.length + fresh.length > MAX_LINEUP) {
+    await removeFiles(keys);
     req.session.flash = { type: 'err', msg: `阵容截图最多 ${MAX_LINEUP} 张，先删掉几张再传` };
     return res.redirect('/lineup');
   }
 
   const ins = db.prepare('INSERT INTO lineup_images (entry_id, filename) VALUES (?, ?)');
   db.transaction(() => {
-    for (const n of names) ins.run(entry.id, n);
+    for (const n of fresh) ins.run(entry.id, n);
     db.prepare('UPDATE entries SET lineup_note=? WHERE id=?').run(note || null, entry.id);
   })();   // 只改阵容不动 score_submitted_at，提交时间不变
 
+  const parts = [];
+  if (fresh.length) parts.push(`已上传 ${fresh.length} 张阵容截图`);
+  if (dup) parts.push(`${dup} 张已经在用，跳过`);
   req.session.flash = {
     type: 'ok',
-    msg: names.length ? `已上传 ${names.length} 张阵容截图` : '阵容说明已保存',
+    msg: parts.length ? parts.join(' · ') : '阵容说明已保存',
   };
   res.redirect('/lineup');
 });
@@ -217,15 +295,20 @@ router.get('/score', (req, res) => {
   });
 });
 
-router.post('/score', upload.single('score_image'), compressUploads, (req, res) => {
+/* 提交积分。和 /lineup 同一套：字节直传，这里只收一个 `image_key` 令牌。
+   不选图（只改分数）时隐藏字段是空的，于是沿用库里那张 —— 和从前 `@req.file` 为空
+   时沿用 `entry.score_image` 是同一个分支。 */
+router.post('/score', async (req, res) => {
   const season = db.getOpenSeason();
-  if (!season) {
-    if (req.file) removeFile(req.file.filename);
-    return res.redirect('/');
-  }
+  if (!season) return res.redirect('/');
 
+  const { keys, bad } = readKeys(req, 'image_key');
+  const given = keys[0] || null;   // 只收一张
+
+  // 表单校验没过 → 把刚传上去的那张删掉（和从前 removeFile(req.file.filename) 同理：
+  // 没进库的对象留着就是孤儿）
   const render = (error) => {
-    if (req.file) removeFile(req.file.filename);
+    if (given) removeFile(given).catch(() => { /* 记过日志了 */ });
     res.status(400).render('score', {
       title: '录入积分',
       season,
@@ -234,15 +317,25 @@ router.post('/score', upload.single('score_image'), compressUploads, (req, res) 
     });
   };
 
+  if (bad.length) return render('上传凭证无效或已过期，请刷新页面重传');
+
   const raw = String(req.body.score ?? '').trim();
   if (!/^\d{1,9}$/.test(raw)) return render('积分请填 0 到 999999999 之间的整数');
 
   const entry = db.getOrCreateEntry(season.id, req.user.id);
-  const imageName = req.file ? req.file.filename : entry.score_image;
+  const imageName = given || entry.score_image;
   if (!imageName) return render('必须上传积分截图才能提交（R4）');
 
+  if (given) {
+    const { ok, bad: unverified } = await verifyUploaded([given]);
+    if (!ok.length) {
+      await removeFile(given);
+      return render(`截图没传成功（${unverified[0].why}），请重传`);
+    }
+  }
+
   // 本人改分或换截图 → 提交时间刷新；分数和截图都没动就保持原时间
-  const changed = Number(raw) !== entry.score || !!req.file;
+  const changed = Number(raw) !== entry.score || !!given;
   const submittedAt = changed || !entry.score_submitted_at
     ? new Date().toISOString()
     : entry.score_submitted_at;
@@ -250,7 +343,11 @@ router.post('/score', upload.single('score_image'), compressUploads, (req, res) 
   db.prepare('UPDATE entries SET score=?, score_image=?, score_submitted_at=? WHERE id=?')
     .run(Number(raw), imageName, submittedAt, entry.id);
 
-  if (req.file && entry.score_image) removeFile(entry.score_image);   // 换图后清掉旧文件
+  // 换图后清掉旧图。**换成了同一张就不删**（回退按钮重发时 given 可能与库里那张相同，
+  // 无条件删会把刚提交的这张自己删掉）。
+  if (given && entry.score_image && entry.score_image !== given) {
+    removeFile(entry.score_image).catch(() => { /* 记过日志了 */ });
+  }
 
   req.session.flash = { type: 'ok', msg: `已提交积分 ${Number(raw)}` };
   res.redirect('/');
