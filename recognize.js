@@ -38,6 +38,9 @@ const sharp = require('sharp');
 
 const DIR = path.join(__dirname, 'herodata');
 const INDEX = path.join(DIR, 'index.json');
+// 皮肤样本目录（`<key>__<n>.png`）。整个 herodata/ 都是 git-ignored + 线上手工放一份，
+// 所以这个目录跟着它走 —— **不经过 release.sh**，拷贝进去要重启进程才生效（见 load()）。
+const SKINS = path.join(DIR, 'skins');
 
 // 卡框（相对整图，见文件头）
 const COLS = [0.0441, 0.3360, 0.6270];
@@ -51,6 +54,11 @@ const REGION = { x: 0.16, y: 0.04, w: 0.68, h: 0.43 };
 // 搜索用的工作宽度。原图 1134 宽时卡约 150px，缩到 540 → 卡约 71px，
 // 模板落在 46~72px 这个区间（实测这个区间才分得开）。
 const WORK_W = 540;
+// 工作尺度真正该锚的是**卡框**，不是图宽 —— 模板尺度（SIZES）是按"卡框在工作尺度上
+// 约 71 像素"标定的。取 WORK_BOX_PX = 540 × 0.132 = 71.28，于是竖屏那条路算出来
+// 正好还是 540（基线一个像素都不动），而横屏会按它自己的卡框宽度自动放大工作图。
+// 见 recognize() 里 workW 的算法。
+const WORK_BOX_PX = WORK_W * CARD_W;
 const SIZES = [46, 58, 72];
 const MIN_SIZE = 36;          // 模板下限，见文件头第 2 条
 const STRIDE = 2;
@@ -128,6 +136,39 @@ function bestScore(S, T) {
 
 // 把 102 张卡面读进来做成模板。**每张卡的每个尺度只算一次**，
 // 之后所有图共用 —— 这是整个流程里最贵的一步，只做一次。
+// 某个 key 的皮肤样本文件（可能一个都没有）。
+// 目录扫一次就记住（进程内），和 templates 一个生命周期 —— load() 一进程只跑一次，
+// 所以新拷进去的样本要**重启进程**才生效（和 herodata/index.json 改完要重启是一回事）。
+let skinsIndex = null;
+function skinsFor(key) {
+  if (!skinsIndex) {
+    skinsIndex = [];
+    try {
+      for (const f of fs.readdirSync(SKINS)) {
+        const m = /^(.+)__\d+\.png$/.exec(f);      // contact.png / manifest.json 在这里被滤掉
+        if (m) skinsIndex.push({ key: m[1], file: path.join(SKINS, f) });
+      }
+    } catch { /* 目录不在 = 还没采过皮肤，正常 */ }
+  }
+  return skinsIndex.filter((s) => s.key === key).map((s) => s.file);
+}
+
+// 一张图 → 一组模板尺度。
+// `region` 为真时才套 REGION —— 那是**官方卡面**才需要的裁切（去角标、去名字条，只留头肩）。
+// 皮肤样本（herodata/skins/）是从游戏截图里按定位框裁出来的，**本身就是头像取景**，
+// 再套一次 REGION 等于在脸上再挖一块，取景就对不上了。
+async function sizesOf(file, region) {
+  const m = await sharp(file).metadata();
+  const base = await rawGray(file, region ? {
+    left: Math.round(m.width * REGION.x), top: Math.round(m.height * REGION.y),
+    width: Math.round(m.width * REGION.w), height: Math.round(m.height * REGION.h),
+  } : null);
+  const norm = { d: normalize(base.d), w: base.w, h: base.h };
+  return SIZES
+    .filter((w) => w >= MIN_SIZE && w < WORK_W)
+    .map((w) => rescale(norm, w, Math.round(w * base.h / base.w)));
+}
+
 async function load() {
   if (cache) return cache;
   if (!available()) return null;
@@ -136,15 +177,19 @@ async function load() {
   for (const h of idx.heroes) {
     const file = path.join(DIR, h.img);
     if (!fs.existsSync(file)) continue;
-    const m = await sharp(file).metadata();
-    const base = await rawGray(file, {
-      left: Math.round(m.width * REGION.x), top: Math.round(m.height * REGION.y),
-      width: Math.round(m.width * REGION.w), height: Math.round(m.height * REGION.h),
-    });
-    const norm = { d: normalize(base.d), w: base.w, h: base.h };
-    const sizes = SIZES
-      .filter((w) => w >= MIN_SIZE && w < WORK_W)
-      .map((w) => rescale(norm, w, Math.round(w * base.h / base.w)));
+    const sizes = await sizesOf(file, true);
+
+    // 皮肤（2026-10-16 晚加）。见 .devlocal/harvest-skins.js —— 素材只能从玩家核对过的
+    // 截图里攒，sgmdtx 上每种只有一张基础卡面。
+    //
+    // ★ **往同一个 key 的 sizes 里追加，不要另推一条 templates 条目**：下游全部假设
+    //   "一条模板 = 一个 key"（`:258` 用 lib.templates[j].hero 回填、贪心分配也按 j 去重）。
+    //   追加之后 bestScore 对每个尺度取 max，语义天然就对。
+    //   代价是每个挂皮肤的武将多滑 3 次窗 —— 实测 48 个武将共 +138 个尺度，
+    //   NCC 大约慢一倍（后台队列，可以接受；量大到受不了时按分数裁剪）。
+    for (const s of skinsFor(h.key)) {
+      sizes.push(...await sizesOf(s, false));
+    }
     templates.push({ hero: h, sizes });
   }
   cache = { heroes: idx.heroes, templates };
@@ -171,14 +216,26 @@ function slots(width, height) {
 
 // 主入口：给一张图（Buffer 或路径），返回 9 个格子各自的候选
 // 返回 [{ slot, candidates: [{key,name,faction,arm,variant,score}] }]
-async function recognize(input, topN = 3) {
+//
+// `given` = 外部定位器（locate.js）算出来的九个框。**不传就用 slots()**，
+// 于是定位失败/没接定位器时行为与从前一字不差。横屏图必须传 —— 见 locate.js 文件头。
+async function recognize(input, topN = 3, given = null) {
   const lib = await load();
   if (!lib) throw new Error('herodata/ 不在，识别未启用');
   const meta = await sharp(input).metadata();
 
-  // 整图缩到工作宽度，之后所有卡框都在这个尺度上算
-  const k = WORK_W / meta.width;
-  const { data, info } = await sharp(input).greyscale().resize({ width: WORK_W })
+  // 整图缩到工作宽度，之后所有卡框都在这个尺度上算。
+  //
+  // ★ 工作宽度**按卡框算，不写死**：模板尺度是按"卡框约 71 像素"标定的，
+  //   而横屏的卡框只占图宽的 6%（竖屏 13.2%）。固定 540 的话横屏的卡框会被缩到
+  //   **27 像素 —— 比最小的模板（46）还小**，bestScore 无处可比、一路返回哨兵 -1，
+  //   表现就是"定位对了也 9 格全灭"（2026-10-16 实测，横屏 117 格 0 候选就是这么来的）。
+  //   按卡框反推，横屏会自己把工作图放大到 ~1300 宽。代价是慢几倍，但这是后台队列。
+  const workW = given && given.length && given[0].width
+    ? Math.min(meta.width, Math.max(200, Math.round(WORK_BOX_PX * meta.width / given[0].width)))
+    : WORK_W;
+  const k = workW / meta.width;
+  const { data, info } = await sharp(input).greyscale().resize({ width: workW })
     .raw().toBuffer({ resolveWithObject: true });
   const S = { d: Float32Array.from(data), w: info.width, h: info.height };
 
@@ -186,7 +243,8 @@ async function recognize(input, topN = 3) {
   // **不能在每个格子里各挑各的第一名** —— 同一套阵容 9 个武将必然互不相同，
   // 各挑各的会出现"两格都认成诸葛亮"（实测真发生了），
   // 而加上"互不相同"这条约束能把这种错挤掉。
-  const boxes = slots(meta.width, meta.height);
+  // 定位器给的框优先；没给就退回按竖屏版面的固定坐标算（原行为）
+  const boxes = given && given.length ? given : slots(meta.width, meta.height);
   const matrix = [];          // matrix[i][j] = 第 i 格、第 j 张卡的分
   for (const box of boxes) {
     const ex = {

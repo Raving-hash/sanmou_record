@@ -22,6 +22,7 @@ const db = require('./db');
 const { imgUrl } = require('./upload');
 const recognize = require('./recognize');
 const vlmModel = require('./recognize-vlm');
+const locate = require('./locate');
 
 const INDEX = path.join(__dirname, 'herodata', 'index.json');
 const TICK_MS = 3000;
@@ -66,7 +67,11 @@ async function fetchImage(filename) {
 //    （上一版它就叫 process，只是当时模块顶层没读过 process.env，所以没炸。）
 async function runJob(job) {
   const buf = await fetchImage(job.filename);
-  const ncc = await recognize.recognize(buf);
+
+  // 先定位九个格子（竖屏/横屏是两套版面，见 locate.js）。**失败就返回 null**，
+  // recognize 会退回原来那套写死的坐标 —— 定位器出任何问题都不该让识别整体挂掉。
+  const grid = await locate.locate(buf);
+  const ncc = await recognize.recognize(buf, 3, grid && grid.boxes);
 
   // 第二路：视觉模型。**它挂了不能拖垮整张图** —— 降级成"只有 NCC"，
   // merge 会把那些格子标成 low（照填，但标记「待核对」），而不是整张图失败。
@@ -84,11 +89,16 @@ async function runJob(job) {
 
   const filled = merged.filter((m) => m.auto_key).length;
   const high = merged.filter((m) => m.confidence === 'high').length;
+  // NCC 有几个格子拿到了候选 —— **这一行是判断定位对不对的主要实据**：
+  // 横屏以前恒为 0/9（坐标是按竖屏写死的），现在应该接近 9/9。
+  const nccGot = ncc.filter((s) => (s.candidates || []).length).length;
   // 从前这里打的是九个 `?`（没有候选时），看着像报错、其实是正常的 ——
   // 玩家传的要不是「阵容配置」页，九格本来就一个都认不出来。改成人话。
   console.log(filled
     ? `[识别] ${job.filename} 填了 ${filled}/9 格（两路一致 ${high}）`
-    : `[识别] ${job.filename} 一个都没认出来（多半传的不是「阵容配置」页）`);
+      + ` · NCC ${nccGot}/9 · 版面 ${grid ? grid.layoutName : '未定位→回退竖屏坐标'}`
+    : `[识别] ${job.filename} 一个都没认出来（多半传的不是「阵容配置」页）`
+      + ` · NCC ${nccGot}/9 · 版面 ${grid ? grid.layoutName : '未定位→回退竖屏坐标'}`);
 }
 
 async function tick() {
