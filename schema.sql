@@ -132,8 +132,11 @@ CREATE TABLE IF NOT EXISTS heroes (
 );
 
 -- 识别结果（2026-10-16 加）：一张阵容图 9 个格子，一格一行。
--- 产品形态是「机器给候选、玩家点一下」—— 精度不够全自动（实测首位 8/9），
--- 而玩家的每次纠错都在攒真值，这张表就是攒的地方。
+--
+-- 产品形态（2026-10-16 改版）：**上传后后台自动跑，直接填好结果，玩家事后在阵容卡上纠正。**
+-- 两路识别各出一套候选 —— 本地 NCC 模板匹配（`candidates`）+ 远端视觉模型（`vlm`）；
+-- 两路**头名一致时实测 28/28 全对**，所以"一不一致"直接当置信度用（`confidence`）。
+-- 玩家的每次纠错都在攒真值，`auto_key` 留住"机器原本说什么"，纠正分析全靠它。
 CREATE TABLE IF NOT EXISTS hero_guesses (
   id         INTEGER PRIMARY KEY,
   entry_id   INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
@@ -141,15 +144,24 @@ CREATE TABLE IF NOT EXISTS hero_guesses (
   slot       INTEGER NOT NULL,    -- 1..9，行优先（部队一 1-3、二 4-6、三 7-9）
   -- 候选快照（JSON）。**故意存快照而不是只存外键**：库会随版本变，
   -- 而"当时机器猜的是什么"是历史事实，反馈分析要的就是它，不该被后来的库覆盖。
-  candidates TEXT NOT NULL,
-  -- 玩家确认的结果。**故意不写 REFERENCES heroes(key)**：库是播种出来的、可能被重播，
+  candidates TEXT NOT NULL,       -- NCC 的前 3 个
+  vlm        TEXT,                -- 视觉模型的前 3 个（JSON）。没跑或跑挂了为 NULL
+  -- 卡上显示的那个：机器自动填的和玩家纠正后的，都写这儿。
+  -- **故意不写 REFERENCES heroes(key)**：库是播种出来的、可能被重播，
   -- 而玩家的决定是这张表里最值钱的数据，不能因为库里少了一个武将就被级联删掉或写不进去。
   chosen_key TEXT,
-  source     TEXT,                -- 'pick'（点了候选）/ 'other'（自己输入）/ 'none'（说没有）
+  -- 机器自动填的那个。玩家改过之后 chosen_key 就变了，而这一列**永不覆盖** ——
+  -- /admin 那块「定期总结修复」的排行榜（机器说 X → 玩家改成 Y）全靠它。
+  auto_key   TEXT,
+  confidence TEXT,                -- 'high'（NCC 与 VLM 头名一致）/ 'low'（不一致，或无 VLM）
+  source     TEXT,                -- 'auto'（机器填的）/ 'pick' / 'other' / 'none'（后三个是玩家动作）
   other_name TEXT,                -- source='other' 时玩家手输的原文，哪怕没能对上库里任何一个
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  -- ★ **只有人动过才写**。自动填绝不碰它 —— 它从此是「有没有人核对过」的唯一判据：
+  --   NULL = 机器填的、没人看过；非 NULL = 本人或管理员确认/改过。
+  --   把这两个混起来的话，「玩家纠正了什么」就再也算不出来了。
   decided_at TEXT,
-  -- 一张图的同一格只有一行。重跑识别 = 覆盖候选，但**不动已确认的玩家选择**。
+  -- 一张图的同一格只有一行。重跑识别 = 覆盖候选与自动填，但**不动人工的结论**。
   UNIQUE (filename, slot)
 );
 

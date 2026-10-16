@@ -1458,9 +1458,22 @@ footer.container {
      我还没投   → 均分/最高/最低三行 + 五个档位按钮
      我投过了   → 均分/最高/最低三行 + 一行「你打了 X」，按钮不再出现
    已结算的期模板干脆不渲染按钮，所以这里不用管禁用态。 */
-/* margin-top:auto 把打分区（连同它下面的评论区）顶到卡片底部。
-   图框是固定 160px 之后，同一排里高矮不齐的那部分高度总得有人吃 —— 给打分区吃，
-   于是每张卡的「均分/最高/最低」和「💬 评论」都落在同一条水平线上（见 .shot-frame）。
+/* ⚠️ **这里从前有一条 `margin-top: auto`，2026-10-16 拿掉了。**
+   它原本是想把打分区连同评论区顶到卡片底部。但那是**多余的**：
+   public/wall.js 会把同一排的 .shot-head / .shot-note / .shot-rate 三块都撑到一样高，
+   而同排每张卡的图框是固定高度、评论区只有一行 —— 于是卡片高度本来就相等，
+   富余恒为 0，这条 auto 边距**从来没起过作用**。
+
+   它会在一种情况下突然"起效"，而且是有害的：**卡片下方出现高度可变的内容**。
+   2026-10-16 加的阵容识别那一块（`.reco`）正好就是 —— 有识别结果的卡比没有的高 89px，
+   于是同一排里没识别的那张卡把富余全塞进了 rate 上方的 auto 边距里，
+   打分区被顶下去 89px，整排看着是错位的（wall 那套浏览器断言抓到的就是这个：
+   「同一排的 .shot-rate 齐平 → 差 89px」）。
+
+   拿掉之后：卡片从顶往下自然堆，富余留在**卡片底部**（评论区下面），
+   同一排的 rate、reco、评论首行全都落在同一条线上。评论区展开也不会顶到它上面的东西。 */
+
+/* 打分区内部仍然是上下两截（`.rate-tail` 那一截贴底），见下面 .rate-tail 的注释。 */
 
    2026-10-14 起打分区内部也分了上下两截（`.rate-tail` 那一截贴底）：三行数字留在顶部，
    按钮和「你打了 X」那几行贴住底部。因为 public/wall.js 会把**同一排**的 .shot-rate
@@ -1470,7 +1483,6 @@ footer.container {
 .shot-rate {
   display: flex;
   flex-direction: column;
-  margin-top: auto;
   padding: 0.5rem 0.6rem 0.6rem;
   border-top: 1px solid var(--yw-line-soft);
 }
@@ -1824,8 +1836,25 @@ details.cmt[open] > summary {
   color: var(--yw-gold-lt); border-color: var(--yw-gold);
   background: color-mix(in srgb, var(--yw-gold) 14%, transparent);
 }
+/* 机器自动填的、还没人核对过：**虚框 + 压暗**，和"人确认过的实框"一眼分得开。
+   用户定的是"含机器填的对所有人可见，但要标出是机器填的" ——
+   所以它得看得见，但不能看着跟确认过的一样可信。 */
+.reco-hero.is-auto {
+  border-style: dashed; border-color: var(--yw-text-mute);
+  color: var(--yw-text-mute);
+}
+/* 那个小问号。放小了、且不参与语义（屏幕阅读器读的是 title）。 */
+.reco-q {
+  font-style: normal; margin-left: 0.15rem;
+  opacity: 0.75; font-size: 0.9em;
+}
+/* T0 和 is-auto 撞上时金色仍然要压得住（T0 是主角），但保持虚框表示存疑 */
+.reco-hero.is-t0.is-auto {
+  color: color-mix(in srgb, var(--yw-gold-lt) 70%, var(--yw-text-mute));
+  border-color: color-mix(in srgb, var(--yw-gold) 55%, var(--yw-text-mute));
+}
 
-/* 确认表单 */
+/* 纠正面板 */
 .reco-box { margin-top: 0.35rem; font-size: var(--yw-fs-2xs); }
 .reco-tip { color: var(--yw-text-mute); margin: 0.35rem 0 0.5rem; line-height: 1.5; }
 .reco-grid {
@@ -1838,6 +1867,9 @@ details.cmt[open] > summary {
   background: var(--yw-ink-800); border: 1px solid var(--yw-line);
 }
 .reco-slot-k { color: var(--yw-text-mute); margin-bottom: 0.1rem; }
+/* 这一格是机器填的、还没人核对 → 整格加一圈虚线，和上面那行的虚框呼应。
+   玩家点过之后就恢复实线，一眼能看出"还剩几格没看"。 */
+.reco-slot.is-pending { border-style: dashed; }
 .reco-opt {
   display: flex; align-items: center; gap: 0.3rem;
   cursor: pointer; line-height: 1.3;

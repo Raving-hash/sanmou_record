@@ -22,6 +22,15 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   }
 }
 
+// 识别改版（2026-10-16）：从"给候选让玩家点"改成"机器直接填、玩家事后纠正"，
+// hero_guesses 要留住"机器原本说什么"，否则纠正数据无从分析。
+{
+  const cols = db.prepare(`PRAGMA table_info(hero_guesses)`).all().map((c) => c.name);
+  if (!cols.includes('vlm')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN vlm TEXT`);
+  if (!cols.includes('auto_key')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN auto_key TEXT`);
+  if (!cols.includes('confidence')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN confidence TEXT`);
+}
+
 // ---------- 配置 / 邀请码 ----------
 db.getSetting = (k) => db.prepare(`SELECT value FROM settings WHERE key=?`).get(k)?.value ?? null;
 db.setSetting = (k, v) => db.prepare(
@@ -108,10 +117,38 @@ db.seedHeroes = (heroes) => {
 
 db.getHeroes = () => db.prepare(`SELECT * FROM heroes ORDER BY sort`).all();
 db.getHero = (key) => db.prepare(`SELECT * FROM heroes WHERE key=?`).get(key);
-// 按显示名反查。**可能返回多条**（诸葛亮 ×2），调用方自己决定怎么办；
-// 「其他」输入框靠它把玩家手输的名字对回库里。
-db.findHeroesByName = (name) =>
-  db.prepare(`SELECT * FROM heroes WHERE name=? ORDER BY sort`).all(String(name || '').trim());
+// 按玩家手输的名字反查（「其他」输入框靠它把名字对回库里）。**可能返回多条**，
+// 调用方自己决定怎么办。
+//
+// ⚠️ 分三档，**按优先级来，不是取并集** —— 这个顺序是有实测依据的：
+//   玩家在「其他」框里打的，多半是**照着卡上抄下来的显示名**，而显示名 = variant + name。
+//   从前这里只比 `name`，于是「群雄孙坚」「SP周瑜」一条都对不上（它们的 name 只是
+//   「孙坚」「周瑜」，前缀存在 variant 里）；「诸葛亮」更冤 —— 库里两个诸葛亮 name 都是
+//   「诸葛亮」，精确匹配返回两条，撞上调用方的 `hits.length === 1` 直接放弃。
+//   2026-10-16 实测：玩家标注的 17 条手输里有 5 条是这么丢的，其中「祝融」还是 T0，
+//   害得那条 T0 高亮一直不亮。
+//
+//   ① 显示名精确命中 —— 「群雄孙坚」「SP周瑜」「诸葛亮」都在这儿落到唯一一条
+//   ② name 精确命中   —— 显示名对不上时退回老口径（可能有同名多条）
+//   ③ 前缀兜底        —— 只认**唯一命中**：玩家会把「祝融夫人」打成「祝融」，
+//                        但打「孙」能命中孙权/孙尚香/孙坚/孙策，那种宁可不认
+db.findHeroesByName = (raw) => {
+  const name = String(raw || '').trim();
+  if (!name) return [];
+
+  const byDisplay = db.prepare(
+    `SELECT * FROM heroes WHERE COALESCE(variant,'') || name = ? ORDER BY sort`).all(name);
+  if (byDisplay.length) return byDisplay;
+
+  const byName = db.prepare(`SELECT * FROM heroes WHERE name = ? ORDER BY sort`).all(name);
+  if (byName.length) return byName;
+
+  // LIKE 里 % 和 _ 是通配符，玩家真打了这两个字符就得转义，否则「张%」会命中一片
+  const escaped = name.replace(/[\\%_]/g, '\\$&');
+  const byPrefix = db.prepare(
+    `SELECT * FROM heroes WHERE name LIKE ? ESCAPE '\\' ORDER BY sort`).all(escaped + '%');
+  return byPrefix.length === 1 ? byPrefix : [];
+};
 
 // 一张图的 9 行。没识别过就是空数组。
 db.getGuesses = (filename) =>
@@ -120,16 +157,35 @@ db.getGuesses = (filename) =>
 db.getEntryGuesses = (entryId) =>
   db.prepare(`SELECT * FROM hero_guesses WHERE entry_id=? ORDER BY filename, slot`).all(entryId);
 
-// 写入识别候选。**不碰 chosen_key / source / decided_at** ——
-// 重跑识别只该更新"机器猜的"，玩家的确认是另一回事（除非玩家明确要重认）。
+// 写入识别结果（机器那一路）。一张图的 9 行一次写完，幂等。
+//
+// ★ 整个 Upsert 的关键是那几个 `CASE ... decided_at IS NULL`：
+//   **有人核对过的格子，重跑识别一律不许覆盖。** 这是"定期重跑"能安全存在的前提 ——
+//   否则补一次识别就把玩家所有的纠正冲掉了。decided_at 是判据（只有人动过才会写它）。
+//   candidates / vlm / confidence 是"机器当时看到什么"，无条件刷新；auto_key 也是
+//   —— 它记的是机器的意见，玩家改的是 chosen_key，两者本来就该分开存。
 db.saveGuesses = (entryId, filename, list) => {
   const up = db.prepare(`
-    INSERT INTO hero_guesses (entry_id, filename, slot, candidates) VALUES (?, ?, ?, ?)
-    ON CONFLICT(filename, slot) DO UPDATE SET candidates=excluded.candidates`);
-  db.transaction((rows) => rows.forEach((g) => up.run(entryId, filename, g.slot, JSON.stringify(g.candidates))))(list);
+    INSERT INTO hero_guesses (entry_id, filename, slot, candidates, vlm, auto_key, confidence, chosen_key, source)
+    VALUES (@entry_id, @filename, @slot, @candidates, @vlm, @auto_key, @confidence, @auto_key, 'auto')
+    ON CONFLICT(filename, slot) DO UPDATE SET
+      candidates = excluded.candidates,
+      vlm        = excluded.vlm,
+      confidence = excluded.confidence,
+      auto_key   = excluded.auto_key,
+      chosen_key = CASE WHEN hero_guesses.decided_at IS NULL THEN excluded.chosen_key ELSE hero_guesses.chosen_key END,
+      source     = CASE WHEN hero_guesses.decided_at IS NULL THEN excluded.source     ELSE hero_guesses.source     END`);
+  db.transaction((rows) => rows.forEach((g) => up.run({
+    entry_id: entryId, filename, slot: g.slot,
+    candidates: JSON.stringify(g.candidates || []),
+    vlm: g.vlm ? JSON.stringify(g.vlm) : null,
+    auto_key: g.auto_key || null,
+    confidence: g.confidence || null,
+  })))(list);
 };
 
-// 玩家确认一格。source: 'pick' | 'other' | 'none'
+// 玩家纠正一格。source: 'pick' | 'other' | 'none'
+// 写 decided_at 就是"有人核对过"的标记（见 schema.sql）。**auto_key 一个字节都不动。**
 db.decideGuess = (filename, slot, { key = null, source, otherName = null }) =>
   db.prepare(`UPDATE hero_guesses SET chosen_key=?, source=?, other_name=?, decided_at=?
               WHERE filename=? AND slot=?`)
@@ -141,11 +197,17 @@ db.filenamesMissingGuesses = () => db.prepare(`
   SELECT DISTINCT li.filename, li.entry_id FROM lineup_images li
   WHERE NOT EXISTS (SELECT 1 FROM hero_guesses g WHERE g.filename = li.filename)`).all();
 
-// 已确认的武将（给卡上做 T0 高亮用）。只取确认过的，机器猜的不算数。
-db.getConfirmedHeroes = (entryId) => db.prepare(`
-  SELECT DISTINCT h.key, h.name, h.faction, h.arm, h.variant
-  FROM hero_guesses g JOIN heroes h ON h.key = g.chosen_key
-  WHERE g.entry_id = ? ORDER BY h.sort`).all(entryId);
+// 还没跑过视觉模型的阵容图：已经有 NCC 的行，但 vlm 那一列还是 NULL。
+// 这是**历史图重跑的入口** —— 改版前那批图只有 NCC 候选，靠这个条件被扫出来补一遍。
+// ⚠️ 调用方（recognize-worker 的 sweep）必须**只在 vlm 启用时才**用它，
+//    否则没配 key 的环境每次启动都会把全部历史图重推一遍。
+db.filenamesMissingVlm = () => db.prepare(`
+  SELECT DISTINCT g.filename, g.entry_id FROM hero_guesses g
+  WHERE g.vlm IS NULL`).all();
+
+// （2026-10-16 删掉了 getConfirmedHeroes —— 它是上一版的遗留，没有任何调用方
+//   （阵容墙走的是 getSeasonHeroData 的批量版），而且改版后"已确认"这个说法本身
+//   就不成立了：机器填的也算数。留着只会误导下一个人。）
 
 // ★ T0 名单。**用户 2026-10-16 手工给的 7 个**，按 key 写而不是按名字 ——
 // 名字不是唯一键（诸葛亮 / SP诸葛亮 同名不同人），写名字将来一定会认错人。
@@ -163,36 +225,64 @@ db.T0_HEROES = new Set([
 ]);
 db.isT0 = (key) => db.T0_HEROES.has(key);
 
-// 识别效果的统计（/admin 的「识别反馈」页）。用户要的"整理反思"就落在这儿。
+// 识别效果的统计（/admin 的「阵容识别」块）。用户要的"整理反思、定期修复"就落在这儿。
 //
-// 三个数各有用处：
-//   · top1 —— 机器推的第一个就是对的，这个数决定"能不能全自动"（现在还不够）。
-//   · top3 —— 正确答案在给的三个候选里，**这个数决定这套交互成不成立**
-//             （玩家点一下就行，不用手输）。
-//   · 库里没有的 —— 玩家手输了、但对不上库里任何一个武将。两种可能：库里漏了武将，
-//     或者他打错了字。这一列是拿去看的，不是拿去做指标的。
+// ⚠️ 2026-10-16 改过一次口径，**改的原因是旧口径在自我美化**：
+//   旧版的分母是「玩家选了候选的格子」，而"手输"那一整类根本不进分母 ——
+//   偏偏手输正是机器错得最狠的地方。于是页面显示 89%/100%，真值是 65%/73%。
+//
+// 现在的口径按"人核对过没有"切分，这是唯一诚实的切法：
+//   · 机器填的（filled）—— 其中高/低置信。**这一档是工作量，不是质量**：
+//     没人核对过的格子既不算对也不算错，放进准确率的分母只会让数字随"玩家懒得点"虚高。
+//   · 人核对过的（reviewed）—— 才有资格谈对错。准确率 = 机器对 / (机器对 + 被改掉)。
+//     分母**不含**"机器原本空着、人补上的"：那是漏（召回），不是错（精度）。
+//   · 纠正排行（pairs）—— 「机器说 X → 玩家改成 Y」。**这就是"定期总结修复"的入口**：
+//     高频配对要么是 herodata 里的错画（皮肤版本对不上，用户已确认存在），
+//     要么是两个长得像的武将。照着这份名单修，比重新跑一遍分析便宜得多。
 db.getRecoStats = () => {
-  const rows = db.prepare(`SELECT filename, slot, candidates, chosen_key, source, other_name FROM hero_guesses`).all();
-  const s = { total: rows.length, decided: 0, pick: 0, other: 0, none: 0, top1: 0, top3: 0, notInCand: 0 };
+  const rows = db.prepare(`
+    SELECT auto_key, confidence, chosen_key, other_name, decided_at
+    FROM hero_guesses`).all();
+
+  const s = { total: rows.length, filled: 0, high: 0, low: 0,
+              reviewed: 0, kept: 0, corrected: 0, added: 0, cleared: 0 };
+  const pairs = new Map();
   const unresolved = [];
+
   for (const r of rows) {
-    if (r.source === null) continue;
-    s.decided++;
-    if (r.source === 'pick') s.pick++;
-    else if (r.source === 'other') s.other++;
-    else if (r.source === 'none') s.none++;
-    if (!r.chosen_key) {
-      if (r.other_name) unresolved.push(r.other_name);
-      continue;
+    if (r.auto_key) {
+      s.filled++;
+      if (r.confidence === 'high') s.high++; else s.low++;
     }
-    let cands = [];
-    try { cands = JSON.parse(r.candidates); } catch { cands = []; }
-    const at = cands.findIndex((c) => c.key === r.chosen_key);
-    if (at === 0) s.top1++;
-    if (at >= 0) s.top3++;
-    else s.notInCand++;      // 玩家选的武将压根不在候选里（多半是走「其他」手输的）
+    if (r.decided_at) {
+      s.reviewed++;
+      if (r.auto_key === null || r.auto_key === undefined) {
+        if (r.chosen_key) s.added++; else s.cleared++;
+      } else if (r.chosen_key === r.auto_key) {
+        s.kept++;                                  // 机器填的，人看了没动 —— 机器对
+      } else {
+        s.corrected++;                             // 被改掉了 —— 机器错
+        const k = `${r.auto_key}→${r.chosen_key || '__none__'}`;
+        pairs.set(k, (pairs.get(k) || 0) + 1);
+      }
+    }
+    // 玩家手输了、但对不上库里任何一个武将：要么库里漏了这个武将，要么他打错了字
+    if (!r.chosen_key && r.other_name) unresolved.push(r.other_name);
   }
-  return { ...s, unresolved };
+
+  // 纠正排行翻成显示名。库里已经查不到的 key 就原样显示 —— 那本身也是条线索。
+  const label = (key) => {
+    if (key === '__none__') return '（玩家说没有）';
+    const h = key ? db.getHero(key) : null;
+    return h ? (h.variant || '') + h.name : `?${key}`;
+  };
+  s.pairs = [...pairs.entries()]
+    .map(([k, n]) => { const [from, to] = k.split('→'); return { from: label(from), to: label(to), n }; })
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 20);
+
+  s.unresolved = unresolved;
+  return s;
 };
 
 // 阵容墙上用的批量版。**必须批量** —— 一面墙十几张卡，逐张查就是 N+1。
@@ -200,16 +290,23 @@ db.getRecoStats = () => {
 // 所以只给**能改这张卡的人**（本人 / 管理员）查。
 db.getSeasonHeroData = (seasonId, editableEntryIds) => {
   const confirmed = new Map();
+  // 从 2026-10-16 起这一份**不只是"玩家确认过的"了**：机器自动填的也在里面
+  // （用户定的是"含机器填的对所有人可见，标出是机器填的"）。
+  // 靠 source 分辨：'auto' = 机器填的、还没人核对过 → 卡上打「待核对」标记。
   const rows = db.prepare(`
-    SELECT g.entry_id, h.key, h.name, h.faction, h.arm, h.variant
+    SELECT g.entry_id, g.source, h.key, h.name, h.faction, h.arm, h.variant
     FROM hero_guesses g JOIN heroes h ON h.key = g.chosen_key
     JOIN entries e ON e.id = g.entry_id
     WHERE e.season_id = ? ORDER BY h.sort`).all(seasonId);
   for (const r of rows) {
     if (!confirmed.has(r.entry_id)) confirmed.set(r.entry_id, []);
     const list = confirmed.get(r.entry_id);
-    // 同一张图的 9 格里不该出现同一个武将，但历史数据可能有 —— 去重
-    if (!list.some((h) => h.key === r.key)) list.push({ key: r.key, name: r.name, faction: r.faction, arm: r.arm, variant: r.variant });
+    const auto = r.source === 'auto';
+    // 同一张图的 9 格里不该出现同一个武将，但历史数据可能有 —— 去重。
+    // 重复时**人工的那条赢**：不能因为机器也猜了这个武将，就把人核对过的标记冲掉。
+    const hit = list.find((h) => h.key === r.key);
+    if (hit) { if (!auto) hit.auto = false; continue; }
+    list.push({ key: r.key, name: r.name, faction: r.faction, arm: r.arm, variant: r.variant, auto });
   }
 
   const guesses = new Map();
@@ -327,7 +424,8 @@ db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
     images: db.getLineupImages(r.id),
     rating: ratings.get(r.id) || db.EMPTY_RATING,
     comments: comments.get(r.id) || [],
-    // 已确认的武将（所有人可见，T0 高亮要用）
+    // 认出来的武将（所有人可见，T0 高亮要用）。**从 2026-10-16 起机器自动填的也在里面**，
+    // 靠每项上的 `auto` 布尔区分 —— 模板据此画虚框 + 打「待核对」，见 reco.ejs。
     heroes: heroData.confirmed.get(r.id) || [],
     // 候选（只对能改这张卡的人有值，别人是空数组）
     guesses: heroData.guesses.get(r.id) || [],
@@ -404,22 +502,31 @@ const LOCK_WEEKDAY = 4;                   // 4 = 周四（getUTCDay 口径，0 �
 const LOCK_HOUR_BJ = 12;                  // 北京时间正午
 const BJ_OFFSET_MS = 8 * 3600 * 1000;     // 北京 = UTC+8
 
-// 这一期的打分截止时刻（毫秒时间戳），没有有效的 created_at 就返回 null。
-// 取**严格晚于** created_at 的那一个周四 12:00：万一正好卡在周四 12:00:00.000 开期，
-// 算下一周 —— 否则那一期一开出来就是封盘的。
-db.getRateLockAt = (season) => {
-  const created = Date.parse(season?.created_at ?? '');
-  if (!Number.isFinite(created)) return null;
-
+// 开期之后**严格晚于** created_at 的第一个「星期 weekday 的北京 12:00」，返回毫秒时间戳。
+//
+// 「严格晚于」是关键：万一正好卡在那一刻开期，算下一周 —— 否则那一期一开出来
+// 就已经过了自己的截止点。下面两个时刻共用这一段，只差一个 weekday。
+function nextNoonBJ(created, weekday) {
   // 把"北京墙上时间"借 UTC 的字段读出来：created + 8h 之后，getUTC* 拿到的就是北京的日期
   const d = new Date(created + BJ_OFFSET_MS);
-  // 12:00 北京 = 04:00 UTC，所以拿日期直接凑出当天那个时刻，再一天天往后找周四
+  // 12:00 北京 = 04:00 UTC，所以拿日期直接凑出当天那个时刻，再一天天往后找
   let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), LOCK_HOUR_BJ - 8);
   for (let i = 0; i < 8; i++) {           // 最多往后 7 天，必中
-    if (t > created && new Date(t + BJ_OFFSET_MS).getUTCDay() === LOCK_WEEKDAY) break;
+    if (t > created && new Date(t + BJ_OFFSET_MS).getUTCDay() === weekday) break;
     t += 86400000;
   }
   return t;
+}
+
+const parseCreated = (season) => {
+  const t = Date.parse(season?.created_at ?? '');
+  return Number.isFinite(t) ? t : null;
+};
+
+// 这一期的打分截止时刻，没有有效的 created_at 就返回 null。
+db.getRateLockAt = (season) => {
+  const created = parseCreated(season);
+  return created === null ? null : nextNoonBJ(created, LOCK_WEEKDAY);
 };
 
 // 这一期封盘了没有。**只看时间**，不看 status：已结算的期由别处挡着
@@ -427,6 +534,29 @@ db.getRateLockAt = (season) => {
 db.isRateLocked = (season) => {
   const at = db.getRateLockAt(season);
   return at !== null && Date.now() >= at;
+};
+
+// ---------- 阵容上传的窗口（2026-10-16 用户加的设定）----------
+//
+// 规矩：**每期开期后的第一个周三 12:00 才开放上传，开了以后一直到结算都能传。**
+// 用户的原话是"每周三 12 点以前不允许上传阵容"。开放时刻和打分截止是同一套算法，
+// 只差一个 weekday —— 所以共用上面的 nextNoonBJ，别抄第二份。
+//
+// ⚠️ 这里有个和打分一模一样的坑，`/admin` 必须把算出来的时刻摆给管理员看：
+//    **周三 12:00 之后开期的话，开放时刻会顺延到下周三 12:00** ——
+//    等于整整一周谁都不能传阵容。开期前就能看见，比开完才发现强。
+const OPEN_WEEKDAY = 3;                   // 3 = 周三
+
+db.getUploadOpenAt = (season) => {
+  const created = parseCreated(season);
+  return created === null ? null : nextNoonBJ(created, OPEN_WEEKDAY);
+};
+
+// 上传窗口还没开。**只按时间判**，不看 status —— 和 isRateLocked 同一个道理：
+// 已结算的期由调用方（当前的期才渲染 /lineup）挡着。
+db.isLineupClosed = (season) => {
+  const at = db.getUploadOpenAt(season);
+  return at !== null && Date.now() < at;
 };
 
 // 没人打过分时的形状。模板直接读，不用到处判空；冻结只是提醒别改它。

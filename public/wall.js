@@ -28,6 +28,12 @@
   var HEAD = '.shot-head';     // 顶栏：折行数随昵称长短变
   var NOTE = '.shot-note';     // 说明：写了几行就几行（没写的是一格空的，见模板）
   var RATE = '.shot-rate';     // 打分区：有没有"你打了 X"那两行决定高矮
+  // 阵容识别那一块（2026-10-16 加）：有识别结果的卡比没有的高 89px。
+  // ★ 它必须跟上面三块一起撑 —— 这一块是**卡片里最后一块高度可变的**，
+  //   不撑的话富余会跑到它下面去，同一排的评论行整排错开（实测差 89px）。
+  //   模板那边配合着**无条件渲染**这个盒子（没有识别结果时是个空 div），
+  //   所以这里 9 张卡里一张有、八张没有的情况也能撑齐。见 views/partials/reco.ejs 的头注释。
+  var RECO = '.reco';
 
   var box = function (el) { return el ? el.getBoundingClientRect().height : 0; };
 
@@ -89,7 +95,7 @@
       // 上一轮的 min-height 必须先清掉，否则量出来的是上一轮的结果
       cards.forEach(function (c) {
         c.style.minHeight = '';
-        [HEAD, NOTE, RATE].forEach(function (sel) {
+        [HEAD, NOTE, RATE, RECO].forEach(function (sel) {
           var e = c.querySelector(sel);
           if (e) e.style.minHeight = '';
         });
@@ -114,7 +120,7 @@
         //    那样富余的高度会落到打分区上方的 margin-top:auto 里，用户一点开评论区，
         //    这点富余先被吃掉 —— 按钮整排往上跳 100px，然后卡片才开始往下长。
         //    三块都撑齐之后富余为 0，展开评论区就是干干净净地往下长。
-        [HEAD, NOTE, RATE].forEach(function (sel) {
+        [HEAD, NOTE, RATE, RECO].forEach(function (sel) {
           var els = [];
           row.forEach(function (c) {
             var e = c.querySelector(sel);

@@ -1,25 +1,34 @@
 // 阵容识别的后台队列。
 //
-// 为什么要有这一层：识别一张图约 2.5 秒（外加从 R2 把图下回来的时间），
+// 为什么要有这一层：识别一张图本地要 ~2.5 秒、加上视觉模型要 20~70 秒，
 // 而**全站是同步请求-响应**的 Express —— 在 POST /lineup 里直接跑，玩家会卡在那儿，
 // 并发几个人就能把进程占满。所以上传只负责"把文件名推进队列"，算的活儿在这儿慢慢做。
 //
 // 全站没有队列基础设施（最近的先例是 limiter.js 的 setInterval(...).unref()），
 // 这里照那个路子来：**一个进程内的数组 + 一个定时器 + 严格串行**。
-// 串行是故意的 —— 识别是 CPU 密集的，并行跑只会互相拖慢，还抢 Express 的线程。
+// 串行是故意的 —— NCC 是 CPU 密集的，并行跑只会互相拖慢，还抢 Express 的线程。
 //
-// 进程重启后内存队列会丢，所以启动时扫一遍库：**没有 hero_guesses 行的阵容图**
-// 全部补进队列（见 db.filenamesMissingGuesses）。
+// 两路识别（本地 NCC + 远端视觉模型）**都在这一条队列里跑完再写库**，
+// 因为它们要合起来才能定置信度（见 recognize.merge）。
+//
+// 进程重启后内存队列会丢，所以启动时扫一遍库：
+//   · 没有 hero_guesses 行的阵容图 —— 全流程补跑（见 db.filenamesMissingGuesses）
+//   · 有行但 vlm 还是 NULL 的 —— 补跑第二路（见 db.filenamesMissingVlm）。
+//     这条正是"历史 24 张重跑"的入口，不用另外写脚本。
 
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 const { imgUrl } = require('./upload');
 const recognize = require('./recognize');
+const vlmModel = require('./recognize-vlm');
 
 const INDEX = path.join(__dirname, 'herodata', 'index.json');
 const TICK_MS = 3000;
 const MAX_FAIL = 3;           // 同一张图连续失败这么多次就放弃（内存里记着，重启会再试）
+// 从 R2 取图的超时。从前这里**完全没有超时**，代理一抖就会把整条串行队列吊死 ——
+// 后面排着的图全都不动了，而且日志里一个字都没有。r2.js 一直是有超时的，这里漏了。
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 30000);
 
 const queue = [];             // [{ filename, entryId }]
 const queued = new Set();     // 去重，避免同一张图被反复推
@@ -37,18 +46,49 @@ function enqueue(filename, entryId) {
 
 // 把图从 R2 下回来。图片是浏览器直传上去的，服务端从来没经手过字节。
 async function fetchImage(filename) {
-  const url = imgUrl(filename);
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`取图失败 ${r.status} ${filename}`);
-  return Buffer.from(await r.arrayBuffer());
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const r = await fetch(imgUrl(filename), { signal: ctl.signal });
+    if (!r.ok) throw new Error(`取图失败 ${r.status} ${filename}`);
+    return Buffer.from(await r.arrayBuffer());
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`取图超时（${FETCH_TIMEOUT_MS}ms）${filename}`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function process(job) {
+// ⚠️ 这个函数**不能叫 `process`**：函数声明会提升到模块作用域，把 Node 的全局
+//    `process` 整个挡住 —— 于是本文件顶层的 `process.env.XXX` 全都读到 undefined，
+//    报错还是 "Cannot read properties of undefined"，看着像环境没配好。
+//    （上一版它就叫 process，只是当时模块顶层没读过 process.env，所以没炸。）
+async function runJob(job) {
   const buf = await fetchImage(job.filename);
-  const list = await recognize.recognize(buf);
-  db.saveGuesses(job.entryId, job.filename, list);
-  const top = list.map((s) => s.candidates[0]?.name || '?').join(' ');
-  console.log(`[识别] ${job.filename} 完成：${top}`);
+  const ncc = await recognize.recognize(buf);
+
+  // 第二路：视觉模型。**它挂了不能拖垮整张图** —— 降级成"只有 NCC"，
+  // merge 会把那些格子标成 low（照填，但标记「待核对」），而不是整张图失败。
+  let vlm = null;
+  if (vlmModel.enabled()) {
+    try {
+      vlm = await vlmModel.identify(buf);
+    } catch (e) {
+      console.error(`[识别] 视觉模型失败，这张降级为只用 NCC：${e.message}`);
+    }
+  }
+
+  const merged = recognize.merge(ncc, vlm);
+  db.saveGuesses(job.entryId, job.filename, merged);
+
+  const filled = merged.filter((m) => m.auto_key).length;
+  const high = merged.filter((m) => m.confidence === 'high').length;
+  // 从前这里打的是九个 `?`（没有候选时），看着像报错、其实是正常的 ——
+  // 玩家传的要不是「阵容配置」页，九格本来就一个都认不出来。改成人话。
+  console.log(filled
+    ? `[识别] ${job.filename} 填了 ${filled}/9 格（两路一致 ${high}）`
+    : `[识别] ${job.filename} 一个都没认出来（多半传的不是「阵容配置」页）`);
 }
 
 async function tick() {
@@ -56,7 +96,7 @@ async function tick() {
   const job = queue.shift();
   busy = true;
   try {
-    await process(job);
+    await runJob(job);
     fails.delete(job.filename);
     queued.delete(job.filename);
   } catch (e) {
@@ -79,7 +119,16 @@ async function tick() {
 function sweep() {
   const rows = db.filenamesMissingGuesses();
   rows.forEach((r) => enqueue(r.filename, r.entry_id));
-  if (rows.length) console.log(`[识别] 启动补跑 ${rows.length} 张`);
+  if (rows.length) console.log(`[识别] 启动补跑 ${rows.length} 张（从没识别过的）`);
+
+  // 历史图补第二路（改版前那批只有 NCC 候选）。
+  // ⚠️ **只在配了 key 的时候收这批** —— 否则没 key 的环境每次启动都会把
+  //    全部历史图重推一遍，白跑一遍 NCC，还刷一屏"视觉模型未启用"的错误。
+  if (vlmModel.enabled()) {
+    const old = db.filenamesMissingVlm();
+    old.forEach((r) => enqueue(r.filename, r.entry_id));
+    if (old.length) console.log(`[识别] 启动补跑 ${old.length} 张（还没跑过视觉模型的）`);
+  }
 }
 
 function start() {
@@ -91,11 +140,16 @@ function start() {
   try {
     const idx = JSON.parse(fs.readFileSync(INDEX, 'utf8'));
     db.seedHeroes(idx.heroes);
+    // 视觉模型那边有一份"显示名 → 武将"的缓存，库刚变过，得让它重建
+    vlmModel.resetCache();
     console.log(`[识别] 武将库 ${idx.heroes.length} 个已就位`);
   } catch (e) {
     console.error('[识别] 武将库播种失败，识别不启用：', e.message);
     return;
   }
+  console.log(vlmModel.enabled()
+    ? '[识别] 两路都开：本地 NCC + 远端视觉模型'
+    : '[识别] 只跑本地 NCC（没配 DS_API_KEY，视觉模型那一路关闭）');
   // 库还没热的时候第一张要等一两秒（102 张卡面要解码 + 算模板），
   // 提前热一下，免得第一个玩家的图白等。
   recognize.load().catch((e) => console.error('[识别] 预热失败：', e.message));

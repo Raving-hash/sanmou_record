@@ -1,48 +1,72 @@
 <%#
-  阵容识别（2026-10-16 加）。这一块是「机器给候选、玩家点一下」的落点。
+  阵容识别（2026-10-16 加，同日改版）。改版要点：**不再让玩家做初始选择**——
+  上传后后台自动跑（本地 NCC + 远端视觉模型），直接填好结果，玩家看到了再纠正。
+  见 recognize.js / recognize-vlm.js / recognize-worker.js。
 
   两块内容，可见范围不同：
-    ① 已确认的武将 —— **所有人可见**。T0 的加金色标记，这就是这个功能最终要的东西。
-    ② 确认表单 —— **只有本人和管理员可见**（r.guesses 非空就说明能改，
+    ① 已识别的武将 —— **所有人可见**，包括机器自动填的（用户定的）。
+       机器填的带 `auto` 标记、画成虚框，提示"还没人核对过"。T0 的加金色标记。
+    ② 纠正面板 —— **只有本人和管理员可见**（r.guesses 非空就说明能改，
        见 db.getSeasonHeroData：候选 JSON 只给能改这张卡的人查）。
 
-  ⚠️ 布局约束：这一块**只在真有内容时才渲染**（`r.heroes.length || r.guesses.length`）。
-     没有识别结果时一个字都不输出 —— 阵容墙的版面靠 public/wall.js 把同一排撑成等高，
-     凭空多一个盒子会让没识别的卡和识别过的卡错开（wall-harness 里有对齐断言）。
+  ⚠️ 布局约束（2026-10-16 改过一次，**这次是反直觉的那个方向**）：
+     这一块的 `<div class="reco">` **永远渲染，哪怕一个字的内容都没有**。
+     理由是 public/wall.js 把同一排的 .shot-head / .shot-note / .shot-rate **以及 .reco**
+     四块各自撑成等高，这一排的卡片才会等高、打分区和评论行才会齐平。
+     少了这个空盒子的话，有识别结果的卡比没有的高 89px —— 同一排里没识别的那张
+     把富余全塞进别处，评论行整排错开（wall 那套浏览器断言抓的就是这个）。
+     空盒子没有边框没有底色，看不见；内容仍然是"没东西就不输出"。
 %>
 <% const heroes = r.heroes || [];
-   // ⚠️ 一个 entry 可以有多张阵容图（上限 6 张），而卡上只摊开第一张 ——
+   // ⚠️ 一个 entry 可以有多张阵容图（历史上限 6 张），而卡上只摊开第一张 ——
    //    所以这里**只取那张图的识别结果**。不筛的话，两张图的 18 行会一起渲染出来，
    //    「部队一 · 1」会出现两次，而两组的单选框还同名，互相打架。
-   //    （实测快照里 entry 5 / 9 / 16 就是两张图。）
+   //    （快照里 entry 5/9/16 就是两张图的老数据；2026-10-16 起每期只许传一张了。）
    const shownFile = r.images[0] ? r.images[0].filename : null;
    const guesses = (r.guesses || []).filter((g) => g.filename === shownFile);
-   const done = guesses.filter((g) => g.chosen_key || g.other_name).length;
-   // 有没有任何一格识别出东西。**一个候选都没有就整块不渲染** ——
-   // 玩家传的要不是「阵容配置」页（排行榜截图、PC 端截图），9 个框会落在别的东西上、
-   // 一个武将都匹配不上，这时摆 9 个空格子纯属噪声（实测：13 张真图里有 5 张是这种）。
-   // 服务端那边照样写 9 行（否则启动补跑会永远认为这张图没识别过），只是不显示。
-   const hasCands = guesses.some((g) => (g.candidates || []).length); %>
-<% if (heroes.length || hasCands || done) { %>
+   // 「待核对」= 机器填的、还没人看过（source==='auto' 且没落 decided_at）。
+   // 这个数就是折叠面板标题上那个 N。
+   const pending = guesses.filter((g) => g.source === 'auto').length;
+   const reviewed = guesses.filter((g) => g.decided_at).length;
+   // 有没有任何一格识别出东西（NCC 候选、VLM 候选、或已经填上了）。
+   // ⚠️ **判据不能只看 NCC** —— 会有"NCC 一无所获、视觉模型认出来了"的图，
+   //    只看 candidates 的话那种图整块不渲染，等于白认。
+   //    另一头也不能松：9 格全空仍然一个字都不输出（传排行榜截图的玩家不该看到 9 个空格子）。
+   const hasCands = guesses.some((g) =>
+     g.chosen_key || (g.candidates || []).length || (g.vlm || []).length); %>
+<%# ★ 盒子**无条件**渲染（见文件头的布局约束）。里面没内容时它是个空 div，
+    public/wall.js 会把它和同排别的一起撑到一样高，这样整排才对得齐。 %>
 <div class="reco">
   <% if (heroes.length) { %>
     <p class="reco-line">
       <span class="reco-k">阵容</span>
-      <% heroes.forEach((h) => { %>
-        <span class="reco-hero<%= isT0(h.key) ? ' is-t0' : '' %>"<% if (isT0(h.key)) { %> title="T0 武将"<% } %>><%= h.variant ? h.variant : '' %><%= h.name %></span>
+      <% heroes.forEach((h) => {
+           const t0 = isT0(h.key);
+           const tip = [t0 ? 'T0 武将' : '', h.auto ? '机器识别，还没人核对过' : '']
+             .filter(Boolean).join('；'); %>
+        <span class="reco-hero<%= t0 ? ' is-t0' : '' %><%= h.auto ? ' is-auto' : '' %>"
+              <% if (tip) { %>title="<%= tip %>"<% } %>
+        ><%= h.variant ? h.variant : '' %><%= h.name %><% if (h.auto) { %><i class="reco-q" aria-hidden="true">?</i><% } %></span>
       <% }) %>
     </p>
   <% } %>
 
-  <% if (hasCands || done) { %>
+  <% if (hasCands) { %>
     <details class="reco-box">
-      <summary>识别结果 · 已确认 <%= done %>/<%= guesses.length %></summary>
-      <%# 说明为什么有时候会对不上：9 个框是按「阵容配置」页的版式算的（见 recognize.js），
-          玩家要是传了别的页面，框就落在别处了。说清楚比让他瞎猜好。 %>
-      <p class="reco-tip">机器给的是候选，点一下确认。传的不是「阵容配置」页的话候选会不靠谱，直接在「其他」里手输。</p>
+      <summary>
+        <% if (pending) { %>识别结果 · 待核对 <%= pending %> 格<% } %>
+        <% if (pending && reviewed) { %> · <% } %>
+        <% if (reviewed) { %>已核对 <%= reviewed %>/<%= guesses.length %><% } %>
+      </summary>
+      <%# 说明两件事：机器填的可以直接改；传的不是「阵容配置」页的话候选会不靠谱。
+          9 个框是按那个页面的版式算的（见 recognize.js），换个页面框就落在别处了。 %>
+      <p class="reco-tip">
+        这套阵容是机器认的，<strong>认错了直接改</strong>。虚框带 ? 的是机器拿不准的，
+        最该看的就是它们。传的不是「阵容配置」页的话，认出来的多半不对，从「其他」里手输。
+      </p>
       <form method="post" action="/entries/<%= r.id %>/heroes" class="reco-form">
         <%# 认的是**哪一张图**。卡上摊开的是 images[0]，服务端要按同一个来 ——
-            不传的话它只能猜，而一个 entry 可能有好几张阵容图。 %>
+            不传的话它只能猜，而老数据里一个 entry 可能有好几张阵容图。 %>
         <input type="hidden" name="filename" value="<%= shownFile %>">
         <div class="reco-grid">
           <% guesses.forEach((g) => {
@@ -50,14 +74,26 @@
                const team = Math.floor((slot - 1) / 3) + 1;
                const pos = ((slot - 1) % 3) + 1;
                const cands = g.candidates || [];
-               const picked = (k) => g.source === 'pick' && g.chosen_key === k ? ' checked' : ''; %>
-            <div class="reco-slot">
-              <span class="reco-slot-k">部队<%= '一二三'[team - 1] %> · <%= pos %></span>
-              <%# 候选，外加**玩家确认的那个**（如果它不在候选里）——
-                  玩家常常是从「其他」手输的，或者点了一个机器没推的武将，
-                  不把它列出来的话，那一格在页面上就没有任何单选框是选中的。 %>
-              <% const opts = cands.slice();
-                 if (g.chosen && !opts.some((c) => c.key === g.chosen.key)) opts.push(g.chosen); %>
+               const vlm = g.vlm || [];
+               // ⚠️ `'auto'` 必须一起判 —— 机器自动填的那一格 chosen_key 是有值的，
+               //    但 source 不是 'pick'。漏掉它的话，那种格子在页面上
+               //    **没有任何单选框是选中的**（「不确定」也不选中，因为 chosen_key 非空），
+               //    看着像识别结果丢了 —— 上一版就在这儿栽过一次。
+               const picked = (k) =>
+                 (g.source === 'pick' || g.source === 'auto') && g.chosen_key === k ? ' checked' : '';
+               // 候选 = NCC 前 3 ∪ 视觉模型前 3，**按 key 去重**（两路常常给出同一个名字）。
+               // 两路合起来实测几乎打满（7 张里 6 张 9/9），所以玩家点一下就能改对。
+               const opts = [];
+               const seen = new Set();
+               for (const c of [...cands, ...vlm]) {
+                 if (c && c.key && !seen.has(c.key)) { seen.add(c.key); opts.push(c); }
+               }
+               // 再补上**玩家之前确认过的那个**（如果它不在两路候选里）——
+               // 他可能是从「其他」手输的、或者点了一个机器没推的武将，
+               // 不列出来的话，那一格在页面上就没有任何单选框是选中的。
+               if (g.chosen && !seen.has(g.chosen.key)) opts.push(g.chosen); %>
+            <div class="reco-slot<%= g.source === 'auto' ? ' is-pending' : '' %>">
+              <span class="reco-slot-k">部队<%= '一二三'[team - 1] %> · <%= pos %><% if (g.source === 'auto') { %> <i class="reco-q">?</i><% } %></span>
               <% opts.forEach((c) => { %>
                 <label class="reco-opt">
                   <input type="radio" name="slot<%= slot %>" value="<%= c.key %>"<%= picked(c.key) %>>
@@ -84,4 +120,3 @@
     </details>
   <% } %>
 </div>
-<% } %>

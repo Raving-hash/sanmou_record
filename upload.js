@@ -29,7 +29,12 @@ const MAX_OUT_BYTES = Number(process.env.MAX_OUT_BYTES || 1024 * 1024);
 
 // 每人每期的阵容图上限。从前 routes/main.js 里有一份、app.js 的 locals 里又有一份，
 // 现在收到这里一处。
-const MAX_LINEUP = Number(process.env.MAX_LINEUP || 6);
+//
+// ⚠️ 2026-10-16 起**写死 1**（用户定的设定："只允许上传一张阵容图"）。
+//    刻意**不再从 env 读** —— 它已经从"部署旋钮"变成产品规则了，留在 .env 里
+//    dev 和线上会悄悄分家；更要命的是线上 .env 是手工维护的，
+//    改了代码不改线上等于没改（`DS_API_KEY` 同理）。改上限就改这一行。
+const MAX_LINEUP = 1;
 
 // 签名令牌的有效期。只需覆盖"压缩 + 上传"这一段（前端是**先全压完再签名**，
 // 所以这期间不夹着几分钟的客户端压缩），10 分钟很宽裕。

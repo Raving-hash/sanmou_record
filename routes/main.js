@@ -201,6 +201,11 @@ router.get('/lineup', (req, res) => {
     entry,
     images: entry ? db.getLineupImages(entry.id) : [],
     max: MAX_LINEUP,
+    // 上传窗口（2026-10-16 加的设定）：每期开期后的第一个周三 12:00 才开放。
+    // 关着的时候页面不出上传组件。但**真正拦人的是下面 POST 那一道** ——
+    // 这里只是别让玩家挑完图才被弹回来。
+    uploadClosed: db.isLineupClosed(season),
+    uploadOpenAt: db.getUploadOpenAt(season),
   });
 });
 
@@ -219,6 +224,18 @@ router.post('/lineup', async (req, res) => {
     await removeFiles(keys);
     req.session.flash = { type: 'err', msg: '当前没有进行中的赛期' };
     return res.redirect('/');
+  }
+
+  // ★ 上传窗口。**拦人的那一道在这儿，不在界面上** —— 藏掉表单挡不住直接 POST。
+  //   判据只看时间（见 db.isLineupClosed）。打回时**必须把对象删掉**：
+  //   浏览器已经把字节传到 R2 了，不删就是一堆没入库的孤儿（r2-gc 才收得掉）。
+  if (db.isLineupClosed(season)) {
+    await removeFiles(keys);
+    req.session.flash = {
+      type: 'err',
+      msg: `阵容要到 ${res.locals.fmt(db.getUploadOpenAt(season))} 才开放上传`,
+    };
+    return res.redirect('/lineup');
   }
 
   const entry = db.getOrCreateEntry(season.id, req.user.id);
@@ -254,7 +271,7 @@ router.post('/lineup', async (req, res) => {
 
   if (existing.length + fresh.length > MAX_LINEUP) {
     await removeFiles(keys);
-    req.session.flash = { type: 'err', msg: `阵容截图最多 ${MAX_LINEUP} 张，先删掉几张再传` };
+    req.session.flash = { type: 'err', msg: '每期只能传一张阵容图，要换请先删掉现在这张' };
     return res.redirect('/lineup');
   }
 

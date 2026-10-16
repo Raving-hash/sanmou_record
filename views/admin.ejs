@@ -41,6 +41,13 @@
       <%# 打分截止是按开期时间算出来的（每期开期后第一个周四 12:00），管理员要靠它决定何时结算 %>
       · 打分<% if (canRate) { %>截止 <strong><%= fmt(rateLockAt) %></strong>（<%= fmtLeft(rateLockAt - Date.now()) %>）<% } else { %>已于 <strong><%= fmt(rateLockAt) %></strong> 截止，可以结算了<% } %>
     </p>
+    <%# 开着期却传不了图，管理员得一眼看到原因，而不是收到"为什么传不上"的反馈再去查代码 %>
+    <% if (uploadClosed) { %>
+      <p class="muted small">
+        ⏳ 阵容上传<strong>还没开放</strong> —— 要到 <strong><%= fmt(uploadOpenAt) %></strong>（<%= fmtLeft(uploadOpenAt - Date.now()) %>）才开。
+        在那之前玩家传不了阵容（打分不受影响）。
+      </p>
+    <% } %>
   <% } %>
   <form method="post" action="/admin/seasons" class="inline-create">
     <label>新建赛期
@@ -54,6 +61,21 @@
     <p class="muted small">
       注意：打分的截止点是按<strong>开期时间</strong>算的 —— 每期开期后遇到的第一个周四 12:00（北京）就封盘。
       现在开一期的话，打分截止在 <strong><%= fmt(nextLockAt) %></strong>（<%= fmtLeft(nextLockAt - Date.now()) %>）。
+    </p>
+    <%# ⚠️ 这条比上面那条更要紧：上传开放时刻是"开期后遇到的第一个**周三** 12:00"，
+        所以**周三中午之后开期就会顺延到下周三** —— 等于整整一周所有人传不了阵容。
+        开期前就摆出来，比开完收到一堆"传不上"的反馈再回头查代码强得多。
+        是否要报警只看"离现在还有多远"：正常情形（周三中午前开期）顶多几小时，
+        超过一天就说明已经绕过去了。 %>
+    <% const openGap = nextOpenAt - Date.now(); %>
+    <p class="muted small">
+      阵容上传的开放时刻同理，按<strong>开期时间</strong>算：每期开期后遇到的第一个<strong>周三</strong> 12:00（北京）才开放，
+      之后一直到结算都能传。
+      现在开一期的话，要到 <strong><%= fmt(nextOpenAt) %></strong>（<%= fmtLeft(openGap) %>）才能传阵容。
+      <% if (openGap > 86400000) { %>
+        <br>⚠️ <strong>这个开放时刻已经是下周了</strong> —— 现在开期的话，中间这段时间谁都传不了阵容。
+        想避开就把开期时间挪到周三中午之前。
+      <% } %>
     </p>
   <% } %>
 
@@ -181,36 +203,57 @@
 </section>
 
 <section class="card">
-  <%# 阵容识别的效果（2026-10-16 加）。用户要的"整理反思"落点：
-      看机器猜得准不准、玩家是不是点一下就够了、手输了哪些库里没有的名字。 %>
+  <%# 阵容识别的效果（2026-10-16 加，同日改版）。用户要的"整理反思、定期修复"落点。
+      ⚠️ 口径在改版时**故意换过**：旧版的分母是"玩家选了候选的格子"，把"手输"整类排除在外
+      —— 偏偏手输正是机器错得最狠的地方，于是页面显示 89%/100%，真值是 65%/73%。
+      现在按"人核对过没有"切，这是唯一诚实的切法（详见 db.getRecoStats 的注释）。 %>
   <h3>阵容识别</h3>
   <% if (!recoEnabled) { %>
     <p class="muted small">herodata/ 不在，识别未启用。卡面素材是游戏版权图、不进仓库，
       线上要手工放一份（同 deploy/ 和 .env）。</p>
   <% } %>
+  <% if (!vlmEnabled) { %>
+    <p class="muted small">⚠️ 没配 DS_API_KEY，视觉模型那一路关着 —— 只跑本地 NCC。
+      置信度会一律是「存疑」（没有第二路可比对），准确率也会明显低一截。</p>
+  <% } %>
+  <% const pctOf = (n, d) => (d ? `（${Math.round(n * 100 / d)}%）` : '');
+     // 准确率的分母是"机器填了、且人核对过的" —— **不含"机器原本空着、人补上的"**：
+     // 那是漏（召回），不是错（精度），混进来会让数字看着比实际好。
+     const judged = reco.kept + reco.corrected; %>
   <div class="table-wrap">
     <table>
       <tbody>
         <tr><th>识别过的格子</th><td class="num"><%= reco.total %></td>
-            <td class="muted small">一张阵容图 9 格，会随上传自动跑</td></tr>
-        <tr><th>玩家确认过的</th><td class="num"><%= reco.decided %></td>
-            <td class="muted small">点候选 <%= reco.pick %> · 手输 <%= reco.other %> · 点「不确定」<%= reco.none %></td></tr>
-        <%# 下面三行的分母是**选出了武将的那些格子**（top3 + notInCand），不是全部格子 ——
-            玩家点「不确定」的不该算机器认错。top1 ⊂ top3。
-            top1 决定"能不能做全自动"（现在还不够），top3 决定"点一下够不够"。 %>
-        <% const picked = reco.top3 + reco.notInCand;
-           const pct = (n) => (picked ? `（${Math.round(n * 100 / picked)}%）` : ''); %>
-        <tr><th>机器头名就是对的</th>
-            <td class="num"><%= reco.top1 %><% if (picked) { %> <span class="muted small">/ <%= picked %></span><% } %></td>
-            <td class="muted small">决定能不能做全自动 —— 现在还不够<%= pct(reco.top1) %></td></tr>
-        <tr><th>答案在给的三个候选里</th>
-            <td class="num"><%= reco.top3 %><% if (picked) { %> <span class="muted small">/ <%= picked %></span><% } %></td>
-            <td class="muted small">**这个数才是交互成不成立的依据**：在的话玩家点一下就行<%= pct(reco.top3) %></td></tr>
-        <tr><th>选的武将不在候选里</th><td class="num"><%= reco.notInCand %></td>
-            <td class="muted small">多半是从「其他」手输的，说明那格机器没推对</td></tr>
+            <td class="muted small">一张阵容图 9 格，上传后自动跑两路（本地 NCC + 视觉模型）</td></tr>
+        <tr><th>机器自动填了</th><td class="num"><%= reco.filled %></td>
+            <td class="muted small">其中两路一致（可信）<%= reco.high %> · 存疑 <%= reco.low %></td></tr>
+        <tr><th>人核对过</th><td class="num"><%= reco.reviewed %></td>
+            <td class="muted small">还有 <%= reco.filled - reco.reviewed %> 格没人看过 —— 这是工作量，不是质量</td></tr>
+        <tr><th><strong>核对过的里面机器是对的</strong></th>
+            <td class="num"><strong><%= reco.kept %></strong><% if (judged) { %> <span class="muted small">/ <%= judged %></span><% } %></td>
+            <td class="muted small"><strong>这是核心质量指标</strong><%= pctOf(reco.kept, judged) %>
+              —— 分母是"人真的看过"的那些，没人看的不算</td></tr>
+        <tr><th>被人改掉的</th><td class="num"><%= reco.corrected %></td>
+            <td class="muted small">机器填了但人不认 —— 下面那张排行就是这些</td></tr>
+        <tr><th>机器没填、人补上的</th><td class="num"><%= reco.added %></td>
+            <td class="muted small">机器漏了（多半是那格两路都没给候选）</td></tr>
+        <tr><th>人判「不确定」的</th><td class="num"><%= reco.cleared %></td>
+            <td class="muted small">机器填了、人看下来觉得没有 —— 也算机器错，但错法不同</td></tr>
       </tbody>
     </table>
   </div>
+
+  <%# ★ 这一块是"定期总结修复"的入口。高频配对要么是 herodata 里的错画
+      （皮肤版本跟游戏里显示的不是同一张，用户已确认存在），要么是两个长得像的武将。
+      照着这份名单去修数据，比重新跑一遍分析便宜得多。 %>
+  <% if (reco.pairs.length) { %>
+    <p class="muted small" style="margin-top:0.6rem">
+      <strong>机器错在哪</strong>（机器说 X → 玩家改成 Y，按次数排）—— 照着这份名单修 herodata：
+    </p>
+    <p class="small">
+      <% reco.pairs.forEach((p) => { %><span class="badge badge-wait"><%= p.from %> → <%= p.to %><% if (p.n > 1) { %> ×<%= p.n %><% } %></span> <% }) %>
+    </p>
+  <% } %>
   <% if (reco.unresolved.length) { %>
     <p class="muted small">玩家手输了、但库里对不上的名字（<%= reco.unresolved.length %> 个）——
       要么库里漏了武将，要么他打错了字：</p>

@@ -30,10 +30,21 @@ router.get('/', (req, res) => {
     // 「现在开一期的话，截止会落在什么时候」。截止点是按开期时间算的，周三开期
     // 就只剩一天多 —— 摆在新赛期表单旁边，省得开完了才发现窗口很短。
     nextLockAt: db.getRateLockAt({ created_at: new Date().toISOString() }),
+    // 「现在开一期的话，阵容上传要到什么时候才开放」。**必须摆出来**：
+    // 上传窗口是"开期后第一个周三 12:00"，所以周三中午之后开期的话，
+    // 开放时刻会顺延到下周三 12:00 —— 整整一周谁都不能传阵容。
+    // 和上面打分截止是同一个坑，开期前就看得见比开完才发现强。
+    nextOpenAt: db.getUploadOpenAt({ created_at: new Date().toISOString() }),
+    // 当前这期是不是正卡在"还没到开放时刻"里（开着期却传不了图，管理员得知道为什么）
+    uploadClosed: openSeason ? db.isLineupClosed(openSeason) : false,
+    uploadOpenAt: openSeason ? db.getUploadOpenAt(openSeason) : null,
     // 阵容识别的效果统计（2026-10-16 加）。用户要的"整理反思"就是这一块：
     // 机器推的头名对不对、正确答案在不在给的三个候选里、玩家手输了哪些库里没有的名字。
     reco: db.getRecoStats(),
     recoEnabled: require('../recognize-worker').enabled(),
+    // 视觉模型那一路开着没有。关着的时候上面那些数字会明显难看（没有第二路可比对，
+    // 置信度一律 low）—— 页面要说清楚原因，否则管理员会以为识别退化了。
+    vlmEnabled: require('../recognize-vlm').enabled(),
   });
 });
 

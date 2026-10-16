@@ -2,8 +2,16 @@
 
 <hgroup class="page-head">
   <h2>上传阵容 · <%= season.name %></h2>
-  <p class="muted">最多 <%= max %> 张，支持 jpg / png / webp，在浏览器里压缩后上传</p>
+  <p class="muted">每期一张，支持 jpg / png / webp，在浏览器里压缩后上传</p>
 </hgroup>
+
+<% if (uploadClosed) { %>
+  <%# 上传窗口没开（每期开期后第一个周三 12:00 才开，见 db.getUploadOpenAt）。
+       页面不出上传组件，但**拦人的是服务端那一道** —— 这里只是别让玩家白挑图。
+       已传的图仍然列在下面、仍然能删：窗口一关就连传错的都撤不掉，那才叫坑。 %>
+  <p class="flash flash-err">阵容要到 <strong><%= fmt(uploadOpenAt) %></strong> 才开放上传。
+    现在还不能传新的。</p>
+<% } %>
 
 <h3>已上传（<%= images.length %> / <%= max %>）</h3>
 <% if (!images.length) { %>
@@ -29,14 +37,19 @@
      —— 表现是"说明保存不上"，特别难查。
      ⚠ 文件 input **不能有 name**：没有名字它才不参与提交。这是"字节不再经手服务端"的
      结构性保证，不是靠 input.value='' 之类的技巧。同一条也见 views/score.ejs。 %>
+<% if (!uploadClosed) { %>
 <form method="post" action="/lineup"
       data-upload-kind="lineup" data-key-field="images"
       data-upload-max-bytes="<%= maxOutBytes %>">
-  <label>继续上传
-    <input type="file" accept="image/jpeg,image/png,image/webp" multiple
-           data-max="<%= max - images.length %>">
-    <small class="muted">可以一次多选，最多还能传 <%= max - images.length %> 张</small>
-  </label>
+  <%# 每期只允许一张，所以传满了就不再出文件框（只剩"说明"还能改）。
+       `multiple` 去掉、`data-max` 也就没意义了 —— 留着会让人以为还能多选。 %>
+  <% if (images.length < max) { %>
+    <label>上传阵容图
+      <input type="file" accept="image/jpeg,image/png,image/webp"
+             data-max="<%= max - images.length %>">
+      <small class="muted">每期只能用一张，想换的话先把上面那张删掉</small>
+    </label>
+  <% } %>
   <label>阵容说明
     <textarea name="lineup_note" rows="3"
               placeholder="这套阵容的思路、站位、克制谁……"><%= entry && entry.lineup_note ? entry.lineup_note : '' %></textarea>
@@ -48,6 +61,7 @@
   <noscript><p class="flash flash-err">你的浏览器禁用了 JavaScript，传不了图。
     请换个浏览器、或者把本站的 JS 放开——这是把图片直传图床所必需的。</p></noscript>
 </form>
+<% } %>
 
 <p><small class="muted">只改阵容截图或说明，不会影响你的积分提交时间。</small></p>
 

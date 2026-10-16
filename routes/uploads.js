@@ -35,19 +35,27 @@ router.post('/uploads/sign', async (req, res) => {
   const kind = String(req.body.kind || 'lineup');
   const count = Number(req.body.count);
   if (!Number.isInteger(count) || count < 1 || count > MAX_LINEUP) {
-    return res.status(400).json({ error: `一次最多传 ${MAX_LINEUP} 张` });
+    return res.status(400).json({ error: '一次只能传一张' });
   }
 
   const season = db.getOpenSeason();
   if (!season) return res.status(409).json({ error: '当前没有进行中的赛期' });
 
   if (kind === 'lineup') {
+    // 上传窗口（2026-10-16 加的设定）。**和 POST /lineup 那一道是同一件事**，
+    // 只是提前到签名这一步 —— 不提前拦的话，玩家会白压白传一批注定被拒的图
+    // （那批字节走的是他自己的流量和 R2 的带宽）。
+    if (db.isLineupClosed(season)) {
+      return res.status(409).json({
+        error: `阵容要到 ${res.locals.fmt(db.getUploadOpenAt(season))} 才开放上传`,
+      });
+    }
     // 用 findEntry 而不是 getOrCreateEntry：这里只是在**预检**，不该因为人家点了
     // 一次"选择文件"就先在库里给他建一条空记录（提交时才建，和从前的时机一致）。
     const entry = db.findEntry(season.id, req.user.id);
     const existing = entry ? db.getLineupImages(entry.id).length : 0;
     if (existing + count > MAX_LINEUP) {
-      return res.status(409).json({ error: `阵容截图最多 ${MAX_LINEUP} 张，先删掉几张再传` });
+      return res.status(409).json({ error: '每期只能传一张阵容图，要换请先删掉现在这张' });
     }
   }
 

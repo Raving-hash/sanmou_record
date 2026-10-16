@@ -263,7 +263,45 @@ async function recognize(input, topN = 3) {
   });
 }
 
-module.exports = { available, load, recognize, slots, COLS, ROWS, CARD_W, CARD_H };
+// 把两路识别的结果合起来，决定**自动填哪个**、以及**可信不可信**。
+//
+// ★ 为什么"一致"能当置信度用：2026-10-16 在玩家标注过的 63 格真值上实测 ——
+//   两路头名一致的 28 格（44%）**28/28 全对**；不一致的 56% 里 VLM 对 19、NCC 对 13、都错 3。
+//   所以：一致 → 直接填、标 high；不一致 → 填 VLM 的（它更准），标 low。
+//   注意低置信**也照填**（用户定的"照填 + 标待核对"），不是留空。
+//
+// 这是纯函数（不碰库、不联网），**断言直接喂假数据进来测** —— 见 .devlocal/test/test-heroes.js。
+//
+// 返回的每一项正好是 db.saveGuesses 要的形状。
+function merge(nccList, vlmList) {
+  const nccBySlot = new Map();
+  for (const s of nccList || []) nccBySlot.set(s.slot, s.candidates || []);
+  const vlmBySlot = new Map();
+  for (const s of vlmList || []) vlmBySlot.set(s.slot, s.candidates || []);
+
+  const out = [];
+  for (let slot = 1; slot <= 9; slot++) {
+    const ncc = nccBySlot.get(slot) || [];
+    const vlm = vlmBySlot.get(slot) || [];
+    const nccKey = ncc[0] ? ncc[0].key : null;
+    const vlmKey = vlm[0] ? vlm[0].key : null;
+
+    let auto_key = null, confidence = null;
+    if (nccKey && vlmKey) {
+      auto_key = vlmKey;                                    // 一致时两个都一样，写谁都行
+      confidence = nccKey === vlmKey ? 'high' : 'low';
+    } else if (vlmKey) {
+      auto_key = vlmKey; confidence = 'low';                // NCC 一无所获（卡框没对上、图不是那个页）
+    } else if (nccKey) {
+      auto_key = nccKey; confidence = 'low';                // VLM 没跑或跑挂了 —— 降级，但必须标出来
+    }
+
+    out.push({ slot, candidates: ncc, vlm, auto_key, confidence });
+  }
+  return out;
+}
+
+module.exports = { available, load, recognize, merge, slots, COLS, ROWS, CARD_W, CARD_H };
 
 // 命令行自测：node recognize.js <图片路径>
 // 打印 9 个格子的前 3 个候选，人眼核对用（断言里不跑这个，见 README）
