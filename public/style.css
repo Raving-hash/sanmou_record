@@ -1797,7 +1797,62 @@ details.cmt[open] > summary {
 }
 
 /* --------------------------------------------------------------------------
-   16. 图片弹层（点图看大图）
+   16. 阵容识别（views/partials/reco.ejs）
+
+   两块：上面一行是**已确认的武将**（所有人可见，T0 的加金），下面是可以折叠的确认表单
+   （只有本人和管理员渲染 —— 数据层就不给别人的候选，见 db.getSeasonHeroData）。
+
+   ⚠️ 这一块**高度天然不一**（有的卡识别过、有的没有），所以它在模板里排在
+      `.shot-rate` **之后** —— public/wall.js 只量 HEAD / NOTE / RATE 三块做同排对齐，
+      插在那三块中间会把对齐算歪。样式上也不给它固定高度。
+   -------------------------------------------------------------------------- */
+.reco { margin-top: 0.5rem; }
+
+/* 已确认那一行。挤在一行里、超了省略，不给它长高的机会（同上：版面要稳）。 */
+.reco-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem;
+  margin: 0; font-size: var(--yw-fs-2xs); line-height: 1.4;
+}
+.reco-k { color: var(--yw-text-mute); flex: none; }
+.reco-hero {
+  padding: 0.05rem 0.35rem; border-radius: 999px;
+  background: var(--yw-ink-700); color: var(--yw-text-dim);
+  border: 1px solid var(--yw-line);
+}
+/* T0：金字金边，这一行里一眼能挑出来 —— 这就是整个功能最终要的东西 */
+.reco-hero.is-t0 {
+  color: var(--yw-gold-lt); border-color: var(--yw-gold);
+  background: color-mix(in srgb, var(--yw-gold) 14%, transparent);
+}
+
+/* 确认表单 */
+.reco-box { margin-top: 0.35rem; font-size: var(--yw-fs-2xs); }
+.reco-tip { color: var(--yw-text-mute); margin: 0.35rem 0 0.5rem; line-height: 1.5; }
+.reco-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem; margin-bottom: 0.5rem;
+}
+.reco-slot {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.35rem; border-radius: 6px;
+  background: var(--yw-ink-800); border: 1px solid var(--yw-line);
+}
+.reco-slot-k { color: var(--yw-text-mute); margin-bottom: 0.1rem; }
+.reco-opt {
+  display: flex; align-items: center; gap: 0.3rem;
+  cursor: pointer; line-height: 1.3;
+}
+.reco-opt input { margin: 0; flex: none; }
+.reco-opt span { display: flex; align-items: baseline; gap: 0.25rem; }
+.reco-opt i { font-style: normal; color: var(--yw-text-mute); font-size: 0.9em; }
+.reco-opt.is-none { color: var(--yw-text-mute); }
+.reco-other {
+  width: 100%; margin: 0.1rem 0 0; padding: 0.15rem 0.3rem;
+  font-size: var(--yw-fs-2xs); height: auto;
+}
+
+/* --------------------------------------------------------------------------
+   17. 图片弹层（点图看大图）
    -------------------------------------------------------------------------- */
 /* 点阵容图 / 积分图不再跳新标签页，改成盖一层（public/lightbox.js）。
    这一层和里面的零件**全部由那个脚本现建**，模板里没有它们的 DOM ——
@@ -1930,7 +1985,7 @@ html.lb-lock {
 }
 
 /* --------------------------------------------------------------------------
-   17. 结算战报（/seasons/:id 上那段贴群里用的纯文本，见 views/season.ejs）
+   18. 结算战报（/seasons/:id 上那段贴群里用的纯文本，见 views/season.ejs）
    -------------------------------------------------------------------------- */
 /* 又是原生 <details>，所以第 15 节那三条"必须带 `details.` 前缀、还要顶掉 Pico 给
    details / summary 补的 margin-bottom"的规矩照旧适用 —— 不重复写在注释里了。
@@ -1985,7 +2040,7 @@ details.report[open] > summary {
 }
 
 /* --------------------------------------------------------------------------
-   18. 窄屏
+   19. 窄屏
    -------------------------------------------------------------------------- */
 @media (max-width: 700px) {
   /* Pico 在 <576px 那档把 .container 的 padding 归零了（靠 max-width 当留白），

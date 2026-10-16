@@ -96,6 +96,9 @@ app.use((req, res, next) => {
   // 模板里凡是要判"这行算不算胜者"的地方都读它，别在模板里写死 2 ——
   // 用户 2026-10-15 改的就是这个数，写死的话下次改规矩得满页面找。
   res.locals.topN = db.TOP_N;
+  // 这个武将 key 在不在 T0 名单里（阵容卡上的高亮用，见 partials/reco.ejs）。
+  // 名单本体是 db.js 的 T0_HEROES —— 单一真源，改动只改那一处。
+  res.locals.isT0 = db.isT0;
   // 「最高 400 由谁打的」那个名字走 views/partials/name-list.ejs —— 从前是这里的一个
   // nameList 助手，加慧眼圆框时挪进了模板：要拼「昵称 + 圆框」的 HTML，光有字符串不够了。
   // （2026-10-14 起它只印并列里的第一个名字，库里给的照样是全部的人。）
@@ -168,6 +171,12 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(400).send(err.message || '出错了');
 });
+
+// 阵容识别的后台队列（2026-10-16 加）。**必须在 listen 之前起** ——
+// 它的 sweep() 要扫一遍库里没识别过的阵容图（进程重启会把内存队列清空）。
+// 单进程 + setInterval(...).unref()，和 limiter.js 同一套路，不引入任何队列依赖。
+// herodata/ 不在时它自己会安静地不启用（沙箱就靠这条隔离，见 .devlocal/test/reset.sh）。
+require('./recognize-worker').start();
 
 const port = process.env.PORT || 3000;
 // HOST=127.0.0.1 时只监听回环，外部一律经 nginx 进来（.env 里已设）

@@ -115,8 +115,48 @@ CREATE TABLE IF NOT EXISTS comments (
   -- 防刷走内存限流（limiter.js 的游客那一段），不靠事后照着 IP 追查。
 );
 
+-- 武将库（2026-10-16 加）。102 个武将，数据源是 git-ignored 的 herodata/index.json，
+-- 启动时幂等播种（见 db.js 的 seedHeroes）。
+-- ★ 卡面是游戏版权素材，**不在这个仓库里** —— 目录不存在时识别功能整体不启用，
+--   但下面这两张表和库本身照样能跑（heroes 表空着而已）。
+-- ★ 势力/兵种是**从卡面人工读出来的**，不是脚本抓的：上游 sgmdtx.com 的 JSON 里
+--   `bz`（兵种）字段 103 个里 80 个都填「盾」，是坏的；`color` 全是 orange，也没用。
+--   `zy`（势力）基本准确但个别著名错误（把关平、周仓、徐盛都写成了魏）。
+CREATE TABLE IF NOT EXISTS heroes (
+  key     TEXT PRIMARY KEY,       -- 拼音 slug，卡面文件名（herodata/cards/<key>.png）也是它
+  name    TEXT NOT NULL,          -- 显示名。**不是唯一键**：诸葛亮/SP诸葛亮 同名不同人
+  faction TEXT NOT NULL,          -- 魏 / 蜀 / 吴 / 群
+  arm     TEXT NOT NULL,          -- 骑 / 弓 / 盾 / 枪
+  variant TEXT,                   -- NULL | 'SP' | '群雄' —— 同名两版靠它区分，显示时缀在名字前
+  sort    INTEGER NOT NULL DEFAULT 0
+);
+
+-- 识别结果（2026-10-16 加）：一张阵容图 9 个格子，一格一行。
+-- 产品形态是「机器给候选、玩家点一下」—— 精度不够全自动（实测首位 8/9），
+-- 而玩家的每次纠错都在攒真值，这张表就是攒的地方。
+CREATE TABLE IF NOT EXISTS hero_guesses (
+  id         INTEGER PRIMARY KEY,
+  entry_id   INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL,       -- lineup_images.filename，同一张图 9 行
+  slot       INTEGER NOT NULL,    -- 1..9，行优先（部队一 1-3、二 4-6、三 7-9）
+  -- 候选快照（JSON）。**故意存快照而不是只存外键**：库会随版本变，
+  -- 而"当时机器猜的是什么"是历史事实，反馈分析要的就是它，不该被后来的库覆盖。
+  candidates TEXT NOT NULL,
+  -- 玩家确认的结果。**故意不写 REFERENCES heroes(key)**：库是播种出来的、可能被重播，
+  -- 而玩家的决定是这张表里最值钱的数据，不能因为库里少了一个武将就被级联删掉或写不进去。
+  chosen_key TEXT,
+  source     TEXT,                -- 'pick'（点了候选）/ 'other'（自己输入）/ 'none'（说没有）
+  other_name TEXT,                -- source='other' 时玩家手输的原文，哪怕没能对上库里任何一个
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  decided_at TEXT,
+  -- 一张图的同一格只有一行。重跑识别 = 覆盖候选，但**不动已确认的玩家选择**。
+  UNIQUE (filename, slot)
+);
+
 -- 常用索引
 CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
+CREATE INDEX IF NOT EXISTS idx_guesses_filename ON hero_guesses(filename);
+CREATE INDEX IF NOT EXISTS idx_guesses_entry ON hero_guesses(entry_id);
 CREATE INDEX IF NOT EXISTS idx_entries_user   ON entries(user_id);
 CREATE INDEX IF NOT EXISTS idx_lineup_entry   ON lineup_images(entry_id);
 CREATE INDEX IF NOT EXISTS idx_ratings_entry  ON ratings(entry_id);

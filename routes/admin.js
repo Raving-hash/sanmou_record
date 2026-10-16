@@ -30,6 +30,10 @@ router.get('/', (req, res) => {
     // 「现在开一期的话，截止会落在什么时候」。截止点是按开期时间算的，周三开期
     // 就只剩一天多 —— 摆在新赛期表单旁边，省得开完了才发现窗口很短。
     nextLockAt: db.getRateLockAt({ created_at: new Date().toISOString() }),
+    // 阵容识别的效果统计（2026-10-16 加）。用户要的"整理反思"就是这一块：
+    // 机器推的头名对不对、正确答案在不在给的三个候选里、玩家手输了哪些库里没有的名字。
+    reco: db.getRecoStats(),
+    recoEnabled: require('../recognize-worker').enabled(),
   });
 });
 

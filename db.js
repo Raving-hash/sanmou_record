@@ -93,6 +93,145 @@ db.getLineupImages = (entryId) =>
 
 db.getLineupImage = (id) => db.prepare(`SELECT * FROM lineup_images WHERE id=?`).get(id);
 
+// ---------- 武将库 / 识别结果（2026-10-16 加）----------
+
+// 库的播种。**每次启动都跑一遍**，靠 upsert 保证幂等 ——
+// 这样改了 herodata/index.json（补一个武将、修一个兵种）重启就生效，不用手工改库。
+// 不删多余的 key：库里少一个武将时，历史上玩家对它的确认仍然要留着（见 schema.sql）。
+db.seedHeroes = (heroes) => {
+  const up = db.prepare(`
+    INSERT INTO heroes (key, name, faction, arm, variant, sort) VALUES (@key, @name, @faction, @arm, @variant, @sort)
+    ON CONFLICT(key) DO UPDATE SET name=excluded.name, faction=excluded.faction,
+                                   arm=excluded.arm, variant=excluded.variant, sort=excluded.sort`);
+  db.transaction((rows) => rows.forEach((h, i) => up.run({ ...h, variant: h.variant || null, sort: i })))(heroes);
+};
+
+db.getHeroes = () => db.prepare(`SELECT * FROM heroes ORDER BY sort`).all();
+db.getHero = (key) => db.prepare(`SELECT * FROM heroes WHERE key=?`).get(key);
+// 按显示名反查。**可能返回多条**（诸葛亮 ×2），调用方自己决定怎么办；
+// 「其他」输入框靠它把玩家手输的名字对回库里。
+db.findHeroesByName = (name) =>
+  db.prepare(`SELECT * FROM heroes WHERE name=? ORDER BY sort`).all(String(name || '').trim());
+
+// 一张图的 9 行。没识别过就是空数组。
+db.getGuesses = (filename) =>
+  db.prepare(`SELECT * FROM hero_guesses WHERE filename=? ORDER BY slot`).all(filename);
+
+db.getEntryGuesses = (entryId) =>
+  db.prepare(`SELECT * FROM hero_guesses WHERE entry_id=? ORDER BY filename, slot`).all(entryId);
+
+// 写入识别候选。**不碰 chosen_key / source / decided_at** ——
+// 重跑识别只该更新"机器猜的"，玩家的确认是另一回事（除非玩家明确要重认）。
+db.saveGuesses = (entryId, filename, list) => {
+  const up = db.prepare(`
+    INSERT INTO hero_guesses (entry_id, filename, slot, candidates) VALUES (?, ?, ?, ?)
+    ON CONFLICT(filename, slot) DO UPDATE SET candidates=excluded.candidates`);
+  db.transaction((rows) => rows.forEach((g) => up.run(entryId, filename, g.slot, JSON.stringify(g.candidates))))(list);
+};
+
+// 玩家确认一格。source: 'pick' | 'other' | 'none'
+db.decideGuess = (filename, slot, { key = null, source, otherName = null }) =>
+  db.prepare(`UPDATE hero_guesses SET chosen_key=?, source=?, other_name=?, decided_at=?
+              WHERE filename=? AND slot=?`)
+    .run(key, source, otherName, new Date().toISOString(), filename, slot);
+
+// 还没识别过的阵容图（启动时补跑那些进程重启前没轮到、或当时失败的）。
+// 判据是"这张图在 hero_guesses 里一行都没有"。
+db.filenamesMissingGuesses = () => db.prepare(`
+  SELECT DISTINCT li.filename, li.entry_id FROM lineup_images li
+  WHERE NOT EXISTS (SELECT 1 FROM hero_guesses g WHERE g.filename = li.filename)`).all();
+
+// 已确认的武将（给卡上做 T0 高亮用）。只取确认过的，机器猜的不算数。
+db.getConfirmedHeroes = (entryId) => db.prepare(`
+  SELECT DISTINCT h.key, h.name, h.faction, h.arm, h.variant
+  FROM hero_guesses g JOIN heroes h ON h.key = g.chosen_key
+  WHERE g.entry_id = ? ORDER BY h.sort`).all(entryId);
+
+// ★ T0 名单。**用户 2026-10-16 手工给的 7 个**，按 key 写而不是按名字 ——
+// 名字不是唯一键（诸葛亮 / SP诸葛亮 同名不同人），写名字将来一定会认错人。
+// 和 RATE_VALUES / TOP_N 一个路数：产品参数、单一真源、改的时候改这一处。
+// ⚠️ 注意 `huang_pu_song2`：皇甫嵩有紫/橙两版，紫的那版（huang_fu_song）已按用户要求丢弃，
+//    留下的是这张橙卡，显示名仍叫「皇甫嵩」。
+db.T0_HEROES = new Set([
+  'zhu_rong_fu_ren',  // 祝融夫人（用户说的「祝融」在库里是这个全名）
+  'si_ma_yi',         // 司马懿
+  'lu_xun',           // 陆逊
+  'jiang_wei',        // 姜维
+  'huang_pu_song2',   // 皇甫嵩
+  'wang_yi',          // 王异
+  'zuo_ci',           // 左慈
+]);
+db.isT0 = (key) => db.T0_HEROES.has(key);
+
+// 识别效果的统计（/admin 的「识别反馈」页）。用户要的"整理反思"就落在这儿。
+//
+// 三个数各有用处：
+//   · top1 —— 机器推的第一个就是对的，这个数决定"能不能全自动"（现在还不够）。
+//   · top3 —— 正确答案在给的三个候选里，**这个数决定这套交互成不成立**
+//             （玩家点一下就行，不用手输）。
+//   · 库里没有的 —— 玩家手输了、但对不上库里任何一个武将。两种可能：库里漏了武将，
+//     或者他打错了字。这一列是拿去看的，不是拿去做指标的。
+db.getRecoStats = () => {
+  const rows = db.prepare(`SELECT filename, slot, candidates, chosen_key, source, other_name FROM hero_guesses`).all();
+  const s = { total: rows.length, decided: 0, pick: 0, other: 0, none: 0, top1: 0, top3: 0, notInCand: 0 };
+  const unresolved = [];
+  for (const r of rows) {
+    if (r.source === null) continue;
+    s.decided++;
+    if (r.source === 'pick') s.pick++;
+    else if (r.source === 'other') s.other++;
+    else if (r.source === 'none') s.none++;
+    if (!r.chosen_key) {
+      if (r.other_name) unresolved.push(r.other_name);
+      continue;
+    }
+    let cands = [];
+    try { cands = JSON.parse(r.candidates); } catch { cands = []; }
+    const at = cands.findIndex((c) => c.key === r.chosen_key);
+    if (at === 0) s.top1++;
+    if (at >= 0) s.top3++;
+    else s.notInCand++;      // 玩家选的武将压根不在候选里（多半是走「其他」手输的）
+  }
+  return { ...s, unresolved };
+};
+
+// 阵容墙上用的批量版。**必须批量** —— 一面墙十几张卡，逐张查就是 N+1。
+// 而且候选 JSON 那一列很大（一张图 9 格 × 3 个候选），全查回来能撑到 100KB，
+// 所以只给**能改这张卡的人**（本人 / 管理员）查。
+db.getSeasonHeroData = (seasonId, editableEntryIds) => {
+  const confirmed = new Map();
+  const rows = db.prepare(`
+    SELECT g.entry_id, h.key, h.name, h.faction, h.arm, h.variant
+    FROM hero_guesses g JOIN heroes h ON h.key = g.chosen_key
+    JOIN entries e ON e.id = g.entry_id
+    WHERE e.season_id = ? ORDER BY h.sort`).all(seasonId);
+  for (const r of rows) {
+    if (!confirmed.has(r.entry_id)) confirmed.set(r.entry_id, []);
+    const list = confirmed.get(r.entry_id);
+    // 同一张图的 9 格里不该出现同一个武将，但历史数据可能有 —— 去重
+    if (!list.some((h) => h.key === r.key)) list.push({ key: r.key, name: r.name, faction: r.faction, arm: r.arm, variant: r.variant });
+  }
+
+  const guesses = new Map();
+  if (editableEntryIds && editableEntryIds.length) {
+    const ph = editableEntryIds.map(() => '?').join(',');
+    const gs = db.prepare(`
+      SELECT * FROM hero_guesses WHERE entry_id IN (${ph}) ORDER BY entry_id, slot`).all(...editableEntryIds);
+    for (const g of gs) {
+      if (!guesses.has(g.entry_id)) guesses.set(g.entry_id, []);
+      let cands = [];
+      try { cands = JSON.parse(g.candidates); } catch { cands = []; }
+      // ★ 把**玩家确认的那个武将**一并带出来。
+      //   为什么必须带：他点的很可能是「其他」手输的、或者一个不在候选里的武将
+      //   （候选本来就常常认错）。不带的话，界面上没有任何单选框是选中的 ——
+      //   玩家的确认**在页面上看不见**，看起来像是没存上。
+      const chosen = g.chosen_key ? db.getHero(g.chosen_key) : null;
+      guesses.get(g.entry_id).push({ ...g, candidates: cands, chosen });
+    }
+  }
+  return { confirmed, guesses };
+};
+
 // R2：积分降序 → 提交时间升序 → id 升序
 db.getRanking = (seasonId) => db.prepare(`
   SELECT e.*, u.user_id AS uid, u.nickname
@@ -151,7 +290,7 @@ db.getPrevAces = (seasonId) => {
 // 用户自己刷新时（session 里的标记已经用掉）自然就按最新的均分重排了。
 // ⚠️ 默认排序（下面那条）**一个字都不能改**：`/wall`（routes/public.js）和结算战报
 // （routes/main.js 的 buildReport）都读这条默认顺序，冻结只是首页那一次的特例。
-db.getLineupWall = (seasonId, viewerId, freezeIds) => {
+db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
   const rows = db.prepare(`
     SELECT e.id, e.user_id, e.score, e.score_submitted_at, e.lineup_note, u.user_id AS uid, u.nickname
     FROM entries e JOIN users u ON u.id = e.user_id
@@ -174,6 +313,12 @@ db.getLineupWall = (seasonId, viewerId, freezeIds) => {
   // ace 取的是**上一期**的名次（跨期查，见 getPrevAces），和本期的 rank 没有任何关系：
   // 一个是"你上期第几"（决定边框），一个是"你这期第几"（决定 #N）。
   const aces = db.getPrevAces(seasonId);
+
+  // 阵容识别结果（2026-10-16）。同样一次查回来挂到卡上。
+  // 能改这张卡的人 = 本人或管理员 —— 只有他们才需要看到候选 JSON（见 db.getSeasonHeroData）。
+  const editable = rows.filter((r) => r.user_id === viewerId || isAdmin).map((r) => r.id);
+  const heroData = db.getSeasonHeroData(seasonId, editable);
+
   let rank = 0;
   const wall = rows.map((r) => ({
     ...r,
@@ -182,6 +327,10 @@ db.getLineupWall = (seasonId, viewerId, freezeIds) => {
     images: db.getLineupImages(r.id),
     rating: ratings.get(r.id) || db.EMPTY_RATING,
     comments: comments.get(r.id) || [],
+    // 已确认的武将（所有人可见，T0 高亮要用）
+    heroes: heroData.confirmed.get(r.id) || [],
+    // 候选（只对能改这张卡的人有值，别人是空数组）
+    guesses: heroData.guesses.get(r.id) || [],
   }));
 
   // 互评均分高的在前。没人打分的 avg 是 null，一律沉底。
@@ -191,6 +340,7 @@ db.getLineupWall = (seasonId, viewerId, freezeIds) => {
   const sorted = wall.sort((a, b) => avgOf(b) - avgOf(a));
 
   // 上面那套是默认顺序。freezeIds 只被"刚投完票跳回来的那一次"用到（见函数头的注释）。
+  // isAdmin 只影响"阵容识别的候选要不要一起查回来"（见上面 editable 那行）。
   if (!freezeIds || !freezeIds.length) return sorted;
 
   // 「冻结」= 名单里的行按那份顺序提到前面，其余（这一版新传的卡、或者认不出来的 id）

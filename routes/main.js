@@ -3,6 +3,7 @@ const r2 = require('../r2');
 const {
   removeFile, removeFiles, readKeys, THUMB_SUFFIX, MAX_OUT_BYTES, MAX_LINEUP, IMG_TYPE,
 } = require('../upload');
+const reco = require('../recognize-worker');
 const router = require('express').Router();
 
 /* 提交时的**对象复核**。图片是浏览器直传到 R2 的，服务端没见过那些字节，
@@ -116,7 +117,8 @@ const lineupWall = (req, season, viewerId) => {
     ? String(req.session.wallOrder || '')
       .split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
     : [];
-  const rows = db.getLineupWall(season.id, viewerId, frozen);
+  // isAdmin 传下去只为一件事：管理员也要能改别人的识别结果（认错了总得有人能修）。
+  const rows = db.getLineupWall(season.id, viewerId, frozen, !!req.user?.is_admin);
 
   // 记下这一版的顺序，给"下次投完票跳回来"用。**只在真的变了才赋值**：cookie-session
   // 把整个 session 塞在一张 cookie 里，每赋一次值都要重签一份 Set-Cookie。
@@ -177,7 +179,7 @@ router.get('/', (req, res) => {
     season: null,
     last,
     ranking: last ? withImages(db.getRanking(last.id)) : [],
-    lineups: last ? db.getLineupWall(last.id, req.user.id) : [],
+    lineups: last ? db.getLineupWall(last.id, req.user.id, null, !!req.user.is_admin) : [],
     // 结算时的慧眼等级变动（没有 settled 的期就是空的）。这个回退分支显示的
     // 一定是已结算的期，所以榜直接摆出来，不用再判一次状态。
     eye: last ? db.getEyeAdjustments(last.id) : [],
@@ -261,6 +263,11 @@ router.post('/lineup', async (req, res) => {
     for (const n of fresh) ins.run(entry.id, n);
     db.prepare('UPDATE entries SET lineup_note=? WHERE id=?').run(note || null, entry.id);
   })();   // 只改阵容不动 score_submitted_at，提交时间不变
+
+  // 排队做阵容识别。**只推文件名，不在这儿算** —— 一张图约 2.5 秒，
+  // 同步跑会把请求卡住（详见 recognize-worker.js 的头注释）。
+  // 结果写进 hero_guesses，玩家在阵容卡上确认（见 views/partials/reco.ejs）。
+  fresh.forEach((n) => reco.enqueue(n, entry.id));
 
   const parts = [];
   if (fresh.length) parts.push(`已上传 ${fresh.length} 张阵容截图`);
@@ -384,6 +391,74 @@ router.post('/score/withdraw', (req, res) => {
 // —— 改分没有单独的路由，就是再 POST 一次这个地址（有则 UPDATE、无则 INSERT）。
 // 两道时间关：这一期得是进行中，而且还没到截止点（每期开期后第一个周四 12:00 北京，
 // 见 db.getRateLockAt）。过了截止整期封盘，连改都不行；要撤掉某条票只能请管理员去 /admin 清。
+/* 确认阵容识别的 9 个格子（2026-10-16 加）。
+   和打分那条路的区别：**这条不改任何名次、不进结算**，纯粹是玩家对"这张图里是谁"的标注。
+   写进 hero_guesses，供阵容卡上做 T0 高亮、以及事后分析识别的准确率。
+
+   表单形状：每格一个字段名 `slot<N>`，值二选一 ——
+     · 候选的 key（来源 'pick'）
+     · 或者 `__other__`，此时读同名的 `other<N>` 文本框（来源 'other'）
+   没提交的格子 = 不动（不是清空）—— 玩家可能只改其中一格就提交了。
+
+   权限：**本人或管理员**。管理员要能改是因为识别会认错，而玩家不一定回来修。 */
+router.post('/entries/:id/heroes', (req, res) => {
+  const entry = db.getEntry(Number(req.params.id));
+  if (!entry) {
+    req.session.flash = { type: 'err', msg: '没有这条记录' };
+    return res.redirect('/');
+  }
+  const me = req.user;
+  if (entry.user_id !== me.id && !me.is_admin) return res.status(403).send('不能改别人的识别结果');
+  const back = `/#e${entry.id}`;
+
+  // 认的是**哪一张图**，由表单里的 hidden 字段给（卡上摊开的是 images[0]）。
+  // ⚠️ 一个 entry 可以有多张阵容图，它们不一定是同一套阵容 ——
+  //    从前这里对 entry 的**所有**图一起写，等于把一张图的答案抄给了别的图。
+  //    所以必须按 filename 定位，而且**要核这张图真属于这个 entry**（表单是能改的）。
+  const files = db.getLineupImages(entry.id).map((i) => i.filename);
+  const filename = String(req.body.filename || '');
+  if (!files.includes(filename)) {
+    req.session.flash = { type: 'err', msg: '这张图不属于这套阵容' };
+    return res.redirect(back);
+  }
+
+  let saved = 0, unknown = 0;
+  {
+    const known = new Set(db.getGuesses(filename).map((g) => g.slot));
+    for (let slot = 1; slot <= 9; slot++) {
+      const raw = req.body[`slot${slot}`];
+      // 没提交 = 这格没动（单选框一个都没选时，表单不会带这个字段名）。
+      // 提了空串 = 玩家点了「不确定」，是**清空**，不是没动 —— 两者必须分开，
+      // 否则"取消确认"这个操作永远写不进去。
+      if (raw === undefined) continue;
+      if (!known.has(slot)) continue;                         // 还没识别过这一格，不认
+      if (raw === '') { db.decideGuess(filename, slot, { key: null, source: 'none' }); saved++; continue; }
+      if (raw === '__other__') {
+        const text = String(req.body[`other${slot}`] || '').trim().slice(0, 40);
+        if (!text) continue;
+        // 玩家手输的名字**尽量对回库里**（对上就记 key，T0 高亮才认得出来），
+        // 对不上也照样存原文 —— 那些对不上的正是最该拿去看的数据。
+        const hits = db.findHeroesByName(text);
+        db.decideGuess(filename, slot, hits.length === 1
+          ? { key: hits[0].key, source: 'other', otherName: text }
+          : { key: null, source: 'other', otherName: text });
+        if (!hits.length) unknown++;
+        saved++;
+      } else {
+        // 只认库里真有的 key。**不信任表单** —— 表单是玩家能随便改的。
+        if (!db.getHero(raw)) continue;
+        db.decideGuess(filename, slot, { key: raw, source: 'pick' });
+        saved++;
+      }
+    }
+  }
+
+  req.session.flash = saved
+    ? { type: 'ok', msg: unknown ? `已记下 ${saved} 处（其中 ${unknown} 个名字库里没有，也留着了）` : `已记下 ${saved} 处` }
+    : { type: 'err', msg: '没有改动' };
+  res.redirect(back);
+});
+
 router.post('/entries/:id/rate', (req, res) => {
   // 跳回墙上的那一次按**投票前的顺序**渲染（见上面的 lineupWall）：投出去的瞬间均分就变了，
   // 顺序跟着变的话，人正在看的那张卡当场跳走。拒绝的分支也置上 —— 被拒的票一个字都没改，

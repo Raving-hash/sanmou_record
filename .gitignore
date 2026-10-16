@@ -9,3 +9,6 @@ node_modules/
 deploy/
 # 设计预览的构建产物，随时能重新生成
 .preview-build/
+
+# 游戏卡面素材（版权，不进公开仓库；线上目录要手工放一份）
+herodata/

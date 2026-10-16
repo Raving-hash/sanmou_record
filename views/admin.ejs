@@ -181,6 +181,42 @@
 </section>
 
 <section class="card">
+  <%# 阵容识别的效果（2026-10-16 加）。用户要的"整理反思"落点：
+      看机器猜得准不准、玩家是不是点一下就够了、手输了哪些库里没有的名字。 %>
+  <h3>阵容识别</h3>
+  <% if (!recoEnabled) { %>
+    <p class="muted small">herodata/ 不在，识别未启用。卡面素材是游戏版权图、不进仓库，
+      线上要手工放一份（同 deploy/ 和 .env）。</p>
+  <% } %>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th>识别过的格子</th><td class="num"><%= reco.total %></td>
+            <td class="muted small">一张阵容图 9 格，会随上传自动跑</td></tr>
+        <tr><th>玩家确认过的</th><td class="num"><%= reco.decided %></td>
+            <td class="muted small">点候选 <%= reco.pick %> · 手输 <%= reco.other %> · 点「不确定」<%= reco.none %></td></tr>
+        <%# 下面三行的分母是**选出了武将的那些格子**（top3 + notInCand），不是全部格子 ——
+            玩家点「不确定」的不该算机器认错。top1 ⊂ top3。
+            top1 决定"能不能做全自动"（现在还不够），top3 决定"点一下够不够"。 %>
+        <% const picked = reco.top3 + reco.notInCand;
+           const pct = (n) => (picked ? `（${Math.round(n * 100 / picked)}%）` : ''); %>
+        <tr><th>机器头名就是对的</th>
+            <td class="num"><%= reco.top1 %><% if (picked) { %> <span class="muted small">/ <%= picked %></span><% } %></td>
+            <td class="muted small">决定能不能做全自动 —— 现在还不够<%= pct(reco.top1) %></td></tr>
+        <tr><th>答案在给的三个候选里</th>
+            <td class="num"><%= reco.top3 %><% if (picked) { %> <span class="muted small">/ <%= picked %></span><% } %></td>
+            <td class="muted small">**这个数才是交互成不成立的依据**：在的话玩家点一下就行<%= pct(reco.top3) %></td></tr>
+        <tr><th>选的武将不在候选里</th><td class="num"><%= reco.notInCand %></td>
+            <td class="muted small">多半是从「其他」手输的，说明那格机器没推对</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <% if (reco.unresolved.length) { %>
+    <p class="muted small">玩家手输了、但库里对不上的名字（<%= reco.unresolved.length %> 个）——
+      要么库里漏了武将，要么他打错了字：</p>
+    <p class="small"><%= [...new Set(reco.unresolved)].join('、') %></p>
+  <% } %>
+
   <h3>成员（<%= users.length %>）</h3>
   <div class="table-wrap">
     <table>

@@ -1,0 +1,87 @@
+<%#
+  阵容识别（2026-10-16 加）。这一块是「机器给候选、玩家点一下」的落点。
+
+  两块内容，可见范围不同：
+    ① 已确认的武将 —— **所有人可见**。T0 的加金色标记，这就是这个功能最终要的东西。
+    ② 确认表单 —— **只有本人和管理员可见**（r.guesses 非空就说明能改，
+       见 db.getSeasonHeroData：候选 JSON 只给能改这张卡的人查）。
+
+  ⚠️ 布局约束：这一块**只在真有内容时才渲染**（`r.heroes.length || r.guesses.length`）。
+     没有识别结果时一个字都不输出 —— 阵容墙的版面靠 public/wall.js 把同一排撑成等高，
+     凭空多一个盒子会让没识别的卡和识别过的卡错开（wall-harness 里有对齐断言）。
+%>
+<% const heroes = r.heroes || [];
+   // ⚠️ 一个 entry 可以有多张阵容图（上限 6 张），而卡上只摊开第一张 ——
+   //    所以这里**只取那张图的识别结果**。不筛的话，两张图的 18 行会一起渲染出来，
+   //    「部队一 · 1」会出现两次，而两组的单选框还同名，互相打架。
+   //    （实测快照里 entry 5 / 9 / 16 就是两张图。）
+   const shownFile = r.images[0] ? r.images[0].filename : null;
+   const guesses = (r.guesses || []).filter((g) => g.filename === shownFile);
+   const done = guesses.filter((g) => g.chosen_key || g.other_name).length;
+   // 有没有任何一格识别出东西。**一个候选都没有就整块不渲染** ——
+   // 玩家传的要不是「阵容配置」页（排行榜截图、PC 端截图），9 个框会落在别的东西上、
+   // 一个武将都匹配不上，这时摆 9 个空格子纯属噪声（实测：13 张真图里有 5 张是这种）。
+   // 服务端那边照样写 9 行（否则启动补跑会永远认为这张图没识别过），只是不显示。
+   const hasCands = guesses.some((g) => (g.candidates || []).length); %>
+<% if (heroes.length || hasCands || done) { %>
+<div class="reco">
+  <% if (heroes.length) { %>
+    <p class="reco-line">
+      <span class="reco-k">阵容</span>
+      <% heroes.forEach((h) => { %>
+        <span class="reco-hero<%= isT0(h.key) ? ' is-t0' : '' %>"<% if (isT0(h.key)) { %> title="T0 武将"<% } %>><%= h.variant ? h.variant : '' %><%= h.name %></span>
+      <% }) %>
+    </p>
+  <% } %>
+
+  <% if (hasCands || done) { %>
+    <details class="reco-box">
+      <summary>识别结果 · 已确认 <%= done %>/<%= guesses.length %></summary>
+      <%# 说明为什么有时候会对不上：9 个框是按「阵容配置」页的版式算的（见 recognize.js），
+          玩家要是传了别的页面，框就落在别处了。说清楚比让他瞎猜好。 %>
+      <p class="reco-tip">机器给的是候选，点一下确认。传的不是「阵容配置」页的话候选会不靠谱，直接在「其他」里手输。</p>
+      <form method="post" action="/entries/<%= r.id %>/heroes" class="reco-form">
+        <%# 认的是**哪一张图**。卡上摊开的是 images[0]，服务端要按同一个来 ——
+            不传的话它只能猜，而一个 entry 可能有好几张阵容图。 %>
+        <input type="hidden" name="filename" value="<%= shownFile %>">
+        <div class="reco-grid">
+          <% guesses.forEach((g) => {
+               const slot = g.slot;
+               const team = Math.floor((slot - 1) / 3) + 1;
+               const pos = ((slot - 1) % 3) + 1;
+               const cands = g.candidates || [];
+               const picked = (k) => g.source === 'pick' && g.chosen_key === k ? ' checked' : ''; %>
+            <div class="reco-slot">
+              <span class="reco-slot-k">部队<%= '一二三'[team - 1] %> · <%= pos %></span>
+              <%# 候选，外加**玩家确认的那个**（如果它不在候选里）——
+                  玩家常常是从「其他」手输的，或者点了一个机器没推的武将，
+                  不把它列出来的话，那一格在页面上就没有任何单选框是选中的。 %>
+              <% const opts = cands.slice();
+                 if (g.chosen && !opts.some((c) => c.key === g.chosen.key)) opts.push(g.chosen); %>
+              <% opts.forEach((c) => { %>
+                <label class="reco-opt">
+                  <input type="radio" name="slot<%= slot %>" value="<%= c.key %>"<%= picked(c.key) %>>
+                  <span><%= c.variant ? c.variant : '' %><%= c.name %><i><%= c.faction %>·<%= c.arm %></i></span>
+                </label>
+              <% }) %>
+              <label class="reco-opt">
+                <input type="radio" name="slot<%= slot %>" value="__other__"<%= g.source === 'other' ? ' checked' : '' %>>
+                <span>其他</span>
+              </label>
+              <input class="reco-other" type="text" name="other<%= slot %>" maxlength="20"
+                     placeholder="手输武将名" value="<%= g.source === 'other' ? (g.other_name || '') : '' %>">
+              <%# 「不确定」= 清空这一格。没有它的话单选框选了就取消不掉 ——
+                  而这一格本来就是"还没看清"，得留条退路。 %>
+              <label class="reco-opt is-none">
+                <input type="radio" name="slot<%= slot %>" value=""<%= (!g.chosen_key && !g.other_name) ? ' checked' : '' %>>
+                <span>不确定</span>
+              </label>
+            </div>
+          <% }) %>
+        </div>
+        <button type="submit" class="outline btn-sm">保存</button>
+      </form>
+    </details>
+  <% } %>
+</div>
+<% } %>
