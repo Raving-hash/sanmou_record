@@ -32,15 +32,18 @@
                 <span class="badge badge-settled">已结算</span>
               <% } %>
             </td>
+            <%# 胜者可能不止一个（每期积分前两名都算赢，见 db.js 的 TOP_N）。
+                ！这里**不能**只印 s.winners[0]：那等于把第二名胜者藏起来，
+                而 /seasons/:id 上他明明白白挂着👑。 %>
             <td>
-              <% if (s.winner_name) { %>
-                <a href="/u/<%= s.winner_uid %>">👑 <%= s.winner_name %></a>
-                <%- include('partials/eye', { uid: s.winner_uid }) %>
-              <% } else { %>
+              <% if (!s.winners.length) { %>
                 <small class="muted">—</small>
+              <% } else { %>
+                <% s.winners.forEach((w, i) => { %><% if (i) { %>、<% } %><a href="/u/<%= w.uid %>">👑 <%= w.nickname %></a><%- include('partials/eye', { uid: w.uid }) %><% }) %>
               <% } %>
             </td>
-            <td class="num"><%= s.winner_score === null ? '—' : s.winner_score %></td>
+            <%# 和上面那格一一对应：几个胜者就报几个分（用「/」隔开，别让人以为是总分） %>
+            <td class="num"><%= s.winners.length ? s.winners.map((w) => w.score).join(' / ') : '—' %></td>
             <td class="num"><%= s.players %></td>
           </tr>
         <% }) %>

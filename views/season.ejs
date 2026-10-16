@@ -12,7 +12,9 @@
   <p class="muted">
     开始于 <%= fmt(season.created_at) %>
     <% if (settled && season.settled_at) { %> · 结算于 <%= fmt(season.settled_at) %><% } %>
-    · 参赛 <%= players %> 人
+    <%# 两个数：参赛 = 上传了阵容就算（含只传阵容、没录分的人），交分 = 真有积分的。
+        只报前者的话，下面那几张战绩卡看着像"只列了一小半人"。 %>
+    · 参赛 <%= players %> 人 · 交分 <%= scored %> 人
     <%# 打分截止。只在进行中的期出现（已结算时 routes/main.js 传的 rateLockAt 是 null）；
         这一页没有打分区，所以能改的时候顺手指个路 —— 打分/改分都在首页阵容墙上 %>
     <% if (rateLockAt) { %>
@@ -59,12 +61,14 @@
   <p class="muted">这一期还没有人交积分。</p>
 <% } else { %>
   <% rows.forEach((r, i) => { %>
-    <article class="entry-card <%= i === 0 && settled ? 'entry-winner' : '' %>">
+    <%# 已结算：积分前 topN 名都算胜者（2026-10-15 起），这几张卡都描边、都挂👑。
+        进行中：只有暂列第一那一位挂「暂列第一」—— 名次要结算才算数。 %>
+    <article class="entry-card <%= i < topN && settled ? 'entry-winner' : '' %>">
       <header>
         <strong class="rank-no">#<%= i + 1 %></strong>
         <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
         <%- include('partials/eye', { uid: r.uid }) %>
-        <% if (i === 0 && settled) { %><span class="badge badge-first">👑 胜者</span><% } %>
+        <% if (i < topN && settled) { %><span class="badge badge-first">👑 胜者</span><% } %>
         <% if (i === 0 && !settled) { %><span class="badge badge-first">暂列第一</span><% } %>
         <span class="score-pill"><%= r.score %> 分</span>
         <small class="muted">提交于 <%= fmt(r.score_submitted_at) %></small>

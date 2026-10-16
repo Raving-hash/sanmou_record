@@ -4,7 +4,7 @@
 
   <hgroup class="page-head">
     <h2><%= season.name %> <span class="badge badge-open">进行中</span></h2>
-    <p class="muted">开始于 <%= fmt(season.created_at) %> · 积分最高者获胜，同分时先提交的排前面</p>
+    <p class="muted">开始于 <%= fmt(season.created_at) %> · 积分前两名都算胜者，同分时先提交的排前面</p>
   </hgroup>
 
   <div class="actions">
@@ -20,7 +20,9 @@
     </article>
   <% } else if (me_entry) { %>
     <article class="mine-card">
-      <p class="muted">你本期传了阵容但还没录积分 —— <a href="/score">现在录入</a>。按规则，没交积分算本期没打。</p>
+      <p class="muted">你本期传了阵容但还没录积分 —— <a href="/score">现在录入</a>。
+        传了阵容就算参赛（占着参赛次数和胜率的分母），但<strong>没有积分就没有名次</strong>：
+        每期的胜者是积分前两名。</p>
     </article>
   <% } else { %>
     <article class="mine-card">
@@ -59,7 +61,8 @@
         </li>
       <% }) %>
     </ul>
-    <p><small class="muted">没交积分就算本期没打，不计入参赛次数和胜率。</small></p>
+    <p><small class="muted">没交积分就拿不到名次（胜者是积分前两名），但传了阵容的<strong>仍算参赛</strong>、
+      计入参赛次数和胜率。</small></p>
   <% } %>
 
 <% } else { %>
@@ -93,12 +96,13 @@
           </thead>
           <tbody>
             <% ranking.forEach((r, i) => { %>
-              <tr class="<%= i === 0 ? 'row-first' : '' %>">
+              <tr class="<%= i < topN ? 'row-first' : '' %>">
                 <td class="num"><%= i + 1 %></td>
                 <td>
                   <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
                   <%- include('partials/eye', { uid: r.uid }) %>
-                  <% if (i === 0) { %><span class="badge badge-first">胜者</span><% } %>
+                  <%# 前两名都算胜者（db.js 的 TOP_N），两行都挂章、都高亮 %>
+                  <% if (i < topN) { %><span class="badge badge-first">胜者</span><% } %>
                 </td>
                 <td class="num"><strong><%= r.score %></strong></td>
                 <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>

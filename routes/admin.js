@@ -49,14 +49,18 @@ router.post('/seasons/:id/settle', (req, res) => {
   if (!season) { err(req, '没有这一期'); return res.redirect('/admin'); }
   if (season.status !== 'open') { err(req, '这一期已经结算过了'); return res.redirect('/admin'); }
 
-  const players = db.countPlayers(season.id);
-  if (players < MIN_PLAYERS) {
-    err(req, `只有 ${players} 人交了积分，少于 ${MIN_PLAYERS} 人不能结算（可以直接删掉这一期）`);
+  // 前置条件数的是**交了积分**的人，不是参赛人数：没交分的人排不出名次，
+  // 一期只有 1 个人有分的时候结算出来只有一个胜者，没有意义。
+  // （参赛人数是另一个口径 —— 上传了阵容就算，见 db.countPlayers。）
+  const scored = db.countScored(season.id);
+  if (scored < MIN_PLAYERS) {
+    err(req, `只有 ${scored} 人交了积分，少于 ${MIN_PLAYERS} 人不能结算（可以直接删掉这一期）`);
     return res.redirect('/admin');
   }
 
   const ranking = db.settleSeason(season.id);
-  const w = ranking[0];
+  const winners = ranking.slice(0, db.TOP_N);
+  const players = db.countPlayers(season.id);
   const eye = db.getEyeAdjustments(season.id);
   // 慧眼等级是结算的副产物，而且是大多数人在页面上唯一能看出"我为什么变了"的地方，
   // 所以在提示里念一遍，免得有人发现自己的等级变了却不知道该问谁。
@@ -65,7 +69,12 @@ router.post('/seasons/:id/settle', (req, res) => {
   const eyeTip = eye.length
     ? ` · 慧眼等级：${eye.map((e) => `${e.nickname} ${e.delta > 0 ? '+' : ''}${e.delta}`).join('、')}`
     : ' · 本期没有人的票能加等级，慧眼等级没变';
-  ok(req, `${season.name} 已结算：${w.nickname} 以 ${w.score} 分夺冠（共 ${players} 人参赛）${eyeTip}`);
+  // 胜者是前两名（2026-10-15 起），提示里两个人都要念到 —— 只说冠军的话，
+  // 管理员看不出这条新规矩生效了没有。正常的期（≥2 人交分）走的是前半句。
+  const who = winners.length > 1
+    ? `${winners.map((w) => `${w.nickname} ${w.score} 分`).join('、')} 同为胜者`
+    : `${winners[0].nickname} 以 ${winners[0].score} 分夺冠`;
+  ok(req, `${season.name} 已结算：${who}（共 ${players} 人参赛）${eyeTip}`);
   res.redirect(`/seasons/${season.id}`);
 });
 

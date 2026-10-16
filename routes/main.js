@@ -57,12 +57,16 @@ const withImages = (rows) => rows.map((r) => ({ ...r, images: db.getLineupImages
 // 而这本来就是"从数据里算出四个字"的活儿。放这儿一眼能看清最终长什么样。
 // 为什么不用 Markdown：QQ / 微信都不渲染，星号和井号只会变成噪声 —— 纯文本 + 两个 emoji 就够。
 //
-// rows 是 getFinalRanking 的结果（已结算，**只有交了积分的人**，也就是 R5 说的"参赛"）；
-// wall 是 getLineupWall 的结果（已按互评均分降序）；eye 是 getEyeAdjustments 的结果。
-const buildReport = (season, rows, wall, eye) => {
-  const lines = [`【${season.name} · 演武积分赛】${rows.length} 人参赛`];
+// rows 是 getFinalRanking 的结果（已结算，**只有交了积分的人** —— 没分就没名次）；
+// wall 是 getLineupWall 的结果（已按互评均分降序）；eye 是 getEyeAdjustments 的结果；
+// players 是这一期的**参赛人数**（db.countPlayers：上传了阵容就算参与）。
+// 首行两个数都得有：参赛的人里往往只有一部分交了积分（2026-10-15 起这两件事彻底分开了），
+// 只报"参赛 N 人"、底下却只列得出一小半人，看着像漏了谁。
+const buildReport = (season, rows, wall, eye, players) => {
+  const lines = [`【${season.name} · 演武积分赛】${players} 人参赛 · ${rows.length} 人交分`];
 
-  rows.forEach((r, i) => lines.push(`${i ? `${i + 1}. ` : '👑 '}${r.nickname}  ${r.score} 分`));
+  // 积分前两名都算胜者（2026-10-15 起），两行都印 👑，因此不出现"2."。
+  rows.forEach((r, i) => lines.push(`${i < db.TOP_N ? '👑 ' : `${i + 1}. `}${r.nickname}  ${r.score} 分`));
 
   // 口碑最好 = 阵容墙上互评均分最高的那几位。**读的是墙那份 rows**（不另写一条 SQL）：
   // 自己 GROUP BY 一遍的话，口径会和墙悄悄分家 —— 墙上还包含"传了阵容但没交积分"的人
@@ -358,12 +362,19 @@ router.post('/score/withdraw', (req, res) => {
   if (!season) return res.redirect('/');
 
   const entry = db.findEntry(season.id, req.user.id);
+  let keptLineup = false;
   if (entry) {
+    // 撤回分之后他这一期就没有名次了，但**阵容还在就算参赛**（2026-10-15 起）——
+    // 所以先把这句话要用的信息读出来，再删分（删完再查也能查到，只是顺序上更清楚）。
+    keptLineup = db.getLineupImages(entry.id).length > 0;
     db.prepare(`UPDATE entries SET score=NULL, score_image=NULL, score_submitted_at=NULL WHERE id=?`)
       .run(entry.id);
     removeFile(entry.score_image);
   }
-  req.session.flash = { type: 'ok', msg: '已撤回积分，本期变回「没打」' };
+  req.session.flash = {
+    type: 'ok',
+    msg: keptLineup ? '已撤回积分，本期没有名次了（阵容还留着，仍算参赛）' : '已撤回积分，本期没有名次了',
+  };
   res.redirect('/');
 });
 
@@ -493,9 +504,14 @@ router.get('/seasons/:id', (req, res) => {
     eye,
     // 贴群里那段纯文本。**只给已结算的期做**：进行中的期名次还会变，
     // 发出去的"冠军"过两天就成了假消息。没做的时候传 null，模板据此整段不出。
-    report: settled ? buildReport(season, rows, db.getLineupWall(season.id, null), eye) : null,
+    report: settled
+      ? buildReport(season, rows, db.getLineupWall(season.id, null), eye, db.countPlayers(season.id))
+      : null,
     notSubmitted: settled ? [] : db.getNotSubmitted(season.id),
+    // 参赛 N 人（上传了阵容就算，见 db.countPlayers）· 交分 M 人（有分才有名次）。
+    // 两个数都摆出来：只写参赛人数的话，下面那几张战绩卡看着像"只列了一小半"。
     players: db.countPlayers(season.id),
+    scored: db.countScored(season.id),
     // 打分截止。进行中的期才摆这一行：已结算的期传 null，模板就不出它。
     // canRate 在这里只用来选措辞（「截止 …」还是「已于 … 截止」）—— 这一页本身没有打分区。
     rateLockAt: settled ? null : db.getRateLockAt(season),

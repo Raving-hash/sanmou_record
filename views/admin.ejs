@@ -84,7 +84,9 @@
                   <span class="badge badge-settled">已结算</span>
                 <% } %>
               </td>
-              <td><%= s.winner_name ? s.winner_name + '（' + s.winner_score + '）' : '—' %><%- include('partials/eye', { uid: s.winner_uid }) %></td>
+              <%# 胜者可能有两位（每期积分前两名都算赢，见 db.js 的 TOP_N），
+                  所以这列是**列表**：每人「昵称（积分）」+ 各自的慧眼圆框，用顿号隔开。 %>
+              <td><%= s.winners.length ? s.winners.map((w) => `${w.nickname}（${w.score}）`).join('、') : '—' %><% s.winners.forEach((w) => { %><%- include('partials/eye', { uid: w.uid }) %><% }) %></td>
               <td class="num"><%= s.players %></td>
               <td class="row-actions">
                 <% if (s.status === 'open') { %>

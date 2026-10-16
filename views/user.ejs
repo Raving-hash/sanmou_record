@@ -12,8 +12,9 @@
     <article class="stat"><span class="stat-num"><%= stats.wins %></span><span class="stat-label">胜场</span></article>
     <article class="stat"><span class="stat-num"><%= stats.plays %></span><span class="stat-label">参赛</span></article>
     <article class="stat"><span class="stat-num"><%= stats.win_rate %>%</span><span class="stat-label">胜率</span></article>
-    <article class="stat"><span class="stat-num"><%= stats.avg_score %></span><span class="stat-label">平均分</span></article>
-    <article class="stat"><span class="stat-num"><%= stats.best_score %></span><span class="stat-label">最高分</span></article>
+    <%# 平均分 / 最高分只算交过积分的期：只传阵容没录分的人这两格是空的，印「—」不留白 %>
+    <article class="stat"><span class="stat-num"><%= stats.avg_score ?? '—' %></span><span class="stat-label">平均分</span></article>
+    <article class="stat"><span class="stat-num"><%= stats.best_score ?? '—' %></span><span class="stat-label">最高分</span></article>
     <article class="stat"><span class="stat-num"><%= stats.best_rank ?? '—' %></span><span class="stat-label">最佳名次</span></article>
   </div>
 <% } %>
@@ -35,14 +36,19 @@
       </thead>
       <tbody>
         <% history.forEach((h) => { %>
+          <%# 2026-10-15 起这张表列的是**参过的每一期**（从前只列交了积分的期）：
+              传了阵容就算参赛、就占了胜率的分母，所以"参赛未交分"也是一种结果。
+              那种行没有积分也没有名次，两格印「—」，结果写清楚是没交分。 %>
           <tr class="<%= h.is_winner ? 'row-first' : '' %>">
             <td><a href="/seasons/<%= h.id %>"><%= h.name %></a></td>
             <td><small class="muted"><%= fmt(h.created_at) %></small></td>
-            <td class="num"><strong><%= h.score %></strong></td>
-            <td class="num"><%= h.final_rank %></td>
+            <td class="num"><%= h.score === null ? '—' : h.score %></td>
+            <td class="num"><%= h.final_rank === null ? '—' : h.final_rank %></td>
             <td>
               <% if (h.is_winner) { %>
                 <span class="badge badge-first">👑 获胜</span>
+              <% } else if (h.score === null) { %>
+                <small class="muted">未交积分</small>
               <% } else { %>
                 <small class="muted">第 <%= h.final_rank %> 名 / 共 <%= h.players %> 人</small>
               <% } %>

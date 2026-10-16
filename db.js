@@ -63,7 +63,19 @@ db.getSeason = (id) => db.prepare(`SELECT * FROM seasons WHERE id=?`).get(id);
 db.listSeasons = () => db.prepare(`SELECT * FROM seasons ORDER BY id DESC`).all();
 db.getLastSeason = () => db.prepare(`SELECT * FROM seasons ORDER BY id DESC LIMIT 1`).get();
 
-db.countPlayers = (seasonId) =>
+// 参赛人数 = 这一期**上传过阵容或交过积分**的人（每人每期一条 entry，不会重复数）。
+// 2026-10-15 用户改的口径：**只要上传了阵容就算参与本期**（从前只有交了积分才算，
+// 于是"传了阵容但没录分"的人在历史/赛期页上连人数都不算，人数与实际到场的差一大截）。
+db.countPlayers = (seasonId) => db.prepare(`
+  SELECT COUNT(*) AS n FROM entries e
+  WHERE e.season_id = ?
+    AND (e.score IS NOT NULL OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))
+`).get(seasonId).n;
+
+// **交了积分**的人数 —— 和上面那个不是一个数，别混用。
+// 只有两处要它：结算的前置条件（少于 2 人交分不能结算），以及页面上"参赛 N 人 · 交分 M 人"
+// 里的那个 M。名单、名次、胜者永远只看交了积分的人（没分就没名次）。
+db.countScored = (seasonId) =>
   db.prepare(`SELECT COUNT(*) AS n FROM entries WHERE season_id=? AND score IS NOT NULL`).get(seasonId).n;
 
 db.findEntry = (seasonId, userId) =>
@@ -97,6 +109,16 @@ db.getFinalRanking = (seasonId) => db.prepare(`
   ORDER BY e.final_rank IS NULL, e.final_rank ASC, e.score DESC, e.score_submitted_at ASC, e.id ASC
 `).all(seasonId);
 
+// 「前两名」—— 2026-10-15 起本站三处用到这个数，而且**必须是同一个数**，
+// 所以只有这一个真源（改规矩只改这一行）：
+//   · 结算时谁算赢（settleSeason 写 is_winner）—— 用户定的：积分前两名都算胜利；
+//   · 结算时给谁打的票能涨慧眼等级（applyEye）；
+//   · 阵容墙上给上一期的前两名描边，亮蓝 / 亮银（getPrevAces）。
+// 三件事都是"积分前两名"这同一个概念，故意绑在一起；哪天要拆（比如"前 3 名都算赢、
+// 但慧眼还是只看前 2"），把这个常数拆成两个，别在调用处各写一个字面量 2。
+const TOP_N = 2;
+db.TOP_N = TOP_N;
+
 // 上一期的积分第一 / 第二是谁 —— 阵容墙给他们的卡描边（亮蓝 / 亮银）。
 // 「上一期」= 这一期之前**最近一个已结算的期**；没有就返回空表
 // （第一期，或者上一期还没结算 —— 这两种情况下墙上一条边都不描）。
@@ -106,7 +128,7 @@ db.getPrevAces = (seasonId) => {
   const prev = db.prepare(
     `SELECT id FROM seasons WHERE id < ? AND status='settled' ORDER BY id DESC LIMIT 1`).get(seasonId);
   if (!prev) return aces;
-  db.getFinalRanking(prev.id).slice(0, 2).forEach((row, i) => aces.set(row.user_id, i + 1));
+  db.getFinalRanking(prev.id).slice(0, TOP_N).forEach((row, i) => aces.set(row.user_id, i + 1));
   return aces;
 };
 
@@ -449,9 +471,15 @@ db.isImageInUse = (filename) => !!db.prepare(
    LIMIT 1`
 ).get(filename, filename);
 
-// ---------- 统计（只算已结算的期，有积分才算参赛） ----------
+// ---------- 统计（只算已结算的期；**参赛 = 上传了阵容或交了积分**） ----------
+// 一期内一人一行（entries 的 UNIQUE(season_id, user_id)），所以 COUNT(*) 就是"参过几期"。
+// 2026-10-15 起"参赛"不再要求交积分：传了阵容就算参了这一期，于是没交分的人也会进榜
+// （胜场 0、胜率 0%），胜率的分母也从"交过分的期数"变成"到过场的期数"。
+// 分数那三列照旧只认交过分的行：AVG / MAX 天然跳过 NULL，MIN(final_rank) 也是。
+// 只传阵容、一场没交分的人这三列全是 NULL，模板印成「—」。
 const STATS_SQL = `
   SELECT u.user_id AS uid, u.nickname,
+         u.created_at                                   AS joined_at,
          SUM(e.is_winner)                               AS wins,
          COUNT(*)                                       AS plays,
          ROUND(100.0 * SUM(e.is_winner) / COUNT(*), 1)  AS win_rate,
@@ -461,11 +489,20 @@ const STATS_SQL = `
   FROM entries e
   JOIN seasons s ON s.id = e.season_id AND s.status = 'settled'
   JOIN users   u ON u.id = e.user_id
-  WHERE e.score IS NOT NULL`;
+  WHERE (e.score IS NOT NULL
+         OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))`;
+// ⚠️ 上面那个 WHERE 的括号不能省：getUserStats 会往后面接 `AND u.id = ?`，
+// 少了括号就是 `A OR (B AND u.id=?)`，一查个人页会把**全站**交过分的人一起捞出来。
 
+// 排序（用户 2026-10-15 定的口径）：**先比胜场，再比胜率，都一样时先加入的在前**。
+// 没有第三、第四个别比的东西了 —— 从前插在中间的 `plays DESC` 已经拿掉：
+// 胜场和胜率都相同时，场次多少不再是"更强"的证据（何况它和胜率是反向的）。
+// 时间取 users.created_at（注册/加入时间，个人页上印的"加入于"就是它）：
+// 全库只有这一个每人一份的时间，先来后到也说得清。末尾的 u.id 只是兜底，
+// 保证顺序**永远**是全序（同一毫秒注册的两个人不能靠引擎的脾气决定谁在上面）。
 db.getRankBoard = () => db.prepare(`${STATS_SQL}
   GROUP BY u.id
-  ORDER BY wins DESC, win_rate DESC, plays DESC, u.id ASC`).all();
+  ORDER BY wins DESC, win_rate DESC, joined_at ASC, u.id ASC`).all();
 
 db.getUserStats = (userPk) => db.prepare(`${STATS_SQL} AND u.id = ? GROUP BY u.id`).get(userPk);
 
@@ -475,8 +512,11 @@ db.getUserStats = (userPk) => db.prepare(`${STATS_SQL} AND u.id = ? GROUP BY u.i
 // 别人头上"。现算只要两条小查询（榜单 + 一眼 MAX），永远不会和 /rank 对不上。
 //
 //   演武王 —— 胜场最多的那批人里，胜率最高的（并列就一起封）。
-//              口径就是 /rank 排序的前两项，所以头名必定是排行榜第一行：
-//              不存在"只打过一期赢了就称王"（那样的人在排行榜上也不是第一）。
+//              口径就是 /rank 排序的前两项（wins DESC, win_rate DESC），所以**头名必定是
+//              排行榜第一行**：不存在"只打过一期赢了就称王"（那样的人在排行榜上也不是第一）。
+//              /rank 第一行那枚章印的就是这三个字（用户 2026-10-15 定的：从「头名」改名过来）。
+//              两处口径相同、写法不同：榜单**只给第一行**挂章，墙上的称号章按"并列一起封"
+//              —— 胜场和胜率都一样的人会各戴一枚，而排行榜第一行只有一位（时间先后定的）。
 //   慧眼王 —— 慧眼等级最高的那批人（并列一起封），但**等级还全停在初始 10 级时不封**：
 //              所有人都是 10 的时候严格按"同级都封"就是全员戴冠，等于没称号。
 //              等第一次结算把谁顶上去，王冠自己就出现了。
@@ -497,7 +537,7 @@ db.getTitles = () => {
 
   // 演武王。⚠️ 胜场为 0 时一个都不封：全站都没人赢过的时候"胜场最多"就是 0 胜，
   // 那批人的胜率也全是 0 —— 不拦的话所有没赢过的人当场都成了演武王。
-  const board = db.getRankBoard();       // 已按 wins DESC, win_rate DESC, plays DESC 排好
+  const board = db.getRankBoard();       // 已按 wins DESC, win_rate DESC, joined_at 排好
   if (board.length && board[0].wins > 0) {
     const topWins = board[0].wins;
     const best = Math.max(...board.filter((r) => r.wins === topWins).map((r) => r.win_rate));
@@ -525,20 +565,46 @@ db.getTitles = () => {
   return map;
 };
 
+// 个人页「历史各期」。2026-10-15 起**参赛就列**（从前只列交了积分的期）：
+// 这一期的胜率分母把"传了阵容没录分"的期也算进去了，这里要是不列，个人页和排行榜
+// 就各说各话（榜上写着 1 场 0 胜，个人页却一期都没有）。没交分的那几行 score /
+// final_rank 都是 NULL，模板印成「—」，结果那列写「未交积分」。
+// players 也是新口径的参赛人数（上传阵容或交过积分），和赛期页、历史页同一个数。
 db.getUserHistory = (userPk) => db.prepare(`
   SELECT s.id, s.name, s.created_at, e.score, e.final_rank, e.is_winner,
-         (SELECT COUNT(*) FROM entries x WHERE x.season_id = s.id AND x.score IS NOT NULL) AS players
+         (SELECT COUNT(*) FROM entries x WHERE x.season_id = s.id
+            AND (x.score IS NOT NULL
+                 OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = x.id))) AS players
   FROM entries e JOIN seasons s ON s.id = e.season_id
-  WHERE e.user_id = ? AND s.status = 'settled' AND e.score IS NOT NULL
+  WHERE e.user_id = ? AND s.status = 'settled'
+    AND (e.score IS NOT NULL
+         OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))
   ORDER BY s.id DESC`).all(userPk);
 
-db.getHistory = () => db.prepare(`
-  SELECT s.*, u.nickname AS winner_name, u.user_id AS winner_uid, e.score AS winner_score,
-         (SELECT COUNT(*) FROM entries x WHERE x.season_id = s.id AND x.score IS NOT NULL) AS players
-  FROM seasons s
-  LEFT JOIN entries e ON e.season_id = s.id AND e.is_winner = 1
-  LEFT JOIN users   u ON u.id = e.user_id
-  ORDER BY s.id DESC`).all();
+// 历史赛期列表（/history 和 /admin 都用它）。
+//
+// ⚠️ 胜者**是一张列表，不是一个字段**。从前写成 `LEFT JOIN entries e ON … AND e.is_winner=1`，
+// 那在"一期只有一个胜者"的年代是一行；2026-10-15 改成一期两名胜者之后，同一个赛期会在
+// 列表里**出现两行**（管理页那一列还会只剩后一名）。所以改成两条查询 + 在 JS 里归并。
+// 胜者按 final_rank 升序（冠军在前），参赛人数是新口径（上传阵容或交过积分）。
+db.getHistory = () => {
+  const seasons = db.prepare(`SELECT * FROM seasons ORDER BY id DESC`).all();
+  const winners = db.prepare(`
+    SELECT e.season_id, e.score, e.final_rank, u.nickname, u.user_id AS uid
+    FROM entries e JOIN users u ON u.id = e.user_id
+    WHERE e.is_winner = 1
+    ORDER BY e.season_id, e.final_rank ASC, e.id ASC`).all();
+  const bySeason = new Map();
+  for (const w of winners) {
+    if (!bySeason.has(w.season_id)) bySeason.set(w.season_id, []);
+    bySeason.get(w.season_id).push(w);
+  }
+  const countP = db.prepare(`
+    SELECT COUNT(*) AS n FROM entries x WHERE x.season_id = ?
+      AND (x.score IS NOT NULL
+           OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = x.id))`);
+  return seasons.map((s) => ({ ...s, winners: bySeason.get(s.id) || [], players: countP.get(s.id).n }));
+};
 
 // ---------- 慧眼等级 ----------
 // 所有人初始 10 级（users.eye_level 的 DEFAULT），**只在结算那一刻**动，而且只动
@@ -565,13 +631,13 @@ db.eyeDelta = (value) => EYE_GAIN[value] ?? 0;
 // 结算时把慧眼等级算出来并落库。ranking 是 getRanking 的结果（积分序、已含 user_id）。
 // 一期一人写一行，先把这个人的所有票加起来（他可能既给第一打了 400、又给第二打了 250）。
 const applyEye = (seasonId, ranking) => {
-  // 本期前两名的 entry_id。名次本身已经不参与计算了（第一和第二同一张表），
+  // 本期前 TOP_N 名的 entry_id。档位本身不区分名次（第一和第二同一张表），
   // 这个集合只用来筛掉"给第三名往后打的票"；本期不足两人时集合里就只有一条。
-  const top2 = new Set(ranking.slice(0, 2).map((row) => row.id));
+  const top = new Set(ranking.slice(0, TOP_N).map((row) => row.id));
 
   const deltas = new Map();                       // users.id → 本期净增减
   for (const r of db.getSeasonRatings(seasonId)) {
-    if (!top2.has(r.entry_id)) continue;          // 不是给前两名打的，跟他没关系
+    if (!top.has(r.entry_id)) continue;           // 不是给前两名打的，跟他没关系
     const d = db.eyeDelta(r.value);
     if (d) deltas.set(r.rater_id, (deltas.get(r.rater_id) || 0) + d);
   }
@@ -603,10 +669,13 @@ db.getEyeAdjustments = (seasonId) => db.prepare(`
 `).all(seasonId);
 
 // ---------- 结算 / 撤销（一个事务里做完） ----------
+// **积分前 TOP_N 名都算胜者**（用户 2026-10-15 定的口径，从前只有第一名算）。
+// 名次照旧一人一个（final_rank 1, 2, 3…），is_winner 才是"算不算赢"那一列 ——
+// 胜率和胜场统计读的是它，见上面的 STATS_SQL。
 db.settleSeason = db.transaction((seasonId) => {
   const ranking = db.getRanking(seasonId);
   const setRank = db.prepare(`UPDATE entries SET final_rank=?, is_winner=? WHERE id=?`);
-  ranking.forEach((row, i) => setRank.run(i + 1, i === 0 ? 1 : 0, row.id));
+  ranking.forEach((row, i) => setRank.run(i + 1, i < TOP_N ? 1 : 0, row.id));
   // 先把这一期可能残留的慧眼明细退干净，再重新算。正常流程走不到这一步
   // （结算前必然是 open 期，而变回 open 只能经 reopenSeason，那里已经退过），
   // 但少了这句，一旦哪条路径漏了退，这里就会撞 eye_adjustments 的

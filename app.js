@@ -87,6 +87,10 @@ app.use((req, res, next) => {
   res.locals.maxOutBytes = MAX_OUT_BYTES;
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
+  // 「前两名」这个数（结算时算赢 / 慧眼等级认的人 / 墙上描边，见 db.js 的 TOP_N）。
+  // 模板里凡是要判"这行算不算胜者"的地方都读它，别在模板里写死 2 ——
+  // 用户 2026-10-15 改的就是这个数，写死的话下次改规矩得满页面找。
+  res.locals.topN = db.TOP_N;
   // 「最高 400 由谁打的」那个名字走 views/partials/name-list.ejs —— 从前是这里的一个
   // nameList 助手，加慧眼圆框时挪进了模板：要拼「昵称 + 圆框」的 HTML，光有字符串不够了。
   // （2026-10-14 起它只印并列里的第一个名字，库里给的照样是全部的人。）

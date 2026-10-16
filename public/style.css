@@ -724,7 +724,10 @@ input[type="file"]::file-selector-button:hover {
   text-align: right;
 }
 
-/* 第一名整行鎏金，左侧再加一道实金条 */
+/* 胜者整行鎏金，左侧再加一道实金条。
+   2026-10-15 起一期有**两位**胜者（积分前两名，见 db.js 的 TOP_N），所以首页那张
+   上一期结果表里会连着两行都是这个样式 —— 有意的，不是写错了。
+   （/rank 上它仍然只管第一行：那一行是演武王。） */
 .row-first td {
   background: rgba(200, 162, 74, 0.075);
 }

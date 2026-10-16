@@ -2,7 +2,13 @@
 
 <hgroup class="page-head">
   <h2>总排行榜</h2>
-  <p class="muted">只统计已结算的赛期，且只有交了积分才算参赛</p>
+  <%# 口径直接摆在这一页，不藏进 README：下面每个数都是从这三句话里算出来的。
+      第三句（先加入的在前）是 users.created_at，个人页上印的"加入于"就是它。 %>
+  <p class="muted">
+    只统计已结算的赛期；<strong>只要上传了阵容就算参赛</strong>（交过积分当然也算）。
+    名次先比胜场、再比胜率，两样都一样时<strong>先加入的排前面</strong>。
+    每期积分前两名都算胜者。
+  </p>
 </hgroup>
 
 <% if (!board.length) { %>
@@ -28,13 +34,19 @@
             <td>
               <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
               <%- include('partials/eye', { uid: r.uid }) %>
-              <% if (i === 0) { %><span class="badge badge-first">👑 头名</span><% } %>
+              <%# 第一行这枚章就叫「演武王」—— 2026-10-15 起（从前写的是「头名」），
+                  和阵容墙上那枚朱红称号章是同一件事，判据也一样（胜场 → 胜率）：
+                  这一行必定是胜场最多的人里胜率最高的那位，所以榜首一定是演武王。
+                  墙上并列时每人都戴章，这一页只给第一行挂（只有一位第一）。 %>
+              <% if (i === 0) { %><span class="badge badge-first">👑 演武王</span><% } %>
             </td>
             <td class="num"><strong><%= r.wins %></strong></td>
             <td class="num"><%= r.plays %></td>
             <td class="num"><%= r.win_rate %>%</td>
-            <td class="num"><%= r.avg_score %></td>
-            <td class="num"><%= r.best_score %></td>
+            <%# 平均分 / 最高分只算交过积分的期，所以"只传了阵容、一场没交分"的人是空的 ——
+                印「—」而不是留白，不然那一格看着像渲染坏了 %>
+            <td class="num"><%= r.avg_score ?? '—' %></td>
+            <td class="num"><%= r.best_score ?? '—' %></td>
           </tr>
         <% }) %>
       </tbody>
