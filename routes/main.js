@@ -417,6 +417,11 @@ router.post('/score/withdraw', (req, res) => {
      · 或者 `__other__`，此时读同名的 `other<N>` 文本框（来源 'other'）
    没提交的格子 = 不动（不是清空）—— 玩家可能只改其中一格就提交了。
 
+   ★ **「其他」只收库里的武将**（2026-10-16 晚用户定的）。文本要能**唯一**对回库里的一条
+   （显示名 / name / 唯一前缀，见 db.findHeroesByName），对不上或者有歧义就**不写**，
+   并在 flash 里点名说是哪个字没收 —— 否则玩家只会看到"保存了"而那一格没动，像坏了。
+   模板那边配合着给了补全列表（lineup-gallery.ejs 的 <datalist>），挑一个必然对得上。
+
    权限：**本人或管理员**。管理员要能改是因为识别会认错，而玩家不一定回来修。 */
 router.post('/entries/:id/heroes', (req, res) => {
   const entry = db.getEntry(Number(req.params.id));
@@ -439,7 +444,8 @@ router.post('/entries/:id/heroes', (req, res) => {
     return res.redirect(back);
   }
 
-  let saved = 0, unknown = 0;
+  let saved = 0;
+  const rejected = [];                      // 库里对不上的手输（不写库，只在 flash 里点名）
   {
     const known = new Set(db.getGuesses(filename).map((g) => g.slot));
     for (let slot = 1; slot <= 9; slot++) {
@@ -453,13 +459,18 @@ router.post('/entries/:id/heroes', (req, res) => {
       if (raw === '__other__') {
         const text = String(req.body[`other${slot}`] || '').trim().slice(0, 40);
         if (!text) continue;
-        // 玩家手输的名字**尽量对回库里**（对上就记 key，T0 高亮才认得出来），
-        // 对不上也照样存原文 —— 那些对不上的正是最该拿去看的数据。
+        // ★ 只有**唯一对上库里一条**的名字才收（用户 2026-10-16 晚定的口径：
+        //   "只有英雄库中的名字才允许保存"）。从前的做法是对不上也把原文存进 other_name
+        //   —— 那是有意的（库里漏了谁、玩家打错了字，都是线索），但代价是卡上会出现
+        //   一个既不是候选、也点不开的字符串，而"这套带没带 T0"那行高亮永远亮不起来。
+        //   现在两种都**宁可不收**：0 条 = 库里没这个人或打得不像；多条 = 有歧义
+        //   （「孙」能命中孙权/孙尚香/孙坚/孙策，findHeroesByName 第三档就是不认这种）。
+        //   补全列表给的正是一整条唯一的名字，从里面挑必然过这一关。
         const hits = db.findHeroesByName(text);
-        db.decideGuess(filename, slot, hits.length === 1
-          ? { key: hits[0].key, source: 'other', otherName: text }
-          : { key: null, source: 'other', otherName: text });
-        if (!hits.length) unknown++;
+        if (hits.length !== 1) { rejected.push(text); continue; }
+        // source 仍然是 'other' 而不是 'pick'：统计里"手输"是机器错得最狠的一档
+        // （见 db.getRecoStats 的头注释），这个区分要留着。
+        db.decideGuess(filename, slot, { key: hits[0].key, source: 'other', otherName: text });
         saved++;
       } else {
         // 只认库里真有的 key。**不信任表单** —— 表单是玩家能随便改的。
@@ -470,9 +481,17 @@ router.post('/entries/:id/heroes', (req, res) => {
     }
   }
 
-  req.session.flash = saved
-    ? { type: 'ok', msg: unknown ? `已记下 ${saved} 处（其中 ${unknown} 个名字库里没有，也留着了）` : `已记下 ${saved} 处` }
-    : { type: 'err', msg: '没有改动' };
+  // 被退回的名字要在 flash 里**点名**：只说"有名字没保存"，玩家对着九格找不出来。
+  // 去重 + 最多列三个，免得一次提交九格全是生面孔时 flash 撑成一屏。
+  const bad = [...new Set(rejected)];
+  const badMsg = bad.slice(0, 3).map((t) => `「${t}」`).join('、')
+    + (bad.length > 3 ? ` 等 ${bad.length} 个` : '');
+  req.session.flash = bad.length
+    ? { type: 'err', msg: `${badMsg} 不在武将库里，没保存 —— 从补全列表里挑一个`
+        + (saved ? `（另外 ${saved} 处已记下）` : '') }
+    : saved
+      ? { type: 'ok', msg: `已记下 ${saved} 处` }
+      : { type: 'err', msg: '没有改动' };
   res.redirect(back);
 });
 

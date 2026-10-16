@@ -39,6 +39,8 @@
     **上面这两个都只能用 locals. 读**（和 quota / rateLockAt 同一个道理）：
     home.ejs 的两处调用都不传它们，而 EJS 里引用一个没传进来的名字是 ReferenceError，
     整页 500 —— 而且只有"没有进行中的期"那条分支才会撞上，最不容易发现。
+    同样走 locals 的还有 heroNames（武将库的显示名，给「其他」输入框做补全的下面的
+    <datalist>，由 app.js 每请求挂上 —— 和 isT0 一个路数，不在入参里）。
 
   另外卡上昵称前面那两枚**称号章**（演武王 / 慧眼王）不在入参里：它由 db.getTitles()
   现算、app.js 塞进 locals，模板用 titleOf(uid) 取，见 views/partials/title.ejs。
@@ -57,6 +59,8 @@
   // `locals.showScore || true` 恒为 true，等于没兜 —— 游客照样看到分数。
   const showScore = locals.showScore !== false;
   const backTo = locals.backTo || '/';
+  // 「其他」输入框的补全名单（app.js 挂的武将库显示名）。见下面 <datalist> 那段注释。
+  const heroNames = locals.heroNames || [];
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -88,6 +92,16 @@
       <% if (canRate) { %>打分截止 <b><%= fmt(rateLockAt) %></b>（<%= fmtLeft(rateLockAt - Date.now()) %>）—— 投出去的票在那之前都能改
       <% } else { %>本期打分已于 <b><%= fmt(rateLockAt) %></b> 截止，不能再投也不能改，等管理员结算<% } %>
     </p>
+  <% } %>
+  <%# 「其他」那个输入框的补全名单（views/partials/reco.ejs 里 list="reco-hero-names"）。
+      ★ **整面墙只渲染这一份** —— 102 个名字要是挂进每张卡，十几张卡就是十几倍的重复；
+      而且这份名单跟"谁能改这张卡"无关，武将库是公开数据。
+      只有"我至少能改一张卡"时才渲染（guesses 只对本人/管理员有值，见 db.getSeasonHeroData）——
+      游客和别人的卡上根本没有那个输入框，用不着名单。 %>
+  <% if (heroNames.length && rows.some((r) => (r.guesses || []).length)) { %>
+    <datalist id="reco-hero-names">
+      <% heroNames.forEach((n) => { %><option value="<%= n %>"></option><% }) %>
+    </datalist>
   <% } %>
   <div class="shot-grid">
     <% rows.forEach((r) => { const img = r.images[0];

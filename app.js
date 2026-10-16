@@ -36,6 +36,7 @@ app.use((req, res, next) => {
     wall: assetVer('wall.js'),
     comments: assetVer('comments.js'),
     report: assetVer('report.js'),
+    reco: assetVer('reco.js'),
     // 站点图标（2026-10-16 加）。三份都是 scripts/make-icon.js 生成后提交进仓库的，
     // 页面只引用、运行时不生成；引用方式见 partials/header.ejs。
     icon: assetVer('icon.svg'),
@@ -99,6 +100,14 @@ app.use((req, res, next) => {
   // 这个武将 key 在不在 T0 名单里（阵容卡上的高亮用，见 partials/reco.ejs）。
   // 名单本体是 db.js 的 T0_HEROES —— 单一真源，改动只改那一处。
   res.locals.isT0 = db.isT0;
+  // 武将库的显示名（variant + name），给「其他」输入框的补全名单用
+  // （views/partials/lineup-gallery.ejs 的 <datalist>）。**拼法和候选按钮上印的、
+  // 以及服务端反查用的那个字符串逐字一样**（db.findHeroesByName 的第一档就是它）——
+  // 补全里挑一个存下去必然能对上库，这三处不能各写各的。
+  // **故意不缓存**：heroes 表每次启动都从 herodata/index.json 重播，测试里还会自己 seed
+  // 一份（.devlocal/test/test-heroes.js），缓存住的话模板看到的是上一份名单。
+  // 102 行一次全表扫描，和 isT0 一样是每请求算，代价可以忽略。
+  res.locals.heroNames = db.getHeroes().map((h) => (h.variant || '') + h.name);
   // 「最高 400 由谁打的」那个名字走 views/partials/name-list.ejs —— 从前是这里的一个
   // nameList 助手，加慧眼圆框时挪进了模板：要拼「昵称 + 圆框」的 HTML，光有字符串不够了。
   // （2026-10-14 起它只印并列里的第一个名字，库里给的照样是全部的人。）

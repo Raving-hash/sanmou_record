@@ -4,8 +4,8 @@
   见 recognize.js / recognize-vlm.js / recognize-worker.js。
 
   两块内容，可见范围不同：
-    ① 已识别的武将 —— **所有人可见**，包括机器自动填的（用户定的）。
-       机器填的带 `auto` 标记、画成虚框，提示"还没人核对过"。T0 的加金色标记。
+    ① 高亮的武将 —— **所有人可见**，**只列 T0**（下面有为什么）。
+       机器填的带 `auto` 标记、画成虚框，提示"还没人核对过"。
     ② 纠正面板 —— **只有本人和管理员可见**（r.guesses 非空就说明能改，
        见 db.getSeasonHeroData：候选 JSON 只给能改这张卡的人查）。
 
@@ -17,7 +17,12 @@
      把富余全塞进别处，评论行整排错开（wall 那套浏览器断言抓的就是这个）。
      空盒子没有边框没有底色，看不见；内容仍然是"没东西就不输出"。
 %>
-<% const heroes = r.heroes || [];
+<% // ★ 2026-10-16 晚用户定的口径：这一行**只留金色 T0**，其余武将一概不出现。
+   //   为什么：从前把认出来的 9 个全列成胶囊，T0 那两三枚金色反而被淹掉了 ——
+   //   而"一眼看出这套带没带 T0"正是这一行存在的全部理由（见 style.css 的 .reco-hero.is-t0）。
+   //   一个 T0 都没有时**整行不渲染**，连「阵容」两个字也不出（用户选的口径：
+   //   卡上干干净净，识别本身在下面的纠正面板里，本人/管理员照样看得到）。
+   const heroes = (r.heroes || []).filter((h) => isT0(h.key));
    // ⚠️ 一个 entry 可以有多张阵容图（历史上限 6 张），而卡上只摊开第一张 ——
    //    所以这里**只取那张图的识别结果**。不筛的话，两张图的 18 行会一起渲染出来，
    //    「部队一 · 1」会出现两次，而两组的单选框还同名，互相打架。
@@ -39,8 +44,11 @@
 <div class="reco">
   <% if (heroes.length) { %>
     <p class="reco-line">
-      <span class="reco-k">阵容</span>
+      <%# 「阵容」这个标签得自己说明口径，否则看到「阵容 [祝融夫人]」会以为这套只带了一个人 %>
+      <span class="reco-k" title="这套阵容里的 T0 武将（其余武将不上卡）">阵容</span>
       <% heroes.forEach((h) => {
+           // 上面的 filter 之后这里恒为真 —— 判断**故意留着**：哪天把 filter 放宽
+           //（比如再挂一类"也要看"的武将），金边得跟着条件走，而不是无脑给所有人描金。
            const t0 = isT0(h.key);
            const tip = [t0 ? 'T0 武将' : '', h.auto ? '机器识别，还没人核对过' : '']
              .filter(Boolean).join('；'); %>
@@ -63,6 +71,9 @@
       <p class="reco-tip">
         这套阵容是机器认的，<strong>认错了直接改</strong>。虚框带 ? 的是机器拿不准的，
         最该看的就是它们。传的不是「阵容配置」页的话，认出来的多半不对，从「其他」里手输。
+        <%# 「其他」现在是**只能从库里挑**的（服务端只收能唯一对回库里的名字，见 routes/main.js），
+            所以这句必须写出来 —— 不然玩家打一个库里没有的名字，得到的只是"没保存"。 %>
+        手输要跟武将库一致：打几个字会出补全，从那里面挑一个，库里没有的名字存不进去。
       </p>
       <form method="post" action="/entries/<%= r.id %>/heroes" class="reco-form">
         <%# 认的是**哪一张图**。卡上摊开的是 images[0]，服务端要按同一个来 ——
@@ -104,7 +115,13 @@
                 <input type="radio" name="slot<%= slot %>" value="__other__"<%= g.source === 'other' ? ' checked' : '' %>>
                 <span>其他</span>
               </label>
+              <%# `list` 指向的那份名单**整面墙只渲染一次**（views/partials/lineup-gallery.ejs
+                  在 .shot-grid 前面），不是每张卡一份 —— 102 个名字挂在十几张卡里纯属重复。
+                  补全本身是纯 HTML（不用脚本）；public/reco.js 只补"打完字顺手勾上「其他」"
+                  那一下，没它就先点一下单选框，功能一样。
+                  autocomplete=off：别让浏览器拿"以前输过的字符串"来抢这份名单。 %>
               <input class="reco-other" type="text" name="other<%= slot %>" maxlength="20"
+                     list="reco-hero-names" autocomplete="off" spellcheck="false"
                      placeholder="手输武将名" value="<%= g.source === 'other' ? (g.other_name || '') : '' %>">
               <%# 「不确定」= 清空这一格。没有它的话单选框选了就取消不掉 ——
                   而这一格本来就是"还没看清"，得留条退路。 %>

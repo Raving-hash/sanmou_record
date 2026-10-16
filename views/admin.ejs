@@ -254,9 +254,13 @@
       <% reco.pairs.forEach((p) => { %><span class="badge badge-wait"><%= p.from %> → <%= p.to %><% if (p.n > 1) { %> ×<%= p.n %><% } %></span> <% }) %>
     </p>
   <% } %>
+  <%# ⚠️ 这一块是**考古层**：2026-10-16 晚起服务端不再收对不上的手输（只有唯一对回库里的
+      名字才写库，见 routes/main.js），所以这个数只会越来越旧。留着是因为"库里漏了哪个武将"
+      仍然值得回头看一眼；但**别把它当成实时指标** —— 现在玩家打错字是当场 flash 退回，
+      不落库。 %>
   <% if (reco.unresolved.length) { %>
-    <p class="muted small">玩家手输了、但库里对不上的名字（<%= reco.unresolved.length %> 个）——
-      要么库里漏了武将，要么他打错了字：</p>
+    <p class="muted small">玩家手输了、但库里对不上的名字（<%= reco.unresolved.length %> 个，
+      历史遗留，现在的口径是当场退回、不入库）—— 要么库里漏了武将，要么他打错了字：</p>
     <p class="small"><%= [...new Set(reco.unresolved)].join('、') %></p>
   <% } %>
 

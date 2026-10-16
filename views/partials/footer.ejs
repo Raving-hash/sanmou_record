@@ -18,5 +18,9 @@
 <%# 「全选战报」那一下（public/report.js）：只有 /seasons/:id 有那段文本框，
     脚本自己找不到元素就退出，所以跟 lightbox 一样全站引一份。 %>
 <script src="/public/report.js?v=<%= assetVer.report %>"></script>
+<%# 阵容纠正面板那点增强（public/reco.js）：在「其他」框里打字就顺手勾上「其他」那个单选框，
+    免得"打了字却没勾 → 提交等于没动"。只有能改的卡上才有 .reco-other，找不到元素就退出，
+    所以和上面几个一样全站引一份。 %>
+<script src="/public/reco.js?v=<%= assetVer.reco %>"></script>
 </body>
 </html>

@@ -120,6 +120,11 @@ db.getHero = (key) => db.prepare(`SELECT * FROM heroes WHERE key=?`).get(key);
 // 按玩家手输的名字反查（「其他」输入框靠它把名字对回库里）。**可能返回多条**，
 // 调用方自己决定怎么办。
 //
+// ⚠️ 唯一的调用方（routes/main.js）现在的口径是「**只收恰好一条**」：0 条和多条都不写库，
+//    并在 flash 里点名。所以这份查询的每一档都存在意义 —— 第一档让补全列表里挑出来的
+//    名字必然能过，后两档是给"照着卡上抄、但抄得不那么全"的人留的余地（「祝融」）。
+//    **不要**为了"少一次查询"把后两档砍掉。
+//
 // ⚠️ 分三档，**按优先级来，不是取并集** —— 这个顺序是有实测依据的：
 //   玩家在「其他」框里打的，多半是**照着卡上抄下来的显示名**，而显示名 = variant + name。
 //   从前这里只比 `name`，于是「群雄孙坚」「SP周瑜」一条都对不上（它们的 name 只是
@@ -186,6 +191,10 @@ db.saveGuesses = (entryId, filename, list) => {
 
 // 玩家纠正一格。source: 'pick' | 'other' | 'none'
 // 写 decided_at 就是"有人核对过"的标记（见 schema.sql）。**auto_key 一个字节都不动。**
+// ⚠️ `other_name` 现在**只在 key 也对上了库的时候才有值**（2026-10-16 晚起，
+//    "只有英雄库中的名字才允许保存"，见 routes/main.js）—— 它变成了"玩家当时打的那几个字"
+//    这份旁证，而不是"库里没有的名字"的收容所。历史上那种 key=null 的遗留行还在库里、
+//    也照样显示（views/admin.ejs 的"对不上的名字"那一块），但不会再有新的。
 db.decideGuess = (filename, slot, { key = null, source, otherName = null }) =>
   db.prepare(`UPDATE hero_guesses SET chosen_key=?, source=?, other_name=?, decided_at=?
               WHERE filename=? AND slot=?`)
@@ -266,7 +275,10 @@ db.getRecoStats = () => {
         pairs.set(k, (pairs.get(k) || 0) + 1);
       }
     }
-    // 玩家手输了、但对不上库里任何一个武将：要么库里漏了这个武将，要么他打错了字
+    // 玩家手输了、但对不上库里任何一个武将：要么库里漏了这个武将，要么他打错了字。
+    // ⚠️ 这已经是**历史数据的考古层**了：2026-10-16 晚起服务端不再收对不上的名字
+    //    （见 routes/main.js），所以这个数组只会越来越旧、不会长。留着是因为
+    //    "库里漏了哪个武将"这件事仍然值得回头看一眼 —— 名单本身已经集齐了。
     if (!r.chosen_key && r.other_name) unresolved.push(r.other_name);
   }
 
