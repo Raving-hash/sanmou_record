@@ -31,7 +31,11 @@
 <body>
 <nav class="container-fluid topnav">
   <ul>
-    <li><a class="brand" href="/">演武擂台</a></li>
+    <%# 品牌左边那方金印就是页签上那个图标本身（public/icon.svg，同一份文件、同一个 ?v=）。
+        alt="" 是故意的：旁边的「演武擂台」已经把话说完了，读屏再念一遍是噪音。
+        ⚠️ 别再给它配一条 <link rel="icon"> —— head 里那三行是被逐条数过的
+        （mkicon.js 期望正好 3 条，多一条整套 icon 断言直接抛错）。 %>
+    <li><a class="brand" href="/"><img class="brand-seal" src="/public/icon.svg?v=<%= assetVer.icon %>" alt="" width="30" height="30">演武擂台</a></li>
   </ul>
   <ul>
     <% if (locals.me) { %>

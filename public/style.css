@@ -11,19 +11,25 @@
    1. 色板
    -------------------------------------------------------------------------- */
 :root {
-  /* 墨 —— 由深到浅 */
-  --yw-ink-1000: #0b0906;
-  --yw-ink-900:  #14110c;   /* 页面底色 */
-  --yw-ink-800:  #1a1611;   /* 卡片 */
-  --yw-ink-700:  #221d16;   /* 卡片内分区 / 表头 / 悬浮 */
-  --yw-ink-600:  #2b251b;   /* 输入框 */
-  --yw-line:     #332c21;   /* 描边 */
-  --yw-line-soft:#272118;   /* 更弱的线（表格行） */
+  /* 墨 —— 由深到浅。**2026-10-16 改版把档距拉开了**：从前页面 #14110c 和卡片 #1a1611
+     只差 6（每通道），全站看着是"一片糊"、卡片浮不出页面。现在每档差 9~10。 */
+  --yw-ink-1000: #070503;   /* 最深：图框留白 / 金字按钮上的字 */
+  --yw-ink-900:  #100d09;   /* 页面底色 */
+  --yw-ink-800:  #191510;   /* 卡片 */
+  --yw-ink-700:  #241e17;   /* 卡片内分区 / 表头 / 悬浮 */
+  --yw-ink-600:  #2f281e;   /* 输入框 */
+  --yw-line:     #3a3125;   /* 描边（也比从前亮一档，否则卡的边界看不见） */
+  --yw-line-2:   #4c4232;   /* 需要"明确看得见"的描边：次要按钮、输入框 */
+  --yw-line-soft:#2a241b;   /* 更弱的线（表格行） */
 
-  /* 金 —— 主色 */
+  /* 金 —— 主色。这三档的**值刻意不动**：public/icon.svg 那方金印用的就是
+     #e8cd86 / #a07c2c（test-icon.js 逐字断言了这两个十六进制），
+     站点的金要和页签上那方印是同一支金。要加"更亮"就另开一支，别改这三档。 */
   --yw-gold:     #c8a24a;
   --yw-gold-lt:  #e8cd86;
   --yw-gold-dk:  #8a6d2c;
+  --yw-gold-hi:  #f7e9bd;   /* 高光：发丝线、焦点环、hover 描边 */
+  --yw-gold-a06: rgba(200, 162, 74, 0.06);
   --yw-gold-a10: rgba(200, 162, 74, 0.10);
   --yw-gold-a20: rgba(200, 162, 74, 0.20);
   --yw-gold-a35: rgba(200, 162, 74, 0.35);
@@ -49,13 +55,55 @@
      按钮的 danger 都在用）；称号是荣誉，得和它拉开：更亮、更饱和，暗底上才立得住。 */
   --yw-vermilion: #ef6a5a;
 
-  /* 文字（暖白，不用纯白，避免和墨底打架） */
-  --yw-text:      #ece5d8;
-  --yw-text-dim:  #a89b83;
-  --yw-text-mute: #756b59;
+  /* 文字（暖白，不用纯白，避免和墨底打架）。
+     2026-10-16 提亮了 dim / mute 两档：从前的 #a89b83 在墨底上小字只有 5 出头的对比度，
+     一屏小字（均分、时间、说明）看着都"糊"，是这次"没有层次"的一半来源。 */
+  --yw-text:      #f0e9dc;
+  --yw-text-dim:  #b6a98f;
+  --yw-text-mute: #8b7f6a;
 
-  --yw-radius: 8px;
-  --yw-radius-lg: 12px;
+  --yw-radius: 10px;
+  --yw-radius-lg: 16px;
+
+  /* ---- 字号刻度（2026-10-16 加）----
+     从前全站字号是手调的零散值（0.66 / 0.68 / 0.7 / 0.72 / 0.75 / 0.76 / 0.8 / 0.82…），
+     每一处都"差一点点"，凑在一起就是没有节奏。这一套是滚出来的刻度，新代码只许引用它。
+     ⚠️ 两条**测试量着的**约束（改这里之前先看 .devlocal/preview/lb/comment-harness.js）：
+       ① .rate-k 和 details.cmt > summary **必须是同一个档**（差不超过 0.9~1.0 倍 +0.5px）；
+       ② .rate-line 的字号涨了，它的 line-height 必须跟着涨 —— wall-harness 判
+          「打分区每条只占一行」用的是"高 ≤ 1.6 × 该元素自己的 line-height"。 */
+  --yw-fs-2xs: 0.68rem;
+  --yw-fs-xs:  0.72rem;
+  --yw-fs-sm:  0.78rem;
+  --yw-fs-md:  0.85rem;
+  --yw-fs-lg:  0.95rem;
+  --yw-fs-xl:  1.05rem;
+  --yw-fs-2xl: 1.25rem;
+  --yw-fs-3xl: 1.6rem;
+  --yw-fs-4xl: 2rem;
+
+  /* ---- 间距刻度（2026-10-16 加）---- */
+  --yw-sp-1: 0.2rem;
+  --yw-sp-2: 0.3rem;
+  --yw-sp-3: 0.45rem;
+  --yw-sp-4: 0.6rem;
+  --yw-sp-5: 0.9rem;
+  --yw-sp-6: 1.2rem;
+  --yw-sp-7: 1.6rem;
+  --yw-sp-8: 2.2rem;
+
+  /* ---- 面层与材质（2026-10-16 加）----
+     "一层层"是这次改版的目标：面层 + 一圈内高光（顶边那道 1px）+ 多层柔和投影。
+     内高光用 box-shadow 的 inset 而不是 border-top —— 它不参与布局，
+     卡片尺寸一个像素都不会变（.shot-card 的尺寸有断言量着，动不得）。 */
+  --yw-surface-1: var(--yw-ink-900);   /* 页面 */
+  --yw-surface-2: var(--yw-ink-800);   /* 卡片 */
+  --yw-surface-3: var(--yw-ink-700);   /* 抬起来的一层：表头、分区 */
+  --yw-hi:        inset 0 1px 0 rgba(247, 233, 189, 0.055);
+  --yw-hi-strong: inset 0 1px 0 rgba(247, 233, 189, 0.10);
+  --yw-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.28);
+  --yw-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 34px rgba(0, 0, 0, 0.34);
+  --yw-ring: 0 0 0 2px var(--yw-gold-a35);   /* "选中了"那一圈：.rate-tier.is-mine 在用 */
 
   --yw-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
               "Noto Serif SC", "SimSun", "宋体", serif;
@@ -96,15 +144,18 @@
   --pico-primary-underline: var(--yw-gold-a35);
   --pico-primary-hover-underline: var(--yw-gold-lt);
 
-  /* 次要按钮（.secondary / .outline）：低调的暖灰 */
-  --pico-secondary: var(--yw-text-dim);
+  /* 次要按钮（.secondary / .outline）。
+     ★ 2026-10-16 修：「录入积分」那类按钮从前是"墨底 + 暖灰字 + 同色描边"，
+     在页面上几乎看不见（看着像 disabled）—— 字改回 --yw-text，描边换成亮一档的
+     --yw-line-2，这样它读起来是"一颗安静的按钮"而不是"一颗坏掉的按钮"。 */
+  --pico-secondary: var(--yw-text);
   --pico-secondary-background: var(--yw-ink-700);
-  --pico-secondary-border: var(--yw-line);
+  --pico-secondary-border: var(--yw-line-2);
   --pico-secondary-hover: var(--yw-gold-lt);
   --pico-secondary-hover-background: var(--yw-ink-600);
   --pico-secondary-hover-border: var(--yw-gold-a35);
   --pico-secondary-inverse: var(--yw-ink-1000);
-  --pico-secondary-underline: rgba(168, 155, 131, 0.4);
+  --pico-secondary-underline: rgba(182, 169, 143, 0.4);
   --pico-secondary-hover-underline: var(--yw-gold-lt);
   --pico-secondary-focus: var(--yw-gold-a20);
 
@@ -119,14 +170,14 @@
   --pico-card-background-color: var(--yw-ink-800);
   --pico-card-border-color: var(--yw-line);
   --pico-card-sectioning-background-color: var(--yw-ink-700);
-  --pico-card-box-shadow: none;
-  --pico-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --pico-card-box-shadow: var(--yw-hi);
+  --pico-box-shadow: var(--yw-shadow-2);
   --pico-button-box-shadow: none;
   --pico-button-hover-box-shadow: none;
 
   /* 表单 */
   --pico-form-element-background-color: var(--yw-ink-600);
-  --pico-form-element-border-color: var(--yw-line);
+  --pico-form-element-border-color: var(--yw-line-2);
   --pico-form-element-color: var(--yw-text);
   --pico-form-element-placeholder-color: var(--yw-text-mute);
   --pico-form-element-active-background-color: var(--yw-ink-700);
@@ -182,18 +233,33 @@
    2. 底子
    -------------------------------------------------------------------------- */
 
-/* 顶部一抹极淡的暖光，让纯色底不至于死板。纯 CSS，不引外部图。 */
+/* 顶部一抹极淡的暖光，让纯色底不至于死板。纯 CSS，不引外部图。
+   2026-10-16 加厚：正面一道金余光 + 右上朱红 + 顶上极淡的一层竖向提亮，
+   叠出"灯打在纸上"的感觉，页面才不像一块平涂。 */
 body {
   min-height: 100vh;
   background-color: var(--yw-ink-900);
   background-image:
-    radial-gradient(1100px 380px at 50% -140px, rgba(200, 162, 74, 0.075), transparent 70%),
-    radial-gradient(700px 320px at 100% 0, rgba(140, 47, 47, 0.045), transparent 70%);
+    radial-gradient(1200px 420px at 50% -160px, rgba(200, 162, 74, 0.10), transparent 68%),
+    radial-gradient(760px 340px at 100% 0, rgba(140, 47, 47, 0.05), transparent 70%),
+    linear-gradient(180deg, rgba(255, 246, 224, 0.018), transparent 20%);
   background-repeat: no-repeat;
 }
 
+/* 内容容器为什么是 1340：Pico 在 1280 视口下只给 **1200px**（≥1536 才 1450），
+   而阵容墙要"一屏 5 张 228px 的卡"= 5×228 + 4×12 = **1188** —— 1200 里塞得下，
+   但只要浏览器多一条 10px 的滚动条就掉成 4 张（实测就是这么脆）。
+   所以放宽到 1340，并**自己补上左右留白**：Pico 在 ≥576px 那档把 padding 归零、
+   拿 max-width 当留白，1280 视口下那等于一点留白都没有。
+   （Pico 这个版本没有 --pico-container-max-width 可覆盖，只能自己写规则。） */
 main.container {
-  padding-bottom: 2rem;
+  padding-bottom: var(--yw-sp-8);
+}
+@media (min-width: 576px) {
+  main.container {
+    max-width: 1340px;
+    padding-inline: var(--yw-sp-6);
+  }
 }
 
 ::selection {
@@ -227,30 +293,61 @@ h1, h2, h3, h4 {
 }
 
 h2 {
-  font-size: 1.6rem;
+  font-size: var(--yw-fs-3xl);
+  letter-spacing: 0.05em;
 }
+/* 小节标题前面那一道金签（2026-10-16 加）：纯 CSS，不动标记 —— mkwall.js / mktitle.js
+   按 `<h3>本期阵容</h3>` 这个字面量切页，h3 里不许长出任何元素来。 */
 h3 {
-  font-size: 1.15rem;
-  padding-bottom: 0.45rem;
+  font-size: var(--yw-fs-2xl);
+  padding-bottom: var(--yw-sp-3);
   border-bottom: 1px solid var(--yw-line);
-  margin-bottom: 1rem;
+  margin-bottom: var(--yw-sp-6);
+}
+h3::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.8em;
+  margin-right: 0.5rem;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--yw-gold-lt), var(--yw-gold-dk));
+  vertical-align: -0.05em;
 }
 
-/* 页头：Pico 的 hgroup 自带下边框，这里把颜色和间距调顺 */
+/* 页头：Pico 的 hgroup 自带下边框，这里把颜色和间距调顺，并换成两端渐隐的金线 */
 hgroup {
   border-bottom: 1px solid var(--yw-line);
-  padding-bottom: 0.85rem;
+  padding-bottom: var(--yw-sp-5);
+  position: relative;
+}
+hgroup::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    var(--yw-gold-a35),
+    var(--yw-gold-a06) 45%,
+    transparent
+  );
 }
 hgroup h2 {
   margin-bottom: 0.35rem;
 }
 .page-head {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--yw-sp-7);
 }
 
 a {
   text-underline-offset: 3px;
   transition: color 0.14s ease;
+}
+a:hover {
+  color: var(--yw-gold-hi);
 }
 
 /* 焦点环统一成金色 */
@@ -300,18 +397,19 @@ a {
   text-decoration: none;
 }
 .topnav .brand:hover {
-  color: #f2dda0;
+  color: var(--yw-gold-hi);
 }
-/* 品牌前的金色短竖 —— 像一方窄印 */
-.topnav .brand::before {
-  content: "";
-  display: inline-block;
-  width: 3px;
-  height: 1.05em;
-  margin-right: 0.6rem;
-  vertical-align: -0.16em;
-  border-radius: 2px;
-  background: linear-gradient(180deg, var(--yw-gold-lt), var(--yw-gold-dk));
+/* 品牌左边那方金印（2026-10-16 加）。用的是页签那个图标文件本身
+   （public/icon.svg，模板里带同一个 assetVer.icon 的 ?v=），
+   于是"页签上的印"和"页面左上角的印"永远是同一方 —— 换图标只动 scripts/make-icon.js 一处。
+   从前这里是一道金色短竖（::before 画的），现在章直接摆上，就不需要那道竖了。 */
+.topnav .brand-seal {
+  width: 1.5em;
+  height: 1.5em;
+  margin-right: 0.5rem;
+  border-radius: 4px;
+  vertical-align: -0.34em;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .topnav ul:last-child {
@@ -354,23 +452,25 @@ a {
   color: var(--yw-text-dim);
 }
 .small {
-  font-size: 0.85rem;
+  font-size: var(--yw-fs-md);
 }
 .num {
   font-variant-numeric: tabular-nums;
 }
 
-/* 徽章：半透明色底 + 亮色字，在暗底上比实心浅色块协调得多 */
+/* 徽章：半透明色底 + 亮色字，在暗底上比实心浅色块协调得多。
+   2026-10-16：字号/内边距走刻度，并加一道内高光 —— 胶囊在墨底上不再是一块"贴纸"。 */
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.55rem;
+  padding: 0.12rem 0.6rem;
   border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1.65;
   white-space: nowrap;
   vertical-align: middle;
   letter-spacing: 0.02em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
 .badge-open {
   background: var(--yw-gold-a20);
@@ -424,14 +524,18 @@ a {
   padding: 0 0.3em;
   border-radius: 999px;
   border: 1px solid transparent;   /* 颜色按档位来，见下面的 .eye-* */
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
+/* ⚠️ 这一组必须**保持 `.eye, .eye-dim` 这个样子**（test-eye.js 断言了同组选择器：
+   模板万一漏了档位类要落到暗色）。也别在 `.eye{}` 里写 color / border-color ——
+   那条断言是个 `\bcolor:` 的正则，`border-color:` 一样会被它抓到。 */
 .eye, .eye-dim {
-  border-color: rgba(168, 155, 131, 0.35);
-  background: rgba(120, 110, 95, 0.16);
+  border-color: rgba(182, 169, 143, 0.38);
+  background: rgba(130, 120, 104, 0.18);
   color: var(--yw-text-dim);
 }
 .eye-silver {
@@ -489,34 +593,49 @@ a {
 .delta-up   { color: var(--yw-azure-lt); }
 .delta-down { color: var(--yw-cinnabar-lt); }
 
-/* 提示条 */
+/* 提示条。2026-10-16：加了一枚前缀记号（✓ / !）。
+   左边那道竖条留着 —— 全站常常就靠它报"成没成"，只靠红绿两色对红绿色弱的人不友好。
+   记号是 ::before，**不进 HTML**（test-clear.js / test-report.js 都在按
+   `<div class="flash flash-xxx">正文</div>` 这个形状抓）。 */
 .flash {
-  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.7rem 0.95rem;
   border-radius: var(--yw-radius);
   border: 1px solid transparent;
   border-left-width: 3px;
-  margin-bottom: 1.2rem;
+  margin-bottom: var(--yw-sp-6);
+  font-size: var(--yw-fs-md);
+  line-height: 1.55;
+  box-shadow: var(--yw-hi);
+}
+.flash::before {
+  flex: 0 0 auto;
+  font-weight: 700;
 }
 .flash-ok {
-  background: rgba(63, 125, 92, 0.12);
-  border-color: rgba(63, 125, 92, 0.3);
+  background: rgba(63, 125, 92, 0.14);
+  border-color: rgba(63, 125, 92, 0.34);
   border-left-color: var(--yw-jade-lt);
   color: #a9ddc1;
 }
+.flash-ok::before { content: "✓"; }
 .flash-err {
-  background: rgba(140, 47, 47, 0.14);
-  border-color: rgba(140, 47, 47, 0.35);
+  background: rgba(140, 47, 47, 0.16);
+  border-color: rgba(140, 47, 47, 0.4);
   border-left-color: var(--yw-cinnabar-lt);
   color: #f2b4b4;
 }
+.flash-err::before { content: "!"; }
 
 /* 按钮排 */
 .actions {
   display: flex;
-  gap: 0.6rem;
+  gap: var(--yw-sp-3);
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: 1.4rem;
+  margin-bottom: var(--yw-sp-7);
 }
 .actions form {
   margin: 0;
@@ -555,13 +674,13 @@ button:not(:disabled):active,
 /* 文件选择框那个小按钮 */
 input[type="file"]::file-selector-button {
   font-family: inherit;
-  font-size: 0.85rem;
-  padding: 0.32rem 0.8rem;
+  font-size: var(--yw-fs-md);
+  padding: 0.35rem 0.85rem;
   margin-right: 0.7rem;
-  border-radius: 6px;
-  border: 1px solid var(--yw-line);
-  background: var(--yw-ink-700);
-  color: var(--yw-gold);
+  border-radius: 8px;
+  border: 1px solid var(--yw-line-2);
+  background: var(--yw-surface-3);
+  color: var(--yw-gold-lt);
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
@@ -581,10 +700,11 @@ input[type="file"]::file-selector-button:hover {
    否则页面一打开就是「无框 → 有框」的 140ms 淡入。upload.js 加类前会先把
    这条过渡压掉，见那边的注释。 */
 .drop-field {
-  padding: 0.7rem 0.85rem 0.8rem;
-  border: 1px dashed var(--yw-line);
+  padding: 0.75rem 0.9rem 0.85rem;
+  border: 1px dashed var(--yw-line-2);   /* 从 --yw-line 提亮一档：虚线在墨底上本来最容易糊掉 */
   border-radius: var(--yw-radius);
-  background: var(--yw-ink-800);
+  background: var(--yw-ink-700);
+  box-shadow: var(--yw-hi);
   transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 .drop-field.is-dragover {
@@ -622,7 +742,7 @@ input[type="file"]::file-selector-button:hover {
   background: var(--yw-ink-800);
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius-lg);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--yw-hi), var(--yw-shadow-2);
   position: relative;
   overflow: hidden;
 }
@@ -634,7 +754,7 @@ input[type="file"]::file-selector-button:hover {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--yw-gold), transparent);
+  background: linear-gradient(90deg, transparent, var(--yw-gold-lt), transparent);
 }
 .auth-wrap hgroup {
   border-bottom: 0;
@@ -649,25 +769,27 @@ input[type="file"]::file-selector-button:hover {
    6. 卡片 / 我的状态
    -------------------------------------------------------------------------- */
 .card {
-  padding: 1.2rem 1.3rem 1.3rem;
-  margin-bottom: 1.6rem;
-  background: var(--yw-ink-800);
+  padding: 1.25rem 1.35rem 1.35rem;
+  margin-bottom: var(--yw-sp-7);
+  background: var(--yw-surface-2);
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius-lg);
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
 }
 .card h3 {
-  margin-bottom: 0.9rem;
+  margin-bottom: var(--yw-sp-5);
 }
 
 .mine-card {
-  padding: 1rem 1.15rem;
-  margin-bottom: 1.5rem;
+  padding: 1.05rem 1.2rem;
+  margin-bottom: var(--yw-sp-7);
   background:
     linear-gradient(120deg, var(--yw-gold-a10), transparent 55%),
     var(--yw-ink-800);
   border: 1px solid var(--yw-line);
   border-left: 3px solid var(--yw-gold);
   border-radius: var(--yw-radius);
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
 }
 .mine-card p:last-child {
   margin-bottom: 0;
@@ -678,22 +800,29 @@ input[type="file"]::file-selector-button:hover {
    -------------------------------------------------------------------------- */
 .table-wrap {
   overflow: auto;
-  margin-bottom: 1.5rem;
-  background: var(--yw-ink-800);
+  margin-bottom: var(--yw-sp-7);
+  background: var(--yw-surface-2);
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius-lg);
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
 }
 .table-wrap table {
   min-width: 34rem;
   margin: 0;
 }
+/* 表头：抬到上一层 + 一道金发丝线压住它，这样"表头"和"数据"是两层。
+   （**没有做吸顶**：.table-wrap 是 overflow:auto 的横向滚动容器，
+   在其内部 position:sticky 只会贴着 wrap 自己的上沿 —— 而 wrap 竖向根本不滚，
+   等于白写。真吸顶得给 wrap 一个 max-height，那会在手机上多出一层内滚动条。） */
 .table-wrap th {
-  background: var(--yw-ink-700);
+  background: var(--yw-surface-3);
   color: var(--yw-gold);
-  font-size: 0.8rem;
+  font-size: var(--yw-fs-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   white-space: nowrap;
+  border-bottom: 1px solid var(--yw-gold-a35);
+  box-shadow: var(--yw-hi);
 }
 .table-wrap th,
 .table-wrap td {
@@ -703,11 +832,33 @@ input[type="file"]::file-selector-button:hover {
 .table-wrap tbody tr:last-child td {
   border-bottom: 0;
 }
+/* 悬停：一层金色薄底。用 td 的背景而不是 tr 的，免得和 .row-first 打架 */
 .table-wrap tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.024);
+  background: var(--yw-gold-a06);
+}
+/* 分数那一格：宋体金字 —— 和阵容卡上的数字用同一套语言 */
+.table-wrap td.num strong {
+  font-family: var(--yw-serif);
+  font-size: var(--yw-fs-xl);
+  color: var(--yw-gold-lt);
+  font-weight: 700;
 }
 
 .w-rank    { width: 4rem; }
+
+/* 表头跟**它下面那一列**的对齐走（2026-10-16 加）。
+   从前表头一律左对齐、数字列右对齐 —— 「胜场」在左、数字在右，看着像两套东西。
+   信号和 td 那两条同源：`.w-rank` / `.w-score` / `.w-players` 就是数字列，
+   而「名次」只有在**第一列**时才居中（那儿的 td 是 .num:first-child）；
+   user.ejs 的「名次」在第四列、td 是普通 .num（右对齐），所以它也跟着右对齐。 */
+.table-wrap th.w-rank,
+.table-wrap th.w-score,
+.table-wrap th.w-players {
+  text-align: right;
+}
+.table-wrap th:first-child.w-rank {
+  text-align: center;
+}
 .w-score   { width: 6rem; }
 .w-time    { width: 11rem; }
 .w-status  { width: 6rem; }
@@ -741,37 +892,45 @@ input[type="file"]::file-selector-button:hover {
   opacity: 0.45;
 }
 
-/* 列表里的截图缩略图。放大到 200×160 是为了能一眼认出是哪张图 —— 64×64 太小了。
-   用 contain 而不是 cover：阵容截图实测 2844×1280（约 2.2:1），塞进 1.25:1 的框里
-   cover 会左右各裁掉约 1/4，而武将恰恰铺在两侧，裁掉就正好看不见了。
-   留白用卡片底色而不是白色，看起来是刻意的暗底letterbox，不是加载失败。 */
+/* 列表里的截图缩略图。**200×160 → 140×112（2026-10-16 改版）**，仍是 5:4 ——
+   和阵容墙那个图框同一套比例（理由写在那边：真图是"竖版手机截图 / 2.2:1 宽裁"
+   的双峰分布，没有任何比例能同时贴合，5:4 是折中）。
+   缩到 140 的起因：200 宽的缩略图把整张排名表撑成了一片马赛克，昵称列反倒成了最窄的一列；
+   要看清楚本来就该点开（弹层里是原图）。
+   用 contain 不用 cover —— cover 会把宽图两侧的武将裁掉，那正是要看的东西。
+   留白用卡片底色而不是白色，看起来是刻意的暗底 letterbox，不是加载失败。 */
 .thumb {
-  width: 200px;
-  height: 160px;
+  width: 140px;
+  height: 112px;
   object-fit: contain;
   background: var(--yw-ink-1000);
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--yw-line);
   display: block;
-  transition: border-color 0.14s ease;
+  transition: border-color 0.14s ease, transform 0.14s ease;
 }
 a:hover > .thumb {
   border-color: var(--yw-gold-a35);
+  transform: translateY(-1px);
 }
+/* 我自己那张积分截图（/score）：竖版手机截图居多，给它上下封顶才不会占掉半屏 */
 .thumb-lg {
-  max-width: 320px;
-  border-radius: 6px;
+  max-width: 240px;
+  max-height: 300px;
+  object-fit: contain;
+  background: var(--yw-ink-1000);
+  border-radius: 8px;
   border: 1px solid var(--yw-line);
   margin-top: 0.4rem;
 }
 /* 一个人最多 6 张阵容截图。不给这个 flex 容器封顶的话，它在表格单元格里的
-   max-content 宽度就是 6×200 = 1200px，整张表会被撑出 .container（1280 视口下只有 1200px）
-   变成横向滚动。封在 420px 刚好一行两张。 */
+   max-content 宽度就是 6×140 = 840px，整张表会被撑出去变成横向滚动。
+   封在 460px 刚好一行三张（3×140 + 2×7 = 434）。 */
 .thumb-row {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
-  max-width: 420px;
+  max-width: 460px;
 }
 
 .row-actions {
@@ -839,14 +998,17 @@ nav ul li,
    object-fit:contain 是关键 —— 阵容截图多半是 2844×1280 这类超宽比例（2.2:1），
    cover 会左右各裁掉约 1/4，而武将恰恰铺在两侧，裁掉就正好看不见了。
    contain 宁可留边也不裁，横图竖图都不变形。要看清细节点图放大（页面内盖一层，见第 15 节）。 */
-/* 一排小卡片，每张正好 200px 宽。左对齐 —— 上面的 h3 和说明都是左对齐的，
+/* 一排小卡片，每张正好 228px 宽。左对齐 —— 上面的 h3 和说明都是左对齐的，
    卡片若居中就会和大标题错开，像掉在中间。
-   轨道写死 200px 而不是 `minmax(200px, 1fr)`：后者会把列拉伸填满整行，
-   卡片就不是 200 宽了。1280 视口的容器 1200px 里排得下 5 张。
-   窄屏另有一档（见文件末尾的 640px 媒体查询）。 */
+   轨道写死 228px 而不是 `minmax(228px, 1fr)`：后者会把列拉伸填满整行，
+   卡片就不是 228 宽了。
+   **尺寸为什么是 228（2026-10-16 改版，从 200 放大）**：
+   5×228 + 4×12 = 1188，容器放到 1340（见第 2 节）之后，1280 视口下还有 40 多像素余量 ——
+   这是"一屏仍然 5 张"的上限。再宽一点，浏览器多一条 10px 滚动条就会掉成 4 张。
+   窄屏另有一档（见文件末尾的媒体查询）。 */
 .shot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 200px);
+  grid-template-columns: repeat(auto-fill, 228px);
   gap: 0.9rem 0.75rem;
   justify-content: start;
   margin-bottom: 1.8rem;
@@ -908,47 +1070,63 @@ nav ul li,
 .rate-deadline.is-locked b {
   color: var(--yw-text-dim);
 }
+/* ⚠️ `.shot-card` **必须保持"1px 边框 + 零内边距"**：wall-harness.js 有一格断言算的是
+   「图框宽 = 卡宽 − 2」（那个 2 就是这两条 1px 边框）。想给卡片加留白就加在里面各块上，
+   别加在这里，也别把边框加粗。 */
 .shot-card {
   display: flex;
   flex-direction: column;
   margin: 0;
-  width: 200px;
-  background: var(--yw-ink-800);
+  width: 228px;
+  background: var(--yw-surface-2);
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius);
   overflow: hidden;
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+/* 悬停：描边转金 + 轻轻抬 1px。卡片是"可以直接点"的东西，得有点反应。
+   抬起用 transform（不参与布局），所以同一排的邻座不会被推走。 */
+.shot-card:hover {
+  border-color: var(--yw-gold-a35);
+  box-shadow: var(--yw-hi-strong), var(--yw-shadow-2);
+  transform: translateY(-1px);
 }
 /* 上期积分第一 / 第二 的阵容卡（db.getPrevAces → 模板里的 is-prev-first / is-prev-second）。
    边框本身只有 1px（.shot-card 的既有宽度），所以"亮"是靠**外面再补一圈 1px 的
    box-shadow 环 + 一点辉光**做的 —— 不能改成 border-width: 2px：那会挤掉 1px 内容宽度，
-   而框里的图是写死 200px 的，会被 overflow:hidden 裁掉更多。阴影不参与布局，
-   加多少都不动卡片尺寸，也不会裁到图。 */
+   而框里的图跟着卡走（写死尺寸那条断言就会红），也会被 overflow:hidden 多裁一圈。
+   阴影不参与布局，加多少都不动卡片尺寸，也不会裁到图。 */
 .shot-card.is-prev-first {
   border-color: var(--yw-azure-lt);
-  box-shadow: 0 0 0 1px rgba(121, 194, 242, 0.45),
+  box-shadow: var(--yw-hi),
+              0 0 0 1px rgba(121, 194, 242, 0.45),
               0 0 12px rgba(56, 132, 214, 0.28);
 }
 .shot-card.is-prev-second {
   border-color: var(--yw-silver);
-  box-shadow: 0 0 0 1px rgba(204, 214, 226, 0.4),
+  box-shadow: var(--yw-hi),
+              0 0 0 1px rgba(204, 214, 226, 0.4),
               0 0 12px rgba(150, 165, 180, 0.22);
 }
-/* 200px 宽装不下「#1 王小明 共3张 320分」一行，所以间距和字号都比卡片大时收紧，
-   允许换行。同一行的卡片由 grid 拉成等高，顶栏高度不齐也不会歪。 */
+/* 顶栏：名次 + 称号章 + 昵称 + 圆框 + 积分。
+   ⚠️ gap 不能超过 0.6rem：title-harness.js 有一条断言量"章和昵称依次相邻、间距 0–12px"，
+   那个 12px 就是照着这里的 gap 定的（1280 下 0.6rem = 12px，贴着上限）。 */
 .shot-head {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.82rem;
+  padding: 0.45rem 0.6rem;
+  font-size: var(--yw-fs-md);
   line-height: 1.35;
   border-bottom: 1px solid var(--yw-line-soft);
-  background: linear-gradient(180deg, var(--yw-ink-700), var(--yw-ink-800));
+  background: linear-gradient(180deg, var(--yw-surface-3), var(--yw-surface-2));
 }
 .shot-rank {
   font-family: var(--yw-serif);
   font-weight: 700;
+  font-size: var(--yw-fs-lg);
   color: var(--yw-gold);
 }
 .shot-who {
@@ -959,38 +1137,51 @@ nav ul li,
   color: var(--yw-gold-lt);
   text-decoration: underline;
 }
+/* 卡上的积分（本期名次那一格）。金色宋体 —— 和表格里的分数、和个人页的大数字同一套语言。
+   2026-10-16 从"暖灰小字"提上来：它是卡上第二重要的信息（第一是图和均分）。 */
 .shot-score {
   margin-left: auto;
   font-family: var(--yw-serif);
-  color: var(--yw-text-dim);
+  font-size: var(--yw-fs-lg);
+  font-weight: 700;
+  color: var(--yw-gold-lt);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* 传了阵容但还没交积分的人排在最后，右侧不写分数而是这个 */
 .shot-score.is-pending {
   font-family: var(--yw-sans);
-  font-size: 0.82rem;
+  font-size: var(--yw-fs-sm);
+  font-weight: 400;
   color: var(--yw-text-mute);
 }
-/* 图框**写死 160px，不参与弹性拉伸**（2026-10-14 起）。
+/* 图框**写死 181px，不参与弹性拉伸**（2026-10-14 起）。
    从前这里是 `flex:1 + min-height:160px`：卡片被说明/打分区撑高时，多出来的高度
    由这个框吃下去 —— 于是同一排里每张卡的图框高低不一（说明 5 行的那张把整排的框
    都撑高，旁边的跟着一起变），整面墙看着是歪的。用户这天的要求是"严格控制每个
-   阵容图的尺寸"，所以改成固定高度：框永远 200×160，多出来的高度交给下面的打分区
-   （`.shot-rate` 的 `margin-top:auto`），每张卡的打分区和评论行因此也落在同一条水平线上。 */
+   阵容图的尺寸"，所以改成固定高度：框永远 226×181，多出来的高度交给下面的打分区
+   （`.shot-rate` 的 `margin-top:auto`），每张卡的打分区和评论行因此也落在同一条水平线上。
+
+   框宽不用写死：它是卡里唯一的横向铺满元素（flex 列 + 默认 stretch），
+   宽度自然等于卡内宽 226（228 减两条 1px 边框），这也是 wall-harness 那条
+   「图框宽 = 卡宽 − 2」的依据。
+   高 181 而不是 160：卡宽从 200 涨到 228，**比例仍是 5:4**（226÷1.25≈181）——
+   比例刻意不动，见 README「显示尺寸」一节（真图是竖版/宽版双峰分布，5:4 是折中）；
+   放大之后两种形状的可见面积各多约 30%。 */
 .shot-frame {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 160px;
+  height: 181px;
   background: var(--yw-ink-1000);
 }
-/* 和列表缩略图 .thumb 同尺寸、同 contain、同暗底：
-   超宽图（2.2:1）在这个框里是 200×90，上下留边 —— 要看细节点图放大（第 15 节）。
+/* 和列表缩略图 .thumb 同比例、同 contain、同暗底。
    contain 是**有意的**（cover 会把两侧的武将裁掉），见 README 的「显示尺寸」。 */
 .shot-frame img {
   display: block;
-  width: 200px;
-  height: 160px;
+  width: 100%;
+  height: 181px;
   object-fit: contain;
 }
 /* 阵容说明。卡片只有 200px 宽，而说明最长 1000 字，全摊出来会把整行卡片一起顶高
@@ -1003,9 +1194,9 @@ nav ul li,
    （实测 Firefox 140：padding:0 → 干净 5 行；padding:.5rem/…/.6rem → 漏半行）。
    padding 只留 0 就没事，左右留白交给 margin。 */
 .shot-note {
-  margin: 0.5rem 0.55rem 0.6rem;
+  margin: 0.55rem 0.65rem 0.65rem;
   padding: 0;
-  font-size: 0.78rem;
+  font-size: var(--yw-fs-sm);
   line-height: 1.5;
   color: var(--yw-text-dim);
   white-space: pre-wrap;
@@ -1031,10 +1222,11 @@ nav ul li,
    -------------------------------------------------------------------------- */
 .entry-card {
   padding: 1.05rem 1.2rem 1.15rem;
-  margin-bottom: 1.2rem;
-  background: var(--yw-ink-800);
+  margin-bottom: var(--yw-sp-6);
+  background: var(--yw-surface-2);
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius-lg);
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
 }
 .entry-card > header {
   display: flex;
@@ -1049,21 +1241,25 @@ nav ul li,
   border-left: 3px solid var(--yw-gold);
   background:
     linear-gradient(100deg, var(--yw-gold-a10), transparent 45%),
-    var(--yw-ink-800);
+    var(--yw-surface-2);
 }
 .rank-no {
   font-family: var(--yw-serif);
-  font-size: 1.15rem;
+  font-size: var(--yw-fs-2xl);
+  font-weight: 700;
   color: var(--yw-gold);
+  font-variant-numeric: tabular-nums;
 }
 .score-pill {
   font-family: var(--yw-serif);
+  font-size: var(--yw-fs-lg);
   font-weight: 700;
   background: var(--yw-gold-a20);
   border: 1px solid var(--yw-gold-a35);
   color: var(--yw-gold-lt);
   border-radius: 999px;
-  padding: 0.1rem 0.7rem;
+  padding: 0.12rem 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 .entry-shots {
   display: flex;
@@ -1086,12 +1282,14 @@ nav ul li,
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-top: 0.3rem;
-  font-size: 0.78rem;
+  margin-top: var(--yw-sp-2);
+  font-size: var(--yw-fs-sm);
   color: var(--yw-text-dim);
 }
 .lineup-note {
-  margin-top: 0.8rem;
+  margin-top: var(--yw-sp-5);
+  font-size: var(--yw-fs-md);
+  color: var(--yw-text-dim);
   white-space: pre-wrap;
 }
 .fix-form {
@@ -1132,11 +1330,24 @@ nav ul li,
 }
 .stat {
   margin: 0;
-  padding: 0.9rem 0.7rem;
+  padding: 0.95rem 0.7rem 0.8rem;
   text-align: center;
-  background: linear-gradient(160deg, var(--yw-ink-700), var(--yw-ink-800));
+  background: linear-gradient(160deg, var(--yw-surface-3), var(--yw-surface-2));
   border: 1px solid var(--yw-line);
   border-radius: var(--yw-radius);
+  box-shadow: var(--yw-hi), var(--yw-shadow-1);
+  position: relative;
+  overflow: hidden;
+}
+/* 每格顶上压一道金发丝 —— 六格并排时这一排"是同一组数"才看得出来 */
+.stat::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18%;
+  right: 18%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--yw-gold-a35), transparent);
 }
 .stat-num {
   display: block;
@@ -1145,13 +1356,14 @@ nav ul li,
   font-weight: 700;
   color: var(--yw-gold-lt);
   line-height: 1.25;
+  font-variant-numeric: tabular-nums;
 }
 .stat-label {
   display: block;
-  font-size: 0.76rem;
+  font-size: var(--yw-fs-sm);
   color: var(--yw-text-dim);
   letter-spacing: 0.1em;
-  margin-top: 0.15rem;
+  margin-top: 0.2rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -1159,14 +1371,15 @@ nav ul li,
    -------------------------------------------------------------------------- */
 .invite-code {
   font-family: var(--pico-font-family-monospace);
-  font-size: 1.35rem;
+  font-size: var(--yw-fs-2xl);
   font-weight: 700;
   letter-spacing: 0.18em;
   color: var(--yw-gold-lt);
-  background: var(--yw-ink-700);
+  background: var(--yw-surface-3);
   border: 1px dashed var(--yw-gold-a35);
   border-radius: var(--yw-radius);
-  padding: 0.2rem 0.8rem;
+  padding: 0.25rem 0.85rem;
+  box-shadow: var(--yw-hi);
 }
 .copy-row {
   display: flex;
@@ -1176,7 +1389,7 @@ nav ul li,
 .copy-row input {
   margin: 0;
   font-family: var(--pico-font-family-monospace);
-  font-size: 0.85rem;
+  font-size: var(--yw-fs-md);
   color: var(--yw-text-dim);
 }
 .copy-row button {
@@ -1206,10 +1419,11 @@ nav ul li,
    13. 页脚
    -------------------------------------------------------------------------- */
 footer.container {
-  margin-top: 3rem;
-  padding-top: 1.3rem;
+  margin-top: var(--yw-sp-8);
+  padding-top: var(--yw-sp-6);
   border-top: 1px solid var(--yw-line-soft);
   text-align: center;
+  font-size: var(--yw-fs-sm);
 }
 
 /* --------------------------------------------------------------------------
@@ -1236,7 +1450,7 @@ footer.container {
   display: flex;
   flex-direction: column;
   margin-top: auto;
-  padding: 0.45rem 0.5rem 0.55rem;
+  padding: 0.5rem 0.6rem 0.6rem;
   border-top: 1px solid var(--yw-line-soft);
 }
 /* 打分区下半截：点了别的档位就改分那句提示 + 五个按钮（封盘时是没有 form 的
@@ -1258,12 +1472,33 @@ footer.container {
      再往上长（注册上限 12 字）怎么省都放不下，那时由 .rate-who 的省略号兜底。 */
   gap: 0.24rem;
   margin: 0 0 0.15rem;
-  font-size: 0.75rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1.4;
   /* nowrap：均分/最高/最低**各占一行**就是排版的全部目的（用户 2026-10-14 的要求），
      折成两行的话同一排卡的打分区又参差了。挤不下时由 .rate-who 自己省略，
      不是把名字挤到下一行去。 */
   flex-wrap: nowrap;
+}
+/* ★ 第一行「均分」是主角（2026-10-16 改版）。
+   从前三行一样重：`327.8` 和 `190` 看上去同等重要，一张卡上没有视觉焦点。
+   现在均分是宋体大数字 + 亮金，最高/最低退成两行小字副信息。
+   ⚠️ 两条不能忘：
+     ① **字号涨了 line-height 必须跟着涨**。wall-harness 判「打分区每条只占一行」
+        用的是"这一行的实际高 ≤ 1.6 × 它自己的 line-height"。只把 .rate-v 调大、
+        行高不动，这条就会红 —— 而且它报的是"有一行折了"，看着像排版坏了。
+     ② 用 :first-of-type 而不是往模板里加类。没人打分的卡上第一行是
+        `.rate-line.is-empty`（「还没有人打分」），那行不能当主角，所以排除掉。 */
+.rate-line:first-of-type:not(.is-empty) {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin-bottom: 0.3rem;
+}
+.rate-line:first-of-type:not(.is-empty) .rate-k {
+  color: var(--yw-text-dim);
+}
+.rate-line:first-of-type:not(.is-empty) .rate-v {
+  font-size: 1.3rem;
+  line-height: 1.05;
 }
 /* 三行里的最后一行不留底边距。
    ⚠️ 是 `:last-of-type` 不是 `:last-child`：2026-10-14 起 .shot-rate 的最后一个子元素
@@ -1273,22 +1508,24 @@ footer.container {
   margin-bottom: 0;
 }
 .rate-line.is-empty {
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   color: var(--yw-text-mute);
 }
 /* 「均分 / 最高 / 最低」三个标签。**不能用 flex 的定宽基准**：
    实测 `flex: 0 0 2em` 时 2 个汉字正好等于 2em，差一点点就会折成「均」/「分」两行。
-   交给 max-content，三个标签都是 2 个字，宽度自然一样，数字照样对齐。 */
+   交给 max-content，三个标签都是 2 个字，宽度自然一样，数字照样对齐。
+   ⚠️ 这个字号是 comment-harness 的基准：评论 summary 的字号必须落在它的
+   0.9~1.0 倍（+0.5px）之间 —— 改它就得连 `details.cmt > summary` 一起改。 */
 .rate-k {
   flex: 0 0 auto;
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   letter-spacing: 0.02em;
   white-space: nowrap;
   color: var(--yw-text-mute);
 }
 .rate-v {
   font-family: var(--yw-serif);
-  font-size: 0.95rem;
+  font-size: var(--yw-fs-lg);
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
   color: var(--yw-gold-lt);
@@ -1297,12 +1534,12 @@ footer.container {
 .rate-v.is-lo { color: var(--yw-text-dim); }
 /* 打分人（views/partials/name-list.ejs）。**只印并列里的第一个名字**，
    所以这就是一个名字 + 一个慧眼圆框。
-   nowrap + 省略号：这一行留给人名的只有 100px 上下（实测 5 个字的名字加圆框正好 99px），
-   而 12 个字的昵称（注册上限）加圆框要 200px 往上 —— 宁可把圆框切掉，也不许它折成
-   第二行，一行是这个版面的硬要求（见上面 .rate-line 的 nowrap）。 */
+   nowrap + 省略号：这一行留给人名的只有 110px 上下，而 12 个字的昵称（注册上限）
+   加圆框要 220px 往上 —— 宁可把圆框切掉，也不许它折成第二行，
+   一行是这个版面的硬要求（见上面 .rate-line 的 nowrap）。 */
 .rate-who {
   min-width: 0;
-  font-size: 0.7rem;
+  font-size: var(--yw-fs-2xs);
   color: var(--yw-text-mute);
   white-space: nowrap;
   overflow: hidden;
@@ -1315,26 +1552,40 @@ footer.container {
   white-space: nowrap;
 }
 
-/* 五个档位。flex:1 1 0 + min-width:0 让它们等分整行：
-   200px 卡内宽 184px，减去 4 个 0.2rem 间距，每格约 34px，
-   而「400」在 0.7rem 下约 19px，装得下。
+/* 五个档位。flex:1 1 0 + min-width:0 让它们等分整行。
    width:auto 不能省：Pico 给 button 默认 width:100%（见第 10 节的注释），
-   不覆盖的话每个按钮都想占满整行，flex 行会被挤成一列。 */
+   不覆盖的话每个按钮都想占满整行，flex 行会被挤成一列。
+
+   ★ 2026-10-16：默认改成**安静的描边小格**。从前五档是 Pico 的金色实心按钮，
+   一面墙 21 张卡就是 105 块金砖铺在那儿，把"均分"这个主角都盖住了。
+   现在默认是墨底 + 金字的细边小格，只有「我打的那一档」（.is-mine）才是亮的 ——
+   一眼扫过去，先看到的是分数，再看到的是"我投了什么"。 */
 .rate-form {
   display: flex;
   gap: 0.2rem;
-  margin: 0.45rem 0 0;
+  margin: 0.5rem 0 0;
 }
 .rate-form button.rate-tier {
   flex: 1 1 0;
   min-width: 0;
   width: auto;
   margin: 0;
-  padding: 0.18rem 0;
-  font-size: 0.7rem;
+  padding: 0.22rem 0;
+  font-family: var(--yw-sans);
+  font-size: var(--yw-fs-xs);
+  font-weight: 500;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
-  border-radius: 5px;
+  border-radius: 6px;
+  background-color: var(--yw-ink-700);
+  border: 1px solid var(--yw-line-2);
+  color: var(--yw-gold-lt);
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.rate-form button.rate-tier:hover:not(:disabled) {
+  background-color: var(--yw-gold-a20);
+  border-color: var(--yw-gold-a35);
+  color: var(--yw-gold-hi);
 }
 /* 这档名额投满了（db.RATE_QUOTA）：按钮**留着但点不动**——留着是因为五个格子
    等分整行，抽掉一个剩下的会变形；压暗是让它明显区别于旁边还能点的四个。
@@ -1351,7 +1602,7 @@ footer.container {
 .rate-form button.rate-tier.is-mine {
   background: var(--yw-gold-lt);
   border-color: var(--yw-gold-lt);
-  box-shadow: 0 0 0 2px var(--yw-gold-a35);
+  box-shadow: var(--yw-ring);
   font-weight: 700;
 }
 
@@ -1361,7 +1612,7 @@ footer.container {
   margin: 0.5rem 0 0;
   padding: 0.22rem 0.45rem;
   text-align: center;
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1.45;
   color: var(--yw-gold-lt);
   background: var(--yw-gold-a20);
@@ -1370,7 +1621,7 @@ footer.container {
 }
 .rate-mine b {
   font-family: var(--yw-serif);
-  font-size: 0.95rem;
+  font-size: var(--yw-fs-lg);
 }
 /* 打分区的一句说明，两种时候出现：「点别的档位就是改分」（投过之后）和
    「打分已截止，改不了」（整期封盘之后）。**单独一行**，不塞进上面那个色块 ——
@@ -1378,7 +1629,7 @@ footer.container {
 .rate-note {
   margin: 0.2rem 0 0;
   text-align: center;
-  font-size: 0.68rem;
+  font-size: var(--yw-fs-2xs);
   line-height: 1.3;
   color: var(--yw-text-mute);
 }
@@ -1403,17 +1654,26 @@ details.cmt {
   margin: 0;
 }
 details.cmt > summary {
-  padding: 0.4rem 0.5rem;
-  font-size: 0.72rem;          /* 和 .rate-who / .rate-k 同一档，不新造第四套小标签 */
+  padding: 0.45rem 0.6rem;
+  /* ⚠️ 这个字号必须和 `.rate-k` 同一档：comment-harness 有条断言量它俩
+     （区间是 .rate-k 的 0.9~1.0 倍 +0.5px）。那边是 --yw-fs-xs，这里就得是同一支。 */
+  font-size: var(--yw-fs-xs);
   line-height: 1.4;
   white-space: nowrap;         /* 「💬 3 条评论」不许折成两行 */
   overflow: hidden;
+  color: var(--yw-text-dim);
+  border-top: 1px solid var(--yw-line-soft);
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+details.cmt > summary:hover {
+  color: var(--yw-gold-lt);
+  background: var(--yw-gold-a06);
 }
 details.cmt[open] > summary {
   margin-bottom: 0;
 }
 .cmt-body {
-  padding: 0 0.5rem 0.55rem;
+  padding: 0 0.6rem 0.65rem;
 }
 /* 留言攒多了不能把整行卡片一起顶高（grid 会把同一行的卡拉成等高），
    超过 12rem 就在卡片内部滚。 */
@@ -1426,12 +1686,16 @@ details.cmt[open] > summary {
   list-style: none;
 }
 .cmt-item {
-  margin: 0 0 0.35rem;
-  font-size: 0.72rem;
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.35rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1.45;
+  border-bottom: 1px solid var(--yw-line-soft);
 }
 .cmt-item:last-child {
   margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 .cmt-meta {
   display: flex;
@@ -1441,7 +1705,7 @@ details.cmt[open] > summary {
      不能让它横向溢出 —— 卡是 overflow:hidden，溢出的部分直接看不见。 */
   flex-wrap: wrap;
   margin: 0;
-  font-size: 0.68rem;
+  font-size: var(--yw-fs-2xs);
   color: var(--yw-text-mute);
 }
 .cmt-who {
@@ -1457,11 +1721,13 @@ details.cmt[open] > summary {
   flex: 0 0 auto;
   margin: 0 0 0 auto;
 }
+/* ⚠️ 宽度有断言量着（comment-harness：删按钮必须 ≤30px，不能被 Pico 拉满整行），
+   所以内边距和字号都只能收着来。 */
 .cmt-del button {
   width: auto;
   margin: 0;
   padding: 0 0.2rem;
-  font-size: 0.66rem;
+  font-size: var(--yw-fs-2xs);
   line-height: 1.5;
   color: var(--yw-text-mute);
   background: none;
@@ -1481,7 +1747,7 @@ details.cmt[open] > summary {
 }
 .cmt-empty {
   margin: 0 0 0.4rem;
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
   color: var(--yw-text-mute);
 }
 .cmt-form {
@@ -1492,20 +1758,20 @@ details.cmt[open] > summary {
 .cmt-form input {
   width: 100%;
   min-width: 0;
-  margin: 0 0 0.3rem;
-  padding: 0.25rem 0.4rem;
-  font-size: 0.72rem;
+  margin: 0 0 0.35rem;
+  padding: 0.32rem 0.5rem;
+  font-size: var(--yw-fs-xs);
   line-height: 1.4;
 }
 .cmt-form button {
   width: 100%;
   margin: 0;
-  padding: 0.25rem 0;
-  font-size: 0.7rem;
+  padding: 0.3rem 0;
+  font-size: var(--yw-fs-xs);
 }
 .cmt-hint {
-  margin: 0.25rem 0 0;
-  font-size: 0.66rem;
+  margin: 0.3rem 0 0;
+  font-size: var(--yw-fs-2xs);
   color: var(--yw-text-mute);
 }
 
@@ -1531,11 +1797,22 @@ html.lb-lock {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(11, 9, 6, 0.92);        /* --yw-ink-1000 的 92% */
+  background: rgba(7, 5, 3, 0.93);         /* 比 --yw-ink-1000 再深一格：图才"浮"得起来 */
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   cursor: zoom-out;                        /* 点哪都能关，光标先说明这一点 */
 }
 .lightbox.is-on {
   display: flex;
+}
+/* 入场：淡入 + 轻微放大。160ms，够短，不挡手。
+   减弱动效那档由文件末尾的 prefers-reduced-motion 兜着。 */
+@keyframes yw-lb-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.lightbox.is-on .lb-fig {
+  animation: yw-lb-in 0.16s ease-out;
 }
 /* 图 + 说明。上限卡在容器上，图本身再按视口缩（见下面 .lb-img） */
 .lightbox .lb-fig {
@@ -1559,12 +1836,13 @@ html.lb-lock {
   object-fit: contain;
   background: var(--yw-ink-1000);
   border: 1px solid var(--yw-line);
-  border-radius: 4px;
+  border-radius: 6px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
 }
 .lightbox .lb-cap {
   max-width: 90vw;
   text-align: center;
-  font-size: 0.82rem;
+  font-size: var(--yw-fs-md);
   line-height: 1.5;
   color: var(--yw-text-dim);
 }
@@ -1574,7 +1852,7 @@ html.lb-lock {
 }
 .lightbox .lb-hint {
   display: block;
-  font-size: 0.75rem;
+  font-size: var(--yw-fs-xs);
   color: var(--yw-text-mute);
 }
 
@@ -1592,11 +1870,13 @@ html.lb-lock {
   padding: 0;
   line-height: 1;
   font-size: 1.2rem;
-  color: var(--yw-text-dim);
-  background: var(--yw-ink-800);
-  border: 1px solid var(--yw-line);
+  color: var(--yw-text);
+  background: rgba(25, 21, 16, 0.92);      /* --yw-surface-2 的 92%：压在图上也要看得清 */
+  border: 1px solid var(--yw-line-2);
   border-radius: 50%;
+  box-shadow: var(--yw-hi), 0 6px 18px rgba(0, 0, 0, 0.45);
   cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
 }
 .lightbox .lb-btn:hover {
   color: var(--yw-gold-lt);
@@ -1657,7 +1937,7 @@ details.report[open] > summary {
   margin: 0 0 0.5rem;
   padding: 0.6rem 0.7rem;
   font-family: var(--pico-font-family-monospace);
-  font-size: 0.8rem;
+  font-size: var(--yw-fs-md);
   line-height: 1.7;
   /* **故意不写 white-space**：就用默认的软折行。战报每行都很短，宽屏上根本折不到；
      手机上万一折了，也远比横向滚动好读。而复制出去的值不受显示折行影响 ——
@@ -1674,17 +1954,22 @@ details.report[open] > summary {
 .report-actions button {
   width: auto;
   margin: 0;
-  padding: 0.3rem 0.9rem;
-  font-size: 0.8rem;
+  padding: 0.32rem 0.95rem;
+  font-size: var(--yw-fs-md);
 }
 .report-actions small {
-  font-size: 0.72rem;
+  font-size: var(--yw-fs-xs);
 }
 
 /* --------------------------------------------------------------------------
    18. 窄屏
    -------------------------------------------------------------------------- */
-@media (max-width: 640px) {
+@media (max-width: 700px) {
+  /* Pico 在 <576px 那档把 .container 的 padding 归零了（靠 max-width 当留白），
+     手机上那等于内容贴着屏幕边。这里自己补回来。 */
+  main.container {
+    padding-inline: var(--yw-sp-5);
+  }
   h2 {
     font-size: 1.35rem;
   }
@@ -1696,9 +1981,10 @@ details.report[open] > summary {
     flex-wrap: wrap;
     gap: 0.4rem;
   }
+  /* 触区放大一点：手机上这些 pill 是要用手指点的 */
   .topnav ul:last-child li a {
-    padding: 0.22rem 0.5rem;
-    font-size: 0.88rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.92rem;
   }
   .topnav .brand {
     letter-spacing: 0.1em;
@@ -1710,57 +1996,78 @@ details.report[open] > summary {
   .entry-shots img {
     max-width: 100%;
   }
-  /* 窄屏同样按 1.25:1 缩，桌面 200×160 → 手机 120×96。
-     420px 的封顶在 120px 下变成一行三张，表格靠 .table-wrap 横向滚动兜底。 */
+  /* 窄屏缩略图：桌面 140×112 → 手机 104×84（同 5:4）。 */
   .thumb {
-    width: 120px;
-    height: 96px;
+    width: 104px;
+    height: 84px;
   }
-  /* 阵容墙同理：桌面每张 200×160，手机上 150×120，一排两张正好铺满 375px 视口。
-     图框同样是写死高度的（桌面那档的注释里有原因）。 */
+  /* ★ 阵容墙在手机上**改成一行一张的横排卡**（2026-10-16 改版）。
+     从前是两列 150px 的小竖卡（现在这档断点从 640 挪到 700）：
+     昵称被切、三行小字糊成一团、五个档位按钮贴成一条，手机上基本读不了。
+     现在整行一张卡：图在左上、顶栏（名次/章/昵称/积分）当它右边的一块面板，
+     打分区、说明、评论都通栏 —— 打分区通栏之后那三行不再需要缩字号，
+     手机上反而比桌面还宽裕。
+
+     ⚠️ 这套版面是**断言量着的**（见 .devlocal/preview/lb/wall-harness.js 的手机那一支）：
+       · 图框写死 168×134（5:4，和桌面同一套比例；比从前的 150×120 大约 30%，
+         因为整行都是它的，不必再挤）
+       · 一行一张 ⇒ 桌面那几条"同一排各块齐平"在单列下无从谈起，harness 走另一支
+       · `details.cmt` 必须**通栏**：comment-harness 量"输入框宽度贴合卡片"
+         （[卡宽−40, 卡宽] 这个区间），把它留在一列里会直接红
+       · 顶栏的 gap 仍是 0.4rem（title-harness 那条"章和昵称间距 0–12px"照旧管这里）
+     flex 而不是 grid：靠 `flex-basis:100%` 让打分区/说明/评论各自换行，
+     顶栏则**自动被 stretch 撑到和图框一样高**（flex 的默认行为），
+     于是图右边不会空出一块，也不用写 grid-template-areas。 */
   .shot-grid {
-    grid-template-columns: repeat(auto-fill, 150px);
+    grid-template-columns: 1fr;
+  }
+  .shot-grid.is-cols .shot-col {
+    flex: 1 1 auto;   /* 单列要占满整行（桌面是多列，各自 flex:0 0 auto） */
   }
   .shot-card {
-    width: 150px;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
+  .shot-head {
+    /* ★ `flex-basis: 0` 而不是 auto —— 这一条是量出来的，不是随手写的：
+       flex 的**换行是在弹性伸缩之前**按各自的基础尺寸决定的。写成 auto 时，
+       顶栏的基础尺寸就是它内容的宽度（长昵称 + 两枚称号章能到 200px 上下），
+       168 + 200 > 卡内宽 → 顶栏被挤到**第二行**去（图右边空出一大块、
+       那一格也不再和图框等高）。basis 归零之后它永远留在第一行，再 grow 填满。 */
+    flex: 1 1 0;
+    min-width: 0;
+    align-content: center;   /* 顶栏被 stretch 撑到和图框一样高，内容要居中才像一块面板 */
+    border-bottom: 0;
+  }
+  /* ★ 图挪到**左边**。卡里的 DOM 顺序是「顶栏 → 图框 → 说明 → 打分区 → 评论」
+     （桌面是竖着一列，正好），横过来之后顶栏会跑到图前面去，所以用 order 把图提到最前。
+     只动视觉顺序，DOM 顺序一个字没动 —— wall-harness 那条「DOM 顺序 = 按列装」量的
+     就是 DOM，不该被这条影响。 */
   .shot-frame {
-    height: 120px;
+    order: -1;
+    flex: 0 0 168px;
+    width: 168px;
+    height: 134px;
   }
   .shot-frame img {
-    width: 150px;
-    height: 120px;
+    width: 168px;
+    height: 134px;
   }
-  /* 打分：150px 的卡内宽只剩约 137px，五档每格约 25px，
-     字号收到 0.66rem（「400」约 18px）才不溢出。 */
   .shot-rate {
-    padding: 0.4rem 0.4rem 0.5rem;
+    flex: 1 1 100%;
+    margin-top: 0;   /* 桌面靠它把打分区按到卡底；横排里它自己就是新的一行 */
   }
-  .rate-form button.rate-tier {
-    font-size: 0.66rem;
+  .shot-note {
+    flex: 1 1 100%;
   }
-  /* 均分/最高/最低这三行也各收一档。桌面 178px 的行宽到这儿只剩 135px，
-     而「最高 400 昵称(等级)」是全卡最长的一行 —— 实测 5 个字的名字
-     （「善｜赖酒王」）在 375px 下超出去 7px，圆框当场被省略号吃掉。
-     四处各收一点点（数字 / 标签 / 名字 / 那个圆框）正好把这 7px 找回来：
-     名字和等级在手机上都能留住，超出的只剩 6 个字以上的长昵称。 */
-  .rate-k {
-    font-size: 0.68rem;
+  details.cmt {
+    flex: 1 1 100%;
   }
-  .rate-v {
-    font-size: 0.9rem;
-  }
-  .rate-who {
-    font-size: 0.66rem;
-  }
-  .rate-who .eye {
-    font-size: 0.64rem;
-    padding: 0 0.22em;
-  }
-  /* 评论：同样是 150px 的卡，标题行和输入框都再收一档 */
+  /* 评论：卡片通栏了，输入框跟着放开，但标题行仍收一档 ——
+     它要和卡片里其它小字（.rate-k）同一档，comment-harness 量着。 */
   details.cmt > summary {
-    padding: 0.35rem 0.4rem;
-    font-size: 0.68rem;
+    padding: 0.35rem 0.6rem;
   }
   .cmt-body {
     padding: 0 0.4rem 0.45rem;
