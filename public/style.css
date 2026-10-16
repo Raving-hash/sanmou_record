@@ -1855,6 +1855,39 @@ details.cmt[open] > summary {
   border-color: color-mix(in srgb, var(--yw-gold) 55%, var(--yw-text-mute));
 }
 
+/* ---- 搭配评级的 T 牌（2026-10-16 晚加，规则见 db.lineupTier）。
+   四档借用色板上现成的四支：金（和 T0 胶囊同色，都表示"最好"）、亮蓝、亮银、
+   最弱的 T3 走灰 —— 这四支正好也是慧眼等级圆框那四档用的，全站一套颜色语言。
+   **一律挂牌**（用户定的），所以 T3 也有一枚，只是最不起眼。 ---- */
+.reco-tier {
+  flex: none; padding: 0.05rem 0.35rem; border-radius: 4px;
+  font-weight: 700; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--yw-line); color: var(--yw-text-dim); background: var(--yw-ink-700);
+}
+.reco-tier.is-t0 {
+  color: var(--yw-gold-lt); border-color: var(--yw-gold);
+  background: color-mix(in srgb, var(--yw-gold) 16%, transparent);
+}
+.reco-tier.is-t1 {
+  color: var(--yw-azure-lt); border-color: color-mix(in srgb, var(--yw-azure-lt) 60%, transparent);
+  background: color-mix(in srgb, var(--yw-azure-lt) 12%, transparent);
+}
+.reco-tier.is-t2 {
+  color: var(--yw-silver); border-color: color-mix(in srgb, var(--yw-silver) 55%, transparent);
+  background: color-mix(in srgb, var(--yw-silver) 10%, transparent);
+}
+/* T3 = 默认档，灰着；它只是"这套没什么搭配"，不该抢眼 */
+.reco-tier.is-t3 { color: var(--yw-text-mute); background: none; }
+/* 存疑（还有机器填的格子没人核对）：**虚框 + 压暗**，和胶囊那一套完全一样。
+   为什么牌子也要标：它比胶囊更容易骗人 —— 少认一个武将、多认一个武将，级就变了。 */
+.reco-tier.is-auto {
+  border-style: dashed; border-color: var(--yw-text-mute);
+  background: none;
+}
+.reco-tier.is-auto.is-t0 { color: color-mix(in srgb, var(--yw-gold-lt) 70%, var(--yw-text-mute)); }
+.reco-tier.is-auto.is-t1 { color: color-mix(in srgb, var(--yw-azure-lt) 70%, var(--yw-text-mute)); }
+.reco-tier.is-auto.is-t2 { color: color-mix(in srgb, var(--yw-silver) 70%, var(--yw-text-mute)); }
+
 /* 纠正面板 */
 .reco-box { margin-top: 0.35rem; font-size: var(--yw-fs-2xs); }
 .reco-tip { color: var(--yw-text-mute); margin: 0.35rem 0 0.5rem; line-height: 1.5; }

@@ -234,6 +234,88 @@ db.T0_HEROES = new Set([
 ]);
 db.isT0 = (key) => db.T0_HEROES.has(key);
 
+// ★ 阵容评级的底表：**双人搭配**的等级（用户 2026-10-16 手工给的 23 组）。
+// 注意它和上面那份 T0 名单**不是一回事**：T0_HEROES 是"单个武将够不够强"（卡上金色高亮用），
+// 这里是"两个武将凑在一起算不算一套好搭配"（评级用）。一个武将可以既在 T0 名单里、
+// 又出现在某几组搭配里，两者各算各的。
+//
+// ⚠️ **命中要求两人在同一支部队**（用户 2026-10-16 明确定的口径：是"搭配"，不是"凑齐了"）——
+//    所以这个表不能只用 key 的集合去查，得按 slot 分组，见 db.lineupTier。
+// ⚠️ 同名不同人靠 key 分：`zhu_ge_liang2` 是 SP诸葛亮（用户写的「sp诸葛」），
+//    `zhou_yu2` 是 SP周瑜，`sun_jian2` 是群雄孙坚 —— 用户给的名单里就是这么区分的。
+// ⚠️ 没提到的组合一律当 T3。
+// 改这份表 = 改评级，只改这一处；`.devlocal/test/test-heroes.js` 第七节拿它当输入做断言。
+// 一名一组写清楚（key + 中文对照），方便和用户给的那份名单逐行对着看。
+const tierPairs = (tier, list) => list.map(([a, b]) => ({ a, b, tier }));
+db.LINEUP_PAIRS = [
+  ...tierPairs(0, [   // —— T0（11 组）——
+    ['cao_pi', 'si_ma_yi'],           // 曹丕 + 司马懿
+    ['zhang_chun_hua', 'si_ma_yi'],   // 张春华 + 司马懿
+    ['zhang_chun_hua', 'wang_yi'],    // 张春华 + 王异
+    ['zhu_rong_fu_ren', 'meng_huo'],  // 祝融夫人 + 孟获（用户写的是「祝融夫人+」，名字没写完，问过是孟获）
+    ['zhu_rong_fu_ren', 'diao_chan'], // 祝融夫人 + 貂蝉
+    ['sun_quan', 'lu_xun'],           // 孙权 + 陆逊
+    ['zuo_ci', 'sun_jian2'],          // 左慈 + 群雄孙坚
+    ['zhong_hui', 'jiang_wei'],       // 钟会 + 姜维
+    ['zhu_ge_liang2', 'jiang_wei'],   // SP诸葛亮 + 姜维
+    ['zhu_ge_liang2', 'ma_chao'],     // SP诸葛亮 + 马超
+    ['huang_pu_song2', 'yuan_shu'],   // 皇甫嵩 + 袁术
+  ]),
+  ...tierPairs(1, [   // —— T1（8 组）——
+    ['zuo_ci', 'zhang_ning'],         // 左慈 + 张宁
+    ['zhou_yu2', 'zhu_ge_liang'],     // SP周瑜 + 诸葛亮（**普通的**那个，不是 SP）
+    ['le_jin', 'zhang_liao'],         // 乐进 + 张辽
+    ['yuan_shao', 'jiang_wei'],       // 袁绍 + 姜维
+    ['yuan_shao', 'ma_chao'],         // 袁绍 + 马超
+    ['hao_zhao', 'si_ma_yi'],         // 郝昭 + 司马懿
+    ['zhao_yun', 'gan_fu_ren'],       // 赵云 + 甘夫人
+    ['zhao_yun', 'liu_chan'],         // 赵云 + 刘禅
+  ]),
+  ...tierPairs(2, [   // —— T2（4 组）——
+    ['guo_jia', 'xun_you'],           // 郭嘉 + 荀攸
+    ['zhang_fei', 'wei_yan'],         // 张飞 + 魏延
+    ['le_jin', 'wang_shuang'],        // 乐进 + 王双
+    ['ma_teng', 'ma_yun_lu'],         // 马腾 + 马云禄
+  ]),
+];
+
+// 一套阵容的评级（用户 2026-10-16 定的规则，从高往低依次判，命中一条就停）：
+//   T0 ← 2 组 T0 搭配，或 3 组 T1
+//   T1 ← T0 和 T1 都有，或 2 组 T1，或 3 组 T2
+//   T2 ← 1 组 T0，或 T1 和 T2 都有
+//   T3 ← 其余（默认档）
+// 入参是**能改这张卡的人看到的那份武将表**（db.getSeasonHeroData 的 confirmed，
+// 每项带 key / slot / name / variant / auto）。返回 { tier: 'T0'..'T3', pairs: [...] }，
+// pairs 是命中的搭配（模板拿去当 title，让人看得见"凭什么给这个级"）。
+// ⚠️ 只认**同一支部队**（slot 1-3 = 部队一，4-6 = 二，7-9 = 三）里的两个人。
+db.lineupTier = (heroes) => {
+  const units = new Map();               // 部队号 → 这支部队里的 key
+  const label = new Map();               // key → 显示名（拼 title 用）
+  for (const h of heroes || []) {
+    if (!h || !h.key || !h.slot) continue;
+    label.set(h.key, (h.variant || '') + h.name);
+    const u = Math.floor((h.slot - 1) / 3);
+    if (!units.has(u)) units.set(u, new Set());
+    units.get(u).add(h.key);
+  }
+  const hits = [[], [], []];             // tier 0/1/2 各命中了几组
+  for (const p of db.LINEUP_PAIRS) {
+    for (const keys of units.values()) {
+      // 两人都在这一支部队里才算 —— 同一个 key 在一套阵容里只可能出现一次，
+      // 所以一组搭配最多命中一支部队，命中了就跳出，不用继续找。
+      if (keys.has(p.a) && keys.has(p.b)) {
+        hits[p.tier].push(`${label.get(p.a)} + ${label.get(p.b)}`);
+        break;
+      }
+    }
+  }
+  const n = hits.map((list) => list.length);
+  const tier = (n[0] >= 2 || n[1] >= 3) ? 'T0'
+    : ((n[0] && n[1]) || n[1] >= 2 || n[2] >= 3) ? 'T1'
+      : (n[0] || (n[1] && n[2])) ? 'T2' : 'T3';
+  return { tier, pairs: [...hits[0], ...hits[1], ...hits[2]] };
+};
+
 // 识别效果的统计（/admin 的「阵容识别」块）。用户要的"整理反思、定期修复"就落在这儿。
 //
 // ⚠️ 2026-10-16 改过一次口径，**改的原因是旧口径在自我美化**：
@@ -305,11 +387,19 @@ db.getSeasonHeroData = (seasonId, editableEntryIds) => {
   // 从 2026-10-16 起这一份**不只是"玩家确认过的"了**：机器自动填的也在里面
   // （用户定的是"含机器填的对所有人可见，标出是机器填的"）。
   // 靠 source 分辨：'auto' = 机器填的、还没人核对过 → 卡上打「待核对」标记。
+  // ★ 只认**卡上摊开的那张图**（第一张，按 id）。为什么必须写死这一条：
+  //   老数据里一个 entry 可能有两张阵容图（两套不同的阵容），从前这里有 entry 就收，
+  //   于是那三张卡的武将行是**两张图拼起来**的。评级要数"同一支部队里的两个人"，
+  //   拼起来数就是把两套阵容的部队搅在一块儿 —— 必然算出个假的 T0。
+  //   面板那边（下面的 guesses）本来就是按 filename 查的，现在两边口径一致了。
   const rows = db.prepare(`
-    SELECT g.entry_id, g.source, h.key, h.name, h.faction, h.arm, h.variant
+    SELECT g.entry_id, g.slot, g.source, h.key, h.name, h.faction, h.arm, h.variant
     FROM hero_guesses g JOIN heroes h ON h.key = g.chosen_key
     JOIN entries e ON e.id = g.entry_id
-    WHERE e.season_id = ? ORDER BY h.sort`).all(seasonId);
+    WHERE e.season_id = ?
+      AND g.filename = (SELECT li.filename FROM lineup_images li
+                        WHERE li.entry_id = g.entry_id ORDER BY li.id LIMIT 1)
+    ORDER BY h.sort`).all(seasonId);
   for (const r of rows) {
     if (!confirmed.has(r.entry_id)) confirmed.set(r.entry_id, []);
     const list = confirmed.get(r.entry_id);
@@ -318,7 +408,9 @@ db.getSeasonHeroData = (seasonId, editableEntryIds) => {
     // 重复时**人工的那条赢**：不能因为机器也猜了这个武将，就把人核对过的标记冲掉。
     const hit = list.find((h) => h.key === r.key);
     if (hit) { if (!auto) hit.auto = false; continue; }
-    list.push({ key: r.key, name: r.name, faction: r.faction, arm: r.arm, variant: r.variant, auto });
+    // `slot` 是给**评级**用的（db.lineupTier 要按部队分组：1-3 / 4-6 / 7-9）
+    list.push({ key: r.key, name: r.name, faction: r.faction, arm: r.arm,
+                variant: r.variant, slot: r.slot, auto });
   }
 
   const guesses = new Map();
@@ -425,6 +517,8 @@ db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
 
   // 阵容识别结果（2026-10-16）。同样一次查回来挂到卡上。
   // 能改这张卡的人 = 本人或管理员 —— 只有他们才需要看到候选 JSON（见 db.getSeasonHeroData）。
+  // ⚠️ `heroes` 这一列从此每项都带 `slot`（评级要按部队分组）且**只含卡上那张图**的
+  //    （老数据里一个 entry 可能有两张图，见 getSeasonHeroData 里那段）。
   const editable = rows.filter((r) => r.user_id === viewerId || isAdmin).map((r) => r.id);
   const heroData = db.getSeasonHeroData(seasonId, editable);
 

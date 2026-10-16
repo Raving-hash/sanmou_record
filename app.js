@@ -100,6 +100,11 @@ app.use((req, res, next) => {
   // 这个武将 key 在不在 T0 名单里（阵容卡上的高亮用，见 partials/reco.ejs）。
   // 名单本体是 db.js 的 T0_HEROES —— 单一真源，改动只改那一处。
   res.locals.isT0 = db.isT0;
+  // 这套阵容的搭配评级（T0~T3，见 db.lineupTier 的头注释 —— 底表是 db.LINEUP_PAIRS）。
+  // 和 isT0 一样是"单一真源 + 每请求现算"：它只吃传进去的武将表，没有状态。
+  // **注意它和 isT0 是两码事**：isT0 判"单个武将强不强"（金色高亮），
+  // 这个判"两个武将凑没凑成好搭配"（卡上那枚 T 牌），底表也是两份。
+  res.locals.lineupTier = db.lineupTier;
   // 武将库的显示名（variant + name），给「其他」输入框的补全名单用
   // （views/partials/lineup-gallery.ejs 的 <datalist>）。**拼法和候选按钮上印的、
   // 以及服务端反查用的那个字符串逐字一样**（db.findHeroesByName 的第一档就是它）——
