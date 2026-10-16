@@ -165,6 +165,11 @@ journalctl -u yanwu -f          # 看日志
 - **真实 IP 透传**：`limiter.js` 按 `req.ip` 记登录失败次数。IP 没还原的话，
   经 frp 进来的请求在 Node 眼里全是 `127.0.0.1`，任何人输错 10 次密码就会把**全站**锁 15 分钟。
   配置里用 `set_real_ip_from 127.0.0.1` + `real_ip_header X-Forwarded-For` 还原。
+- **反爬虫的执行部分**（2026-10-15 加）：`map $http_user_agent $ai_bot` 拦 AI 爬虫
+  （`if ($ai_bot) { return 403; }`），外加一道 `limit_req` 洪水保护。
+  声明部分不在这里 —— 那是 robots.txt，见下面的「反爬虫」一节。
+  ★ 这一节的「安装」要 root，**命令见 `deploy/DEPLOY.md`**：装完先 `nginx -t`，
+  通过了再 `reload`（`-t` 不过时 nginx 继续跑旧配置，站点不会掉）。
 
 只有 `/public`（CSS / JS）交给 nginx 直接发。`/uploads/<名字>` 现在**只剩一条 302 跳板**
 （在 Node 里，`routes/uploads.js`）：图片搬到 R2 之后页面上的链接全指向图床域名，
@@ -176,7 +181,7 @@ journalctl -u yanwu -f          # 看日志
 > 代价是这一跳过隧道（约 1.1s），但它只服务老书签。
 
 缓存头现在由**对象自身的元数据**管（PUT 那一刻由服务端签进签名，见「缓存头」一节），
-nginx 这边一个字都没加。
+nginx 这边一个缓存头都没加（它只加了上面那条反爬虫规则）。
 
 ---
 
@@ -1238,6 +1243,71 @@ EJS 解析 include 时**先相对本文件**（→ `views/partials/partials/eye`
 
 ---
 
+## 反爬虫（2026-10-15 加）
+
+起因是图片搬到 R2 之后**全部公开**（见上一节），而全站**一个有效的 robots.txt 都没有**。
+实测三条入口当时是：
+
+| 入口 | 那时 `/robots.txt` 返回什么 | 等于 |
+|---|---|---|
+| `www.raving-hash.top`（过 Cloudflare） | **302 → /login** | 爬虫拿不到规则 ⇒ 默认全允许 |
+| `mmm.raving-hash.top:18080`（直连，不过 Cloudflare） | 同上（同一个 Node 进程） | 同上 |
+| `img.raving-hash.top`（R2 图床） | 200，但正文是 Cloudflare 自动注入的 1248 字节**纯注释**，一条指令都没有 | 没有 `User-agent` 组 ⇒ 没有规则 ⇒ 默认全允许 |
+
+### ★ robots.txt 是按 origin 各管各的
+
+这是最容易搞错的一点：协议规定 **scheme + host + port** 才算一个 origin，
+robots.txt 只管自己那个 origin。所以本站的爬虫策略**天然是两份**，写一份管不了另一个：
+
+| | 站点 | 图床 |
+|---|---|---|
+| 放哪 | 一个普通的 Express 路由（`routes/public.js` 的 `GET /robots.txt`） | **R2 桶里的一个对象**（图床前面没有 nginx，也不经过本站进程） |
+| 怎么装 | 跟着代码发布走 | `node --env-file=.env scripts/put-robots.js`（**仓库之外的状态**，见 `deploy/DEPLOY.md`） |
+| 正文 | `robots.js` 的 `SITE` | `robots.js` 的 `IMAGE` |
+
+两个页面入口（80 隧道 / 18080 直连）共用同一个 Node 进程，所以**一份就够**。
+
+> ⚠️ **`GET /robots.txt` 必须挂在 `requireLogin` 之前**（它现在在 `routes/public.js` 里，
+> 而那个文件正挂在前面）。挂到后面会变成 302 到 /login —— 而爬虫拿不到 robots.txt 时
+> 的默认是"全允许"（RFC 9309：4xx 视为无限制），那正是上面表格里那个坏状态，
+> 等于这份文件白写。`test-guest.js` 专门盯着这条。
+
+### 两份的口径**故意相反**
+
+站点**放行搜索引擎、挡掉 AI 爬虫**；图床**一律不爬**。
+「站点能搜到」不等于「成员那 54 张原图该进图片搜索」—— 图片一旦被收录就会被缓存住、
+撤不回来（`deploy/DEPLOY.md`「安全提醒」第 4 条讲的就是这件事）。
+所以 `robots.js` 里是两段**不一样的**正文，别为了"统一"把它们合并。
+`test-guest.js` 里有两条断言分别锁住这两份的相反口径。
+
+AI 爬虫名单按 2026 年的三个档次分组（`robots.js` 里逐条列出了）：
+训练类（`GPTBot`/`ClaudeBot`/`CCBot`/`Bytespider`…）、AI 搜索类（`OAI-SearchBot`/`PerplexityBot`…）、
+用户触发类（`ChatGPT-User`/`Claude-User`…）。
+
+> ★ `Google-Extended` 与 `Applebot-Extended` **只写在 robots.txt 里**，nginx 的 `map` 里没有：
+> 它们是 robots.txt 专用的"训练开关"，**不是会出现在日志里的 UA**（真身是
+> `Googlebot`/`Applebot`），放 `map` 里永远匹配不上。反过来也不能拿这两个词去拦
+> `Googlebot` —— 那就把搜索引擎一起挡了。
+
+### 执行层：nginx 侧
+
+robots.txt 只是**声明**（RFC 9309 是自愿遵守的），不守规矩的爬虫根本不看。
+所以同一套口径在 nginx 里再做一遍，配置在 `deploy/nginx-yanwu.conf`：
+
+- `map $http_user_agent $ai_bot { … }` + `if ($ai_bot) { return 403; }` —— 命中的 AI 爬虫
+  连 Node 都不进。名单与 `robots.js` 一致，但**没有**上面那两个"开关"。
+  ★ `nginx` 侧刻意**没有** `Googlebot` / `Bingbot` / `Baiduspider` / `PetalBot`
+  （PetalBot 是华为的搜索引擎爬虫，不是 AI）—— 顺手把"像爬虫的"一起拦掉等于换了条口径。
+- `limit_req` 洪水保护。取值**故意很松**：经 Cloudflare 那条入口，nginx 还原出来的
+  `$remote_addr` 到底是真实用户还是 **CF 边缘 IP** 还没实测过；若是边缘 IP，则同一片边缘上
+  所有人**共用一个桶**，限严了就变成"一个人把一片朋友拖慢"（和当年"一人输错密码锁全站"
+  同一类 bug）。实测记录与取值理由都写在配置文件里。
+
+> **这一节的安装要 root**，我这边做不了（sudo 白名单只放了 `systemctl … yanwu`）。
+> 命令在 `deploy/DEPLOY.md`：装 → `nginx -t` → 通过了才 `reload`。
+
+---
+
 ## 评论（阵容卡下面的短留言）
 
 2026-10-14 加。每套阵容的卡最下面多一行 `💬 3 条评论`，点开是个原生 `<details>`，
@@ -1655,6 +1725,22 @@ node --env-file=.env scripts/r2-pull.js --dest uploads
 - [ ] 成员自己开 `/wall` → 和游客看到的一样（用来核对），分数照样没有、打分按钮也不出
 - [ ] 没有进行中的期时开 `/wall` → 摆上一期已结算的阵容墙；一期都没办过 → 只有一句空态
 
+**反爬虫**
+- [ ] `curl -s http://<入口>/robots.txt` → **200 `text/plain`**，正文是站点那份。
+      ⚠️ 拿到 302 就是挂错位置了（必须在 `requireLogin` 之前），那时爬虫按"没有规则"处理
+- [ ] 站点那份里有 `Content-Signal: search=yes` 和一组组点名的 AI 爬虫；
+      **`User-agent: *` 那组里没有裸的 `Disallow: /`**（有就是把搜索引擎一起挡了）
+- [ ] 两个入口都要试：`www.raving-hash.top` 和 `mmm.raving-hash.top:18080`（同一个 Node，应一致）
+- [ ] `curl -s https://img.raving-hash.top/robots.txt` → 正文是**图床那份**（有裸的 `Disallow: /`）。
+      ⚠️ 拿到 1248 字节、全是 `#` 注释的，就是没盖掉 Cloudflare 自动注入的前言 ——
+      重跑 `scripts/put-robots.js`；还不行就去面板配 Content Signals 策略
+- [ ] 装完 nginx 后：`curl -A 'GPTBot' http://<入口>/wall` → **403**；
+      `curl -A 'Mozilla/5.0 (compatible; Googlebot/2.1)' …` → **200**（搜索引擎照常放行的验收）
+- [ ] 正常刷几下页面**不该**出 429（限速是防洪的，不是节流的）
+- [ ] ★ 看 `yanwu.access.log` 里新加的 `xff=` 字段：经 Cloudflare 那条入口的 `$remote_addr`
+      是**真实用户 IP** 还是 **CF 边缘 IP**？是边缘 IP 就要把限速放宽或只留 UA 拦截
+      （理由见「反爬虫」一节）
+
 **评论**
 - [ ] 不登录在 `/wall` 点某张卡的 `💬 …` → 展开，留一句话 → 页面回到那张卡，
       评论区**自己弹开**、留言在里面，署名「游客」
@@ -1693,9 +1779,10 @@ schema.sql        建表语句
 r2.js             Cloudflare R2 客户端：手写 SigV4（presign PUT / HEAD / 批量删 / 直传 / 拉取 / 列全量 / setCors）
 upload.js         图片的命名 / 签名 / 删除策略（命名规则与 MAX_OUT_BYTES 都只在这儿一处）
 limiter.js        登录/注册失败限流 + 游客发评论限流 + 签发上传令牌限流（内存，重启清零）
+robots.js         反爬虫策略：**两份** robots.txt 的正文（站点那份放行搜索引擎、图床那份一律不爬）
 routes/auth.js    注册、登录、登出、改密码
 routes/uploads.js POST /uploads/sign（发令牌）+ GET /uploads/:name（老链接 302）+ 末尾 404 兜底
-routes/public.js  游客可见的那一点点：/wall、发评论、删评论
+routes/public.js  游客可见的那一点点：/wall、/robots.txt、发评论、删评论
 routes/main.js    看板、阵容、积分、打分、历史、排行、个人页、结算战报的拼接（buildReport）
 routes/admin.js   赛期、邀请码、成员、修正积分、清空整期打分
 views/            EJS 模板（服务端渲染，全部表单提交；wall.ejs 是游客那版首页）
@@ -1706,6 +1793,7 @@ public/           pico.min.css（v2.1.1，本地）+ style.css
 scripts/          create-admin.js、backup.js
                   + migrate-to-r2.js（搬存量图）/ r2-pull.js（拉回来，备份与回滚共用）
                   + r2-gc.js（孤儿回收）/ r2-refs.js（库引用集的唯一真源）
+                  + put-robots.js（把**图床那份** robots.txt 写进 R2 桶，幂等）
 deploy/           本机专属，未纳入本仓库（nginx 配置、systemd 单元、DEPLOY.md）
 data/app.db       自动生成
 uploads/          **已不再写入**：图片在 Cloudflare R2 上。这里只剩改造前那一份，

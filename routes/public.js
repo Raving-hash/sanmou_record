@@ -1,10 +1,12 @@
 const db = require('../db');
 const limiter = require('../limiter');
+const robots = require('../robots');
 const router = require('express').Router();
 
 // ---------- 游客能看的那一点点（全站唯一的免登录入口） ----------
 // 全站默认是「不登录什么都看不了」：routes/main.js 整条挂在 requireLogin 后面。
-// 这个文件是**唯一**的例外，所以它故意长得很小 —— 游客只能看阵容墙（含每套阵容下的评论），
+// 这个文件是**唯一**的例外，所以它故意长得很小 —— 游客只能看阵容墙（含每套阵容下的评论）、
+// 以及下面那份 robots.txt，
 // 排名表、积分、积分截图、「还没交积分」名单、成员页、历史、总排行、上传、打分
 // 一条都没放出来（用户定的口径：只能参观公布的阵容）。
 //
@@ -53,6 +55,14 @@ const crossSite = (req) => {
 };
 
 // ---------- 看 ----------
+
+// GET /robots.txt —— 爬虫策略，正文在 robots.js（唯一真源）。
+// ★ **必须留在这个文件里**，也就是 requireLogin **之前**：挂到后面会变成 302 到
+//   /login，而爬虫拿不到 robots.txt 时的默认是"全允许" —— 那正是 2026-10-15 之前
+//   的状态（实测三条入口一个有效的 robots.txt 都没有）。
+// 这里只服务**站点**这一份。图床 `img.raving-hash.top` 是另一个 origin、不经过这个
+// 进程，它那份只能作为 R2 桶里的对象存在（scripts/put-robots.js 写上去）。
+router.get('/robots.txt', (req, res) => res.type('text/plain').send(robots.SITE));
 
 // GET / —— 没登录的人的首页就是阵容墙。登录了的交给 main（那是完整的看板）。
 router.get('/', (req, res, next) => (req.user ? next() : res.redirect('/wall')));
