@@ -1931,18 +1931,61 @@ details.cmt[open] > summary {
 .reco-pick.is-set { color: var(--yw-gold-lt); border-color: var(--yw-gold); }
 
 /* 弹窗本体（`<dialog>`，脚本建的；模板里没有它的 DOM —— 和 lightbox 一个道理：
-   没 JS 的页面上不该出现一个点不开的空壳）。窄屏上它几乎占满宽度，宽屏上是个窄条。 */
+   没 JS 的页面上不该出现一个点不开的空壳）。
+
+   ⚠️⚠️ 下面这一段是**和 Pico 打架打出来的，动之前先看这段**：Pico 把 `dialog` 当
+   **全屏 flex 遮罩**用（`display:flex; min-width:100%; min-height:100%; align-items:center;
+   justify-content:center`），内容是给 `dialog > article` 的（那条规则自带 width:100% /
+   max-width / overflow）。我们这两扇里面是 `.reco-dlg-body`，不吃那一套，所以 Pico 那几条
+   得**逐条顶回去**：
+     · 不顶 `min-width:100%` 的话，下面那句 `width` **根本不生效**（min-width 赢 width），
+       弹窗永远是一屏宽；
+     · 不顶 `display:flex` 的话，里面那个 body 是个 flex 子项，被 `justify-content:center`
+       缩成 fit-content 居中 —— 现象是"窗口只有一小块"，看着像 width 没写对，
+       其实是**窗口有一屏大、内容只占中间一小条**（实测：dialog 1280px、body 274px）。
+     · `height:fit-content` 也是必须的：Pico 给了 `height:inherit; min-height:100%`，
+       加上 `inset:0`，盒子会被撑满一屏。
+   实测踩过：那会儿九格在 1280 下只排得下 **1 列**（因为 body 只有 274px），
+   而"窗口"其实有一屏宽 —— 光看截图根本看不出来。 */
 .reco-dlg {
-  width: min(30rem, calc(100vw - 2rem)); margin: auto;
+  display: block;
+  width: min(30rem, calc(100vw - 2rem));       /* 挑名字那扇：一个窄条 */
+  height: fit-content;
+  min-width: 0; min-height: 0;
+  max-height: calc(100vh - 1rem);
+  margin: auto;
   padding: 0;                                  /* 内边距交给里面的 .reco-dlg-body：
                                                   留在这儿的话点空白也会命中 dialog，
                                                   而背景点击的判据正是 `e.target === dlg` */
   border: 1px solid var(--yw-line); border-radius: 10px;
   background: var(--yw-ink-800); color: var(--yw-text);
+  backdrop-filter: none;                       /* Pico 给遮罩加了一层模糊，不要 */
   font-size: var(--yw-fs-xs);
 }
 .reco-dlg::backdrop { background: rgba(0, 0, 0, 0.62); }
+/* 弹窗开着时锁住背景滚动（public/reco.js 的 syncLock 挂/摘这个类）。
+   和 17 节那个 html.lb-lock 是两回事：那个管点图弹层，这个管纠正/挑选弹窗 ——
+   两个可以同时存在（图在弹层里开着、纠正弹窗也开着），所以各管各的类名，别合并。 */
+html.reco-lock { overflow: hidden; }
 .reco-dlg-body { padding: 0.75rem 0.85rem; }
+
+/* 纠正面板那一扇（public/reco.js 把卡里那个 <form> 搬进来）——
+   它要装九格，所以**比挑名字那扇宽得多**：宽屏 48rem。
+   为什么是 48rem 而不是更宽：九格要正好排成 **3×3**（部队一/二/三各一列），
+   48rem 减掉内边距是 926px，`minmax(12rem=240px,1fr)` 正好放得下 3 列、放不下 4 列
+   （4 列要 984px）。再宽一档就变成 4 列，第三行只剩一格，难看。 */
+.reco-dlg.is-panel { width: min(48rem, calc(100vw - 1rem)); }
+/* 九格在手机上排成一列之后比屏幕高，所以**让里面的 body 滚，不是让 dialog 滚** ——
+   滚动条长在 dialog 上的话，点它也会命中 dialog 本身（`e.target === dlg`），
+   于是"点背景关窗"会在拖滚动条的时候把窗关掉。 */
+.reco-dlg.is-panel .reco-dlg-body { max-height: calc(100vh - 2rem); overflow-y: auto; }
+/* 九格在弹窗里的排法：宽屏三列、窄屏一列（auto-fit + minmax 一句话搞定）。
+   ⚠️ 这一条**只在弹窗里生效**（.reco-dlg 底下），卡里那一份仍是固定三列 ——
+   没 JS 时卡上还是原来的样子，这一条帮不上也不该帮。 */
+.reco-dlg.is-panel .reco-grid { grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+.reco-dlg.is-panel .reco-slot { padding: 0.5rem 0.6rem; }   /* 宽了，内边距也跟着松一点 */
+.reco-dlg.is-panel .reco-tip { margin-bottom: 0.7rem; }
+.reco-dlg-close { width: auto; margin: 0.6rem 0 0; padding: 0.25rem 0.8rem; font-size: var(--yw-fs-2xs); }
 .reco-dlg-head { margin: 0 0 0.15rem; font-size: var(--yw-fs-sm); }
 .reco-dlg-tip { margin: 0 0 0.5rem; color: var(--yw-text-mute); font-size: var(--yw-fs-2xs); }
 /* ★ 输入框在这儿**占满一整行** —— 卡片里那 60px 放不下 placeholder，正是这次改动的由来 */
@@ -1952,10 +1995,11 @@ details.cmt[open] > summary {
 }
 .reco-dlg-list {
   list-style: none; margin: 0; padding: 0.15rem;
-  /* min-height 是**故意**的：名单随打字变长变短，不给个下限的话整扇窗会跟着一跳一跳。
-     下限给 30vh、上限 40vh —— 命中少的时候盒子照样是个盒子，命中多的时候里面滚
-     （手机上 40vh 大约 6 行）。 */
-  min-height: 30vh; max-height: 40vh; overflow-y: auto;
+  /* min-height 是**故意**的：名单随打字变长变短，不给个下限的话整扇窗会跟着一跳一跳
+     （打一个字整扇窗抽搐一下）。下限用**固定 rem 不用 vh** —— 30vh 在手机上将近 300px，
+     只命中一个名字的时候那一大块空的太晃眼；12rem 是个"刚好够几行"的盒子。
+     上限 40vh 让它不顶破屏幕，超了里面滚。 */
+  min-height: 12rem; max-height: 40vh; overflow-y: auto;
   border: 1px solid var(--yw-line); border-radius: 6px;
   background: var(--yw-ink-900);
 }

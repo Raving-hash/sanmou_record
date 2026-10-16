@@ -1,16 +1,31 @@
-/* 阵容纠正面板里「手输武将」那一下（views/partials/reco.ejs 的 .reco-slot）。
+/* 阵容纠正：**面板搬进弹窗** + 手输武将的那一层挑选。
 
    ── 为什么要有这个脚本 ──
 
-   那一格在卡里只有 **60px 宽**（.reco-grid 是 3 列，卡总共 200px），输入框挤在里面连
-   placeholder 都放不下，更别说从补全里挑。用户 2026-10-16 晚的口径：**改成弹一个窗口**，
-   输入框在窗口里占满一整行。
+   卡片只有 228px 宽（手机 346px），而识别结果那一块要塞下**九个格子**：每格一个标题、
+   六七个候选单选框、一个「其他」输入框、一个「不确定」。挤在里面每格只剩 60~70px，
+   输入框连 placeholder 都放不下。用户 2026-10-16 晚的口径（分几条消息说的）：
 
-   所以脚本做两件事：
-     ① 把原来那个窄 input 藏起来（**值照样提交** —— hidden 只是不画，不是 disabled），
-        在它旁边立一个按钮，显示当前挑中的名字（没挑就是"手输 / 挑选武将…"）；
-     ② 点这个按钮（或者点「其他」那个单选框）弹出 <dialog>：一整行的输入框 + 一份
-        按打字实时筛选的武将名单，点一个就填进去、把「其他」勾上、关窗。
+     「改为弹出一个窗口，将输入框放宽不要在列表里面挤压」
+     「我希望识别结果如果是待确认的则直接开一个小弹窗进行输入」
+     「只给本人弹窗，其他人观看不弹窗也不需要确认」
+
+   于是脚本干两件事：
+
+     ① **把整个纠正面板搬进一个 `<dialog>`**：卡上只留「识别结果 · 待核对 N 格」那一行，
+        点它弹窗，九格在窗口里宽宽松松地排（宽屏三列、窄屏一列，见 style.css）。
+     ② **手输武将再套一层小弹窗**：那一格的窄 input 藏起来（**值照样提交** —— hidden
+        只是不画，不是 disabled），旁边立一个按钮；点它（或者点「其他」那个单选框）弹出
+        第二个 `<dialog>`：一整行的输入框 + 按打字实时筛选的名单，点一个就填进去。
+        （两层弹窗是叠着的，浏览器原生支持，Esc 先关上面那层。）
+
+   ── 打给谁看 ──
+
+   **只有卡主自己**会被"自动弹一次"提醒（模板给的 `data-auto`，见 reco.ejs）：
+   他有没核对过的格子时，一进页面就把面板弹出来。同一页有多张时**只弹 id 最大的那张**
+   （最新的一套）—— 一进首页被弹一脸是不可接受的。管理员在别人的卡上能改、但不弹
+   （判据在服务端，模板里那个 `mine`）。游客和别的成员**连这一块都不渲染**，
+   所以谈不上弹窗，也没有"要不要确认"这回事。
 
    ── 名单从哪来 ──
 
@@ -19,25 +34,102 @@
 
    ── 边界 ──
 
-   · **没 JS 时一模一样能用**：单选框 + 窄输入框 + 原生 datalist 补全，一个字都没少
+   · **没 JS 时一模一样能用**：卡上还是那个原生 `<details>`，点开就地改；单选框 +
+     窄输入框 + 原生 datalist 补全，一个字都没少
      （和 lightbox.js / comments.js / report.js 同一个约定：是增强不是依赖）。
-   · **老浏览器没有 `<dialog>`**（Safari < 15.4 之类）→ 探测不到 showModal 就直接退出，
-     退回上面那条原路，而不是半残。
+     ⚠️ 所以这一层是**把表单搬进弹窗**，不是"在弹窗里另建一份" —— 搬走之后 `<details>`
+     里只剩一句摘要，卡的高度一点没变（合着的 details 本来也只画那一行）。
+   · **老浏览器没有 `<dialog>`**（Safari < 15.4 之类）→ 探测不到 showModal 就整个退出，
+     退回上面那条原路，而不是只做一半。
    · 服务端才是真正的关口：只有能唯一对回库里的名字才写库（见 routes/main.js）。
-     这里筛出来的是库里的名单，所以挑出来的必然过 —— 但**手打的错字仍然由服务端退回**，
-     弹窗底部那句「库里没有这个名字」只是提前把话说清楚。 */
+     弹窗里筛的是库里的名单，所以挑出来的必然过 —— 但**手打的错字仍然由服务端退回**，
+     底部那句「库里没有这个名字」只是提前把话说清楚。 */
 (function () {
   'use strict';
 
-  var slots = [].slice.call(document.querySelectorAll('.reco-other'));
-  if (!slots.length) return;                       // 别的页面没有这一块
+  // ---------- 探测：没有 <dialog> 就整个不干（见文件头） ----------
+  var probe = document.createElement('dialog');
+  if (typeof probe.showModal !== 'function') return;
 
+  var panels = [].slice.call(document.querySelectorAll('details.reco-box'));
+  if (!panels.length) return;                     // 不是阵容墙，或者这一页没有能改的卡
+
+  // 弹窗开着就把背景滚动锁住（和 lightbox.js 的 .lb-lock 一个道理，只是各用各的类名）。
+  // ⚠️ 关的时候要**看还有没有别的弹窗开着**：手输那一层是叠在面板那一层上面的，
+  //    关掉上面那层就把锁摘了的话，底下的面板还开着、页面却能滚，看着像坏了。
+  function syncLock() {
+    document.documentElement.classList.toggle('reco-lock', !!document.querySelector('dialog[open]'));
+  }
+  // ⚠️⚠️ **`close()` 是同步的，`close` 事件不是** —— 它是排队发的（HTML 规范里
+  //   "queue an element task"）。所以"摘滚动锁"和"退单选框"这两件事**必须在关窗那一瞬间
+  //   同步做掉**，光挂在 close 事件上的话，关掉之后还有那么一小会儿页面是错的
+  //   （锁还挂着、单选框还停在"其他"上）。这里每个自己控制的关法都直接调 syncLock()，
+  //   close 事件那条路留着兜 **Esc**（浏览器自己关的，拦不住）。
+  // 卡 id 是 `e<entry id>`（见 lineup-gallery.ejs），数字越大越新
+  function cardId(box) {
+    var card = box.closest ? box.closest('.shot-card') : null;
+    return card && /^e\d+$/.test(card.id) ? Number(card.id.slice(1)) : 0;
+  }
+
+  // ---------- 一、整个面板搬进弹窗 ----------
+  // 一张卡一个弹窗，**第一次点开时才建**（一页十几张卡，没人会去看的那些不必建）。
+  function panelFor(box) {
+    if (box.__panel) return box.__panel;
+    var form = box.querySelector('form');
+    var sum = box.querySelector('summary');
+    if (!form || !sum) return null;
+    var d = document.createElement('dialog');
+    d.className = 'reco-dlg is-panel';
+    var body = document.createElement('div');
+    body.className = 'reco-dlg-body';
+    var head = document.createElement('h3');
+    head.className = 'reco-dlg-head';
+    head.textContent = sum.textContent.replace(/\s+/g, ' ').trim();   // 「识别结果 · 待核对 9 格」
+    body.appendChild(head);
+    body.appendChild(form);        // ★ 搬进来 —— 不是另建一份，见文件头那条 ⚠️
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'outline reco-dlg-close';
+    close.textContent = '关闭';
+    body.appendChild(close);
+    d.appendChild(body);
+    document.body.appendChild(d);
+    var shut = function () { d.close(); syncLock(); };      // 见 syncLock 上面那条 ⚠️⚠️
+    close.addEventListener('click', shut);
+    d.addEventListener('click', function (e) { if (e.target === d) shut(); });  // 点背景
+    d.addEventListener('close', syncLock);                  // Esc 那条路只有这里兜得到
+    box.__panel = d;
+    return d;
+  }
+
+  function openPanel(box) {
+    var d = panelFor(box);
+    if (!d) return;
+    d.showModal();
+    syncLock();
+  }
+
+  panels.forEach(function (box) {
+    var sum = box.querySelector('summary');
+    if (!sum) return;
+    sum.addEventListener('click', function (e) {
+      e.preventDefault();          // 别让它就地展开 —— 展开是**没 JS 时**的退路
+      openPanel(box);
+    });
+  });
+
+  // 卡主自己的、还有没核对过的格子 → 自动弹一次。多张只弹最新那张（见文件头）。
+  var autos = [].slice.call(document.querySelectorAll('details.reco-box[data-auto]'));
+  if (autos.length) {
+    autos.sort(function (a, b) { return cardId(b) - cardId(a); });
+    openPanel(autos[0]);
+  }
+
+  // ---------- 二、手输武将那一层 ----------
+  var slots = [].slice.call(document.querySelectorAll('.reco-other'));
   var names = [].slice.call(document.querySelectorAll('#reco-hero-names option'))
     .map(function (o) { return o.value; }).filter(Boolean);
-  if (!names.length) return;                       // 没有名单就没什么可挑的
-
-  var dlg = document.createElement('dialog');
-  if (!dlg || typeof dlg.showModal !== 'function') return;   // 见文件头「老浏览器」
+  if (!slots.length || !names.length) return;      // 没有「其他」框，或者没有名单
 
   // 名单项**建一次、反复用**（102 个，每次开窗重建纯属浪费）；筛选只是切 hidden。
   var items = names.map(function (n) {
@@ -51,6 +143,7 @@
     return li;
   });
 
+  var dlg = document.createElement('dialog');
   dlg.className = 'reco-dlg';
   dlg.innerHTML = '<div class="reco-dlg-body">'
     + '<h3 class="reco-dlg-head"></h3>'
@@ -84,13 +177,22 @@
     list.scrollTop = 0;                            // 筛完回到顶上，否则停在上一轮的位置
   }
 
+  // 关窗的唯一出口（挑中 / 取消 / 点背景都走它）—— 见 syncLock 上面那条 ⚠️⚠️：
+  // 退单选框和摘锁都在这儿**同步**做掉，不指望 close 事件（它是排队发的）。
+  function shut() {
+    if (cur && !cur.picked && !cur.box.value && cur.back) cur.back.checked = true;
+    cur = null;
+    dlg.close();
+    syncLock();
+  }
+
   function pick(name) {
     cur.box.value = name;                          // 真正的值写进**原来那个 input**
     cur.radio.checked = true;                      // 服务端只在「其他」被勾中时才读它
     cur.btn.textContent = name;
     cur.btn.classList.add('is-set');
     cur.picked = true;
-    dlg.close();
+    shut();
   }
 
   function open(box, btn, radio) {
@@ -105,12 +207,13 @@
     input.value = box.value || '';
     filter();
     dlg.showModal();
+    syncLock();
     input.focus();
     input.select();
   }
 
   dlg.addEventListener('click', function (e) {
-    if (e.target === dlg) dlg.close();             // 点背景关掉（.reco-dlg 没有内边距，
+    if (e.target === dlg) shut();                  // 点背景关掉（.reco-dlg 没有内边距，
   });                                              // 所以命中的一定是背景，见 style.css）
 
   input.addEventListener('input', filter);
@@ -120,12 +223,14 @@
     var first = items.filter(function (li) { return !li.hidden; })[0];
     if (first) first.querySelector('button').click();   // 回车 = 挑第一个命中的
   });
-  dlg.querySelector('.reco-dlg-cancel').addEventListener('click', function () { dlg.close(); });
+  dlg.querySelector('.reco-dlg-cancel').addEventListener('click', shut);
 
-  // 关窗（取消 / Esc / 点背景，三种都走这儿）。没挑过、框里又是空的 → 把单选框退回去。
+  // Esc 兜底：浏览器自己把窗关掉，拦不住，只能在 close 事件里补一遍同样的事
+  // （自己控制的三种关法都已经在 shut() 里同步做完了，走到这儿时 cur 已经是 null）。
   dlg.addEventListener('close', function () {
     if (cur && !cur.picked && !cur.box.value && cur.back) cur.back.checked = true;
     cur = null;
+    syncLock();
   });
 
   slots.forEach(function (box) {
