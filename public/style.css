@@ -12,15 +12,24 @@
    -------------------------------------------------------------------------- */
 :root {
   /* 墨 —— 由深到浅。**2026-10-16 改版把档距拉开了**：从前页面 #14110c 和卡片 #1a1611
-     只差 6（每通道），全站看着是"一片糊"、卡片浮不出页面。现在每档差 9~10。 */
-  --yw-ink-1000: #070503;   /* 最深：图框留白 / 金字按钮上的字 */
-  --yw-ink-900:  #100d09;   /* 页面底色 */
-  --yw-ink-800:  #191510;   /* 卡片 */
-  --yw-ink-700:  #241e17;   /* 卡片内分区 / 表头 / 悬浮 */
-  --yw-ink-600:  #2f281e;   /* 输入框 */
-  --yw-line:     #3a3125;   /* 描边（也比从前亮一档，否则卡的边界看不见） */
-  --yw-line-2:   #4c4232;   /* 需要"明确看得见"的描边：次要按钮、输入框 */
-  --yw-line-soft:#2a241b;   /* 更弱的线（表格行） */
+     只差 6（每通道），全站看着是"一片糊"、卡片浮不出页面。现在每档差 8~9。
+
+     ★ **同一天晚上整条梯度又抬了一档（"柔化"）**：用户说「黑暗背景对比度还是太强了一些」。
+     病根就在上一版把页面压到了 #100d09 —— 那是往纯黑方向使劲，于是正文 #f0e9dc 压在上面
+     是 **16:1**，全站最刺眼的一处恰恰是这块"背景"。现在页面 #1d1913、正文 #e5ddcc，
+     落到约 **13:1**：暗色该有的"沉"还在，但不是"雪白字压纯黑底"那种扎眼。
+     ⚠️ 抬底和收档距是两件事，**这次只做前者**：每档仍然差 8~9，
+     所以上一版"一层层"的层次一点没塌 —— 这是能同时改这两样的前提。
+     附带收益最大的是图框留白（`.shot-frame` / `.thumb` 的 letterbox）：宽图两侧那两条
+     从前是 #070503 的死黑，压在卡里就是两块黑洞；现在跟着 ink-1000 一起抬到 #15120c。 */
+  --yw-ink-1000: #15120c;   /* 最深：图框留白 / 金字按钮上的字 */
+  --yw-ink-900:  #1d1913;   /* 页面底色 */
+  --yw-ink-800:  #262119;   /* 卡片 */
+  --yw-ink-700:  #2f2820;   /* 卡片内分区 / 表头 / 悬浮 */
+  --yw-ink-600:  #383026;   /* 输入框 */
+  --yw-line:     #413728;   /* 描边（比卡片亮一档，否则卡的边界看不见） */
+  --yw-line-2:   #554936;   /* 需要"明确看得见"的描边：次要按钮、输入框 */
+  --yw-line-soft:#342d21;   /* 更弱的线（表格行） */
 
   /* 金 —— 主色。这三档的**值刻意不动**：public/icon.svg 那方金印用的就是
      #e8cd86 / #a07c2c（test-icon.js 逐字断言了这两个十六进制），
@@ -57,10 +66,13 @@
 
   /* 文字（暖白，不用纯白，避免和墨底打架）。
      2026-10-16 提亮了 dim / mute 两档：从前的 #a89b83 在墨底上小字只有 5 出头的对比度，
-     一屏小字（均分、时间、说明）看着都"糊"，是这次"没有层次"的一半来源。 */
-  --yw-text:      #f0e9dc;
-  --yw-text-dim:  #b6a98f;
-  --yw-text-mute: #8b7f6a;
+     一屏小字（均分、时间、说明）看着都"糊"，是那次"没有层次"的一半来源。
+     ★ 同一天晚上**反过来把正文压暗了一档**（#f0e9dc → #e5ddcc）—— 见上面「柔化」那段：
+     背景抬亮、正文压低是同一件事的两半，只抬一边等于没改。dim / mute 跟着挪一格
+     （背景亮了，它俩在原地会掉到 4.5:1 以下 —— mute 原本是 4.9，抬完底只剩 4.4）。 */
+  --yw-text:      #e5ddcc;
+  --yw-text-dim:  #bdb09a;
+  --yw-text-mute: #978a73;
 
   --yw-radius: 10px;
   --yw-radius-lg: 16px;
@@ -95,14 +107,17 @@
   /* ---- 面层与材质（2026-10-16 加）----
      "一层层"是这次改版的目标：面层 + 一圈内高光（顶边那道 1px）+ 多层柔和投影。
      内高光用 box-shadow 的 inset 而不是 border-top —— 它不参与布局，
-     卡片尺寸一个像素都不会变（.shot-card 的尺寸有断言量着，动不得）。 */
+     卡片尺寸一个像素都不会变（.shot-card 的尺寸有断言量着，动不得）。
+     投影的**黑度当晚各收了一档**（0.35/0.28 → 0.28/0.22）：底色抬亮之后，
+     原来那两团纯黑在浅一点的墨上会"脏"，而且卡和页面本来就差了 9 格色阶，
+     不需要靠影子去分。 */
   --yw-surface-1: var(--yw-ink-900);   /* 页面 */
   --yw-surface-2: var(--yw-ink-800);   /* 卡片 */
   --yw-surface-3: var(--yw-ink-700);   /* 抬起来的一层：表头、分区 */
   --yw-hi:        inset 0 1px 0 rgba(247, 233, 189, 0.055);
   --yw-hi-strong: inset 0 1px 0 rgba(247, 233, 189, 0.10);
-  --yw-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.28);
-  --yw-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 34px rgba(0, 0, 0, 0.34);
+  --yw-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.22);
+  --yw-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.32), 0 14px 34px rgba(0, 0, 0, 0.26);
   --yw-ring: 0 0 0 2px var(--yw-gold-a35);   /* "选中了"那一圈：.rate-tier.is-mine 在用 */
 
   --yw-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
@@ -224,7 +239,7 @@
   --pico-accordion-active-summary-color: var(--yw-gold);
   --pico-accordion-close-summary-color: var(--yw-text);
   --pico-accordion-open-summary-color: var(--yw-text);
-  --pico-modal-overlay-background-color: rgba(11, 9, 6, 0.82);
+  --pico-modal-overlay-background-color: rgba(16, 13, 9, 0.82);
 
   accent-color: var(--yw-gold);
 }
@@ -235,12 +250,14 @@
 
 /* 顶部一抹极淡的暖光，让纯色底不至于死板。纯 CSS，不引外部图。
    2026-10-16 加厚：正面一道金余光 + 右上朱红 + 顶上极淡的一层竖向提亮，
-   叠出"灯打在纸上"的感觉，页面才不像一块平涂。 */
+   叠出"灯打在纸上"的感觉，页面才不像一块平涂。
+   ★ 抬底之后**金余光那档从 0.10 收到 0.08**：底本来就浅了一档，同一层光叠上去会更显眼，
+   不跟着收，顶上会从"一抹余光"变成"一块亮斑"（柔化时唯一跟着动的一处渐变）。 */
 body {
   min-height: 100vh;
   background-color: var(--yw-ink-900);
   background-image:
-    radial-gradient(1200px 420px at 50% -160px, rgba(200, 162, 74, 0.10), transparent 68%),
+    radial-gradient(1200px 420px at 50% -160px, rgba(200, 162, 74, 0.08), transparent 68%),
     radial-gradient(760px 340px at 100% 0, rgba(140, 47, 47, 0.05), transparent 70%),
     linear-gradient(180deg, rgba(255, 246, 224, 0.018), transparent 20%);
   background-repeat: no-repeat;
@@ -365,7 +382,11 @@ a:hover {
   z-index: 30;
   margin-bottom: 2rem;
   padding-inline: var(--pico-spacing);
-  background: rgba(20, 17, 12, 0.93);
+  /* 半透明的页面底色（不是卡片色）：磨砂透出底下滚过去的暖光，导航才"贴"在页面上。
+     ⚠️ 它是硬写的 rgba，**不跟着 --yw-ink-900 走**，改色板时得手动同步。
+     这条已经欠过一次账：上一版把页面改到 #100d09 之后它还是更早的 #14110c，
+     于是导航比页面还深一截、顶上横一条暗带 —— 只是那次的观感恰好不明显，没人发现。 */
+  background: rgba(29, 25, 19, 0.9);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--yw-line);
@@ -1797,7 +1818,9 @@ html.lb-lock {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(7, 5, 3, 0.93);         /* 比 --yw-ink-1000 再深一格：图才"浮"得起来 */
+  background: rgba(16, 13, 9, 0.92);       /* 比 --yw-ink-1000 再深一格：图才"浮"得起来。
+                                              刻意保持比页面深 —— 弹层是"看图的暗房"，
+                                              这里不需要柔和，需要图跳出来（值跟着色板同步抬过） */
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   cursor: zoom-out;                        /* 点哪都能关，光标先说明这一点 */
@@ -1837,7 +1860,7 @@ html.lb-lock {
   background: var(--yw-ink-1000);
   border: 1px solid var(--yw-line);
   border-radius: 6px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 }
 .lightbox .lb-cap {
   max-width: 90vw;
@@ -1871,7 +1894,7 @@ html.lb-lock {
   line-height: 1;
   font-size: 1.2rem;
   color: var(--yw-text);
-  background: rgba(25, 21, 16, 0.92);      /* --yw-surface-2 的 92%：压在图上也要看得清 */
+  background: rgba(38, 33, 25, 0.92);      /* --yw-surface-2 的 92%：压在图上也要看得清（值跟着色板走） */
   border: 1px solid var(--yw-line-2);
   border-radius: 50%;
   box-shadow: var(--yw-hi), 0 6px 18px rgba(0, 0, 0, 0.45);
