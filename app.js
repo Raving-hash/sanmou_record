@@ -36,6 +36,11 @@ app.use((req, res, next) => {
     wall: assetVer('wall.js'),
     comments: assetVer('comments.js'),
     report: assetVer('report.js'),
+    // 站点图标（2026-10-16 加）。三份都是 scripts/make-icon.js 生成后提交进仓库的，
+    // 页面只引用、运行时不生成；引用方式见 partials/header.ejs。
+    icon: assetVer('icon.svg'),
+    ico: assetVer('favicon.ico'),
+    touch: assetVer('apple-touch-icon.png'),
   };
   // 时间格式化。入参是 ISO 字符串或毫秒时间戳（Date 两种都吃）——
   // 打分截止那种现算出来的时间就是个毫秒数，模板里不用再包一层 new Date()。

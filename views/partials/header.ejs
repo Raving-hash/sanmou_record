@@ -18,6 +18,15 @@
       带上文件 mtime 后每次改动都是新 URL，不用让用户按 Ctrl+Shift+R。 %>
   <link rel="stylesheet" href="/public/pico.min.css?v=<%= assetVer.pico %>">
   <link rel="stylesheet" href="/public/style.css?v=<%= assetVer.style %>">
+  <%# 站点图标（2026-10-16 加）。三份都在 public/ 下，由 scripts/make-icon.js 生成：
+      icon.svg 是取字形轮廓画的矢量版，favicon.ico 里装 16/32/48 三档，
+      apple-touch-icon.png 给 iOS 加到桌面用。**ICO 在前、SVG 在后**：
+      认 SVG 的浏览器（Chrome/Firefox/Safari 16.4+）会挑后面那份矢量图，
+      不认的（老 Safari、老 IE）就用前面那个 ICO —— 两边都照顾到。
+      ?v= 的理由和那两个 CSS 一样（nginx 给 /public/ 盖了 7 天缓存）。 %>
+  <link rel="icon" href="/public/favicon.ico?v=<%= assetVer.ico %>" sizes="16x16 32x32 48x48">
+  <link rel="icon" type="image/svg+xml" href="/public/icon.svg?v=<%= assetVer.icon %>">
+  <link rel="apple-touch-icon" href="/public/apple-touch-icon.png?v=<%= assetVer.touch %>">
 </head>
 <body>
 <nav class="container-fluid topnav">

@@ -1,3 +1,4 @@
+const path = require('path');
 const db = require('../db');
 const limiter = require('../limiter');
 const robots = require('../robots');
@@ -63,6 +64,20 @@ const crossSite = (req) => {
 // 这里只服务**站点**这一份。图床 `img.raving-hash.top` 是另一个 origin、不经过这个
 // 进程，它那份只能作为 R2 桶里的对象存在（scripts/put-robots.js 写上去）。
 router.get('/robots.txt', (req, res) => res.type('text/plain').send(robots.SITE));
+
+// GET /favicon.ico —— 浏览器对**根目录**这个固定路径的兜底探测（2026-10-16 加）。
+// ★ 页面上的图标其实指的是 /public/favicon.ico（带 ?v=，见 partials/header.ejs），
+//   那条走的是 express.static，根本到不了这儿。留着这条是因为几种老家伙不读 <link>：
+//   老 IE、老 Safari 的书签、以及一部分 RSS 阅读器，它们闭着眼睛就来拿 /favicon.ico。
+//   放这个文件里的理由和 robots.txt 一样：**必须在 requireLogin 之前**，
+//   不然游客拿到的是登录页的 HTML，浏览器把它当图标存下来就是一张裂图。
+// 缓存头得自己设：nginx 的 `expires 7d` 只管 `location /public/` 那一段，这条穿过去了没人管。
+// 给 1 天而不是 7 天 —— 这个 URL 挂不上 `?v=`（谁也不会给裸路径带查询串），破不了缓存，
+// 只能靠短一点的 max-age 让"换了图标之后最多等一天"。
+router.get('/favicon.ico', (req, res) => res
+  .sendFile(path.join(__dirname, '..', 'public', 'favicon.ico'), {
+    headers: { 'Cache-Control': 'public, max-age=86400' },
+  }));
 
 // GET / —— 没登录的人的首页就是阵容墙。登录了的交给 main（那是完整的看板）。
 router.get('/', (req, res, next) => (req.user ? next() : res.redirect('/wall')));
