@@ -1,31 +1,165 @@
-/* 阵容纠正面板里那点增强（views/partials/reco.ejs 的 .reco-slot / .reco-other）。
+/* 阵容纠正面板里「手输武将」那一下（views/partials/reco.ejs 的 .reco-slot）。
 
-   只干一件事：**在「其他」框里打了字（或从补全列表里挑了一个）的时候，顺手把同一格
-   那个 `__other__` 单选框勾上。**
+   ── 为什么要有这个脚本 ──
 
-   为什么必须有这一下：那一格是一组单选框（各个候选 / 其他 / 不确定），而**表单只提交被勾中
-   的那一个**。玩家打了字却没先点「其他」的话，提交上去那一格等于"没动" —— 而且一声不响，
-   看着就像名字没存上。补全本身不需要脚本（模板里那个 list 属性就够了，见
-   lineup-gallery.ejs 的 <datalist>），这里补的是"打完字还得记得点一下单选"这一步。
+   那一格在卡里只有 **60px 宽**（.reco-grid 是 3 列，卡总共 200px），输入框挤在里面连
+   placeholder 都放不下，更别说从补全里挑。用户 2026-10-16 晚的口径：**改成弹一个窗口**，
+   输入框在窗口里占满一整行。
 
-   是增强不是依赖（和 lightbox.js / comments.js / report.js 同一个约定）：脚本没跑时，
-   先点「其他」再打字，功能一模一样。所以挂在页脚、找不到元素就自己退出。 */
+   所以脚本做两件事：
+     ① 把原来那个窄 input 藏起来（**值照样提交** —— hidden 只是不画，不是 disabled），
+        在它旁边立一个按钮，显示当前挑中的名字（没挑就是"手输 / 挑选武将…"）；
+     ② 点这个按钮（或者点「其他」那个单选框）弹出 <dialog>：一整行的输入框 + 一份
+        按打字实时筛选的武将名单，点一个就填进去、把「其他」勾上、关窗。
+
+   ── 名单从哪来 ──
+
+   就是模板里那份 `<datalist id="reco-hero-names">`（整面墙一份，见 lineup-gallery.ejs）——
+   不再引一份数据进来。**这也保证了"挑出来的名字"和"页面上的补全"永远是同一份**。
+
+   ── 边界 ──
+
+   · **没 JS 时一模一样能用**：单选框 + 窄输入框 + 原生 datalist 补全，一个字都没少
+     （和 lightbox.js / comments.js / report.js 同一个约定：是增强不是依赖）。
+   · **老浏览器没有 `<dialog>`**（Safari < 15.4 之类）→ 探测不到 showModal 就直接退出，
+     退回上面那条原路，而不是半残。
+   · 服务端才是真正的关口：只有能唯一对回库里的名字才写库（见 routes/main.js）。
+     这里筛出来的是库里的名单，所以挑出来的必然过 —— 但**手打的错字仍然由服务端退回**，
+     弹窗底部那句「库里没有这个名字」只是提前把话说清楚。 */
 (function () {
   'use strict';
 
-  // 卡片上可能有九格，一格一个输入框。NodeList 上没有 forEach 的老浏览器也能跑，
-  // 所以照 wall.js 的写法用 [].slice.call —— 这个站是要照顾旧手机的。
-  [].slice.call(document.querySelectorAll('.reco-other')).forEach(function (box) {
+  var slots = [].slice.call(document.querySelectorAll('.reco-other'));
+  if (!slots.length) return;                       // 别的页面没有这一块
+
+  var names = [].slice.call(document.querySelectorAll('#reco-hero-names option'))
+    .map(function (o) { return o.value; }).filter(Boolean);
+  if (!names.length) return;                       // 没有名单就没什么可挑的
+
+  var dlg = document.createElement('dialog');
+  if (!dlg || typeof dlg.showModal !== 'function') return;   // 见文件头「老浏览器」
+
+  // 名单项**建一次、反复用**（102 个，每次开窗重建纯属浪费）；筛选只是切 hidden。
+  var items = names.map(function (n) {
+    var b = document.createElement('button');
+    b.type = 'button';                             // 别当提交按钮：这一层不在表单里，
+    b.className = 'reco-dlg-item';                 // 但按钮默认 type 是 submit，写死更稳
+    b.textContent = n;
+    b.addEventListener('click', function () { pick(n); });
+    var li = document.createElement('li');
+    li.appendChild(b);
+    return li;
+  });
+
+  dlg.className = 'reco-dlg';
+  dlg.innerHTML = '<div class="reco-dlg-body">'
+    + '<h3 class="reco-dlg-head"></h3>'
+    + '<p class="reco-dlg-tip">只能选武将库里的名字 —— 库里没有的存不进去。</p>'
+    + '<input class="reco-dlg-input" type="text" autocomplete="off" spellcheck="false"'
+    + ' placeholder="打几个字，从下面挑">'
+    + '<ul class="reco-dlg-list"></ul>'
+    + '<p class="reco-dlg-empty" hidden>库里没有这个名字，换个写法试试（或者从名单里挑一个）。</p>'
+    // 取消用 outline 那档（Pico）—— 和站里别处的次要按钮一个样子。这里是唯一的按钮，
+    // 画成主色金的话它看着像"这一窗的正事"，而正事明明是挑名字。
+    + '<div class="reco-dlg-foot"><button type="button" class="outline reco-dlg-cancel">取消</button></div>'
+    + '</div>';
+  var head = dlg.querySelector('.reco-dlg-head');
+  var input = dlg.querySelector('.reco-dlg-input');
+  var list = dlg.querySelector('.reco-dlg-list');
+  var empty = dlg.querySelector('.reco-dlg-empty');
+  items.forEach(function (li) { list.appendChild(li); });
+  document.body.appendChild(dlg);
+
+  var cur = null;        // 这一窗是在给哪一格挑：{ box, btn, radio, back }
+
+  function filter() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    items.forEach(function (li) {
+      var hit = !q || li.textContent.toLowerCase().indexOf(q) >= 0;
+      li.hidden = !hit;
+      if (hit) shown++;
+    });
+    empty.hidden = shown > 0;
+    list.scrollTop = 0;                            // 筛完回到顶上，否则停在上一轮的位置
+  }
+
+  function pick(name) {
+    cur.box.value = name;                          // 真正的值写进**原来那个 input**
+    cur.radio.checked = true;                      // 服务端只在「其他」被勾中时才读它
+    cur.btn.textContent = name;
+    cur.btn.classList.add('is-set');
+    cur.picked = true;
+    dlg.close();
+  }
+
+  function open(box, btn, radio) {
+    cur = {
+      box: box, btn: btn, radio: radio, picked: false,
+      // 开窗之前是哪个单选框勾着的：取消时**退回它**。
+      // 不退的话，玩家点了「其他」又反悔，那一格就停在"其他 + 空框"上 —— 提交上去
+      // 等于没动（服务端见空文本直接跳过），看着像是点了没反应。
+      back: box.form ? box.form.querySelector('input[name="' + box.name.replace('other', 'slot') + '"]:checked') : null,
+    };
+    head.textContent = (btn.getAttribute('data-where') || '这一格') + '：手输武将名';
+    input.value = box.value || '';
+    filter();
+    dlg.showModal();
+    input.focus();
+    input.select();
+  }
+
+  dlg.addEventListener('click', function (e) {
+    if (e.target === dlg) dlg.close();             // 点背景关掉（.reco-dlg 没有内边距，
+  });                                              // 所以命中的一定是背景，见 style.css）
+
+  input.addEventListener('input', filter);
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var first = items.filter(function (li) { return !li.hidden; })[0];
+    if (first) first.querySelector('button').click();   // 回车 = 挑第一个命中的
+  });
+  dlg.querySelector('.reco-dlg-cancel').addEventListener('click', function () { dlg.close(); });
+
+  // 关窗（取消 / Esc / 点背景，三种都走这儿）。没挑过、框里又是空的 → 把单选框退回去。
+  dlg.addEventListener('close', function () {
+    if (cur && !cur.picked && !cur.box.value && cur.back) cur.back.checked = true;
+    cur = null;
+  });
+
+  slots.forEach(function (box) {
     var slot = box.closest ? box.closest('.reco-slot') : null;
     if (!slot) return;
     var radio = slot.querySelector('input[type=radio][value="__other__"]');
     if (!radio) return;
-    // `input` 就够：手打和"从补全里选一个"都触发它（`change` 要等失焦，慢半拍，
-    // 而提交是不用失焦的 —— 打完字直接点「保存」的人不在少数）。
-    box.addEventListener('input', function () {
-      if (box.value) radio.checked = true;
-      // 清空时**什么都不做**：那多半是"不想填这一格了"，去勾别的反而更添乱；
-      // 真要清空，点「不确定」那个单选框（它的意思就是清空，见 views/partials/reco.ejs）。
-    });
+
+    // ① 窄输入框让位给按钮。**不是 disabled**，所以 value 照样跟着表单提交。
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'reco-pick';
+    // 按钮上的字就是**那个文本框的内容**（空的时候是句提示），选的到底是哪一项由上面
+    // 那个单选框说了算 —— 和从前那个窄输入框一模一样：点了候选之后框里的字也还在。
+    // **别顺手把它做成"选中才显示"**：那会让"我先打了字、又改点了候选"这种来回变得
+    // 没法退出（字一消失就得重新打一遍）。
+    btn.textContent = box.value || '手输 / 挑选…';
+    if (box.value) btn.classList.add('is-set');
+    // 弹窗标题上要写清是哪一格 —— 九格长得一模一样，只写「手输武将名」会不知道在改哪儿。
+    // 末尾那个 ? 是"机器填的还没人核对"那个小问号（.reco-q，模板里是 <i>），
+    // 标题里带着它只是噪音 —— 何况我们正在做的就是核对它。去掉。
+    var k = slot.querySelector('.reco-slot-k');
+    btn.setAttribute('data-where', k
+      ? k.textContent.replace(/\s+/g, ' ').replace(/\s*\?\s*$/, '').trim() : '');
+    box.hidden = true;
+    box.insertAdjacentElement('beforebegin', btn);
+
+    btn.addEventListener('click', function () { open(box, btn, radio); });
+    // 勾「其他」也开窗：勾它本来就是为了手输，没有第二个理由。
+    // （`change` 只在它**变成**选中时来，所以点一个已经勾着的「其他」不会再弹一次 ——
+    //   那种情况点旁边的按钮，按钮一直在。）
+    radio.addEventListener('change', function () { if (radio.checked) open(box, btn, radio); });
+    // 值被别处改掉时（只可能是没走弹窗那条路：脚本更早的版本、或者将来别的入口）
+    // 也把「其他」勾上 —— 不然那个值提交不上去（服务端只在「其他」被勾中时读它）。
+    box.addEventListener('input', function () { if (box.value) radio.checked = true; });
   });
 })();

@@ -1811,7 +1811,8 @@ details.cmt[open] > summary {
 /* --------------------------------------------------------------------------
    16. 阵容识别（views/partials/reco.ejs）
 
-   两块：上面一行是**已确认的武将**（所有人可见，T0 的加金），下面是可以折叠的确认表单
+   两块：上面一行是**这套阵容里的 T0 武将**（所有人可见，金色；2026-10-16 晚起只列 T0 ——
+   从前把认出来的 9 个全列出来，金色那两三枚反而被淹掉了），下面是可以折叠的确认表单
    （只有本人和管理员渲染 —— 数据层就不给别人的候选，见 db.getSeasonHeroData）。
 
    ⚠️ 这一块**高度天然不一**（有的卡识别过、有的没有），所以它在模板里排在
@@ -1882,6 +1883,58 @@ details.cmt[open] > summary {
   width: 100%; margin: 0.1rem 0 0; padding: 0.15rem 0.3rem;
   font-size: var(--yw-fs-2xs); height: auto;
 }
+
+/* ---- 手输武将：一格 60px 宽，输入框在里面挤成一团（连 placeholder 都放不下），
+   所以 2026-10-16 晚改成**点开一个弹窗**（public/reco.js）：
+   原来那个 input 被脚本藏起来（值照样提交），换成下面这个按钮，点它出弹窗。
+   没 JS 时这里一条都不生效，退回"单选框 + 窄输入框 + <datalist> 补全"的原样。   ---- */
+.reco-pick {
+  width: 100%; margin: 0.1rem 0 0; padding: 0.15rem 0.3rem; height: auto;
+  font-size: var(--yw-fs-2xs); line-height: 1.4;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--yw-ink-700); border: 1px solid var(--yw-line); color: var(--yw-text-dim);
+}
+/* 已经挑好名字的那一格：值本身也要看得清（它是这一格的内容，不是提示） */
+.reco-pick.is-set { color: var(--yw-gold-lt); border-color: var(--yw-gold); }
+
+/* 弹窗本体（`<dialog>`，脚本建的；模板里没有它的 DOM —— 和 lightbox 一个道理：
+   没 JS 的页面上不该出现一个点不开的空壳）。窄屏上它几乎占满宽度，宽屏上是个窄条。 */
+.reco-dlg {
+  width: min(30rem, calc(100vw - 2rem)); margin: auto;
+  padding: 0;                                  /* 内边距交给里面的 .reco-dlg-body：
+                                                  留在这儿的话点空白也会命中 dialog，
+                                                  而背景点击的判据正是 `e.target === dlg` */
+  border: 1px solid var(--yw-line); border-radius: 10px;
+  background: var(--yw-ink-800); color: var(--yw-text);
+  font-size: var(--yw-fs-xs);
+}
+.reco-dlg::backdrop { background: rgba(0, 0, 0, 0.62); }
+.reco-dlg-body { padding: 0.75rem 0.85rem; }
+.reco-dlg-head { margin: 0 0 0.15rem; font-size: var(--yw-fs-sm); }
+.reco-dlg-tip { margin: 0 0 0.5rem; color: var(--yw-text-mute); font-size: var(--yw-fs-2xs); }
+/* ★ 输入框在这儿**占满一整行** —— 卡片里那 60px 放不下 placeholder，正是这次改动的由来 */
+.reco-dlg-input {
+  width: 100%; margin: 0 0 0.5rem; padding: 0.35rem 0.5rem;
+  font-size: var(--yw-fs-xs); height: auto;
+}
+.reco-dlg-list {
+  list-style: none; margin: 0; padding: 0.15rem;
+  /* min-height 是**故意**的：名单随打字变长变短，不给个下限的话整扇窗会跟着一跳一跳。
+     下限给 30vh、上限 40vh —— 命中少的时候盒子照样是个盒子，命中多的时候里面滚
+     （手机上 40vh 大约 6 行）。 */
+  min-height: 30vh; max-height: 40vh; overflow-y: auto;
+  border: 1px solid var(--yw-line); border-radius: 6px;
+  background: var(--yw-ink-900);
+}
+.reco-dlg-item {
+  display: block; width: 100%; margin: 0; padding: 0.3rem 0.4rem; height: auto;
+  text-align: left; font-size: var(--yw-fs-2xs); line-height: 1.3;
+  background: none; border: 0; border-radius: 5px; color: var(--yw-text-dim);
+}
+.reco-dlg-item:hover, .reco-dlg-item:focus { background: var(--yw-ink-700); color: var(--yw-text); }
+.reco-dlg-empty { margin: 0.3rem 0; color: var(--yw-text-mute); font-size: var(--yw-fs-2xs); }
+.reco-dlg-foot { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.6rem; }
+.reco-dlg-foot button { width: auto; margin: 0; padding: 0.25rem 0.8rem; font-size: var(--yw-fs-2xs); }
 
 /* --------------------------------------------------------------------------
    17. 图片弹层（点图看大图）
