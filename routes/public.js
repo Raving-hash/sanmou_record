@@ -2,6 +2,7 @@ const path = require('path');
 const db = require('../db');
 const limiter = require('../limiter');
 const robots = require('../robots');
+const returnto = require('../returnto');
 const router = require('express').Router();
 
 // ---------- 游客能看的那一点点（全站唯一的免登录入口） ----------
@@ -25,10 +26,17 @@ const flash = (req, type, msg) => {
 };
 
 // 回跳目标。发完/删完都要落回**那张卡**（PRG），别让人以为没生效 —— 和打分路由一样。
-// 成员可能在首页的墙上看，游客只可能在 /wall 上看，所以模板里带一个 hidden 的 back。
-// 白名单判定，不拿它拼任意地址。
-const backTo = (req, entryId) =>
-  (req.body.back === 'wall' ? '/wall' : '/') + (entryId ? `#e${entryId}` : '');
+// 2026-10-17 起模板统一带 hidden 的 returnTo（可能是 /、/wall、/seasons/<id>/wall，
+// 或首页带筛选的 /?hero=…），这里只做白名单校验，不拿它拼任意地址。
+// 旧表单的 back=wall 仍然认，免得缓存里的旧页面发出来落错地方；赛季墙会核对期号。
+const backTo = (req, entryId, seasonId = null) => {
+  const raw = req.body.returnTo || (req.body.back === 'wall' ? '/wall' : '/');
+  const safe = returnto.safe(raw, '/', { seasonId });
+  // 游客只可能站在 /wall 上；别让表单把他带去登录后才看得到的赛期墙。
+  // 成员从哪来就回哪（首页筛选 query、/wall、/seasons/<id>/wall 都认）。
+  const target = (req.user || safe === '/' || safe === '/wall') ? safe : '/wall';
+  return target + (entryId ? `#e${entryId}` : '');
+};
 
 // 正文：把连续空白折成一个空格再 trim。只 trim 不够 —— 一串全角空格（　，\s 认它）
 // 也能凑出一个"看起来是空的 20 个字"。
@@ -100,6 +108,29 @@ router.get('/wall', (req, res) => {
   });
 });
 
+// GET /rules —— 公开的赛制说明（2026-10-17 加）。
+// 这是游客**第二个**免登录页面，和 /wall 一样故意不碰任何积分/名次/成员数据；
+// 所有数字都从 db 的单一真源传过去，模板里不写死 2 / 10 / 400 这些数。
+router.get('/rules', (req, res) => {
+  const season = db.getOpenSeason();
+  const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  res.render('rules', {
+    title: '赛制说明',
+    topN: db.TOP_N,
+    rateValues: db.RATE_VALUES,
+    rateQuota: db.RATE_QUOTA,
+    eyeBase: db.EYE_BASE,
+    eyeRows: db.RATE_VALUES.slice().sort((a, b) => b - a)
+      .map((value) => ({ value, delta: db.eyeDelta(value) })),
+    openWeekdayName: WEEKDAYS[db.OPEN_WEEKDAY],
+    lockWeekdayName: WEEKDAYS[db.LOCK_WEEKDAY],
+    lockHour: db.LOCK_HOUR_BJ,
+    season,
+    uploadOpenAt: season ? db.getUploadOpenAt(season) : null,
+    rateLockAt: season ? db.getRateLockAt(season) : null,
+  });
+});
+
 // ---------- 写 ----------
 
 // 发表评论。游客和成员共用这一条，靠 req.user 区分署名（游客一律「游客」）。
@@ -114,7 +145,7 @@ router.post('/entries/:id/comments', (req, res) => {
     return res.redirect(backTo(req, null));
   }
 
-  const back = backTo(req, entry.id);
+  const back = backTo(req, entry.id, entry.season_id);
 
   // 没传阵容 = 墙上根本没有他的卡，评论发出去谁也不会看到 —— 和打分同一道关
   // （routes/main.js 的「他还没传阵容，不能打分」）。
@@ -167,6 +198,9 @@ router.post('/comments/:id/delete', (req, res) => {
     flash(req, 'err', '这条评论已经不在了');
     return res.redirect(backTo(req, null));
   }
+  // 赛季墙回跳要核对期号；评论只存 entry_id，期由 entry 带出来。
+  const targetEntry = db.getEntry(c.entry_id);
+  const seasonId = targetEntry ? targetEntry.season_id : null;
 
   // 管理员删任意一条；成员删自己发的。游客发的 user_id 是 NULL，所以只有管理员删得掉
   // —— 游客没有身份，也就没有"本人"这回事。
@@ -175,7 +209,7 @@ router.post('/comments/:id/delete', (req, res) => {
 
   db.deleteComment(c.id);
   flash(req, 'ok', '评论已删除');
-  res.redirect(backTo(req, c.entry_id));
+  res.redirect(backTo(req, c.entry_id, seasonId));
 });
 
 module.exports = router;

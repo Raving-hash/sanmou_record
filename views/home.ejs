@@ -12,23 +12,50 @@
     <a role="button" class="secondary" href="/score">录入积分</a>
   </div>
 
-  <% if (me_entry && me_entry.score !== null) { %>
-    <article class="mine-card">
-      <p>你本期已提交 <strong class="num"><%= me_entry.score %></strong> 分
-        <small class="muted">（提交于 <%= fmt(me_entry.score_submitted_at) %>）</small></p>
-      <p class="muted small">改分或换截图会刷新提交时间，同分时排名会靠后。</p>
-    </article>
-  <% } else if (me_entry) { %>
-    <article class="mine-card">
-      <p class="muted">你本期传了阵容但还没录积分 —— <a href="/score">现在录入</a>。
-        传了阵容就算参赛（占着参赛次数和胜率的分母），但<strong>没有积分就没有名次</strong>：
-        每期的胜者是积分前两名。</p>
-    </article>
-  <% } else { %>
-    <article class="mine-card">
-      <p class="muted">你本期还没开始 —— <a href="/lineup">上传阵容</a>、<a href="/score">录入积分</a>。</p>
-    </article>
-  <% } %>
+  <%# 本周待办（2026-10-17）：把原来三段 mine-card 合成一张清单。
+      每一项只回答"我这周还差什么"，链接直接落到那个动作上；赛制说明链到公开页。
+      状态判断全部来自 routes/main.js 传的局部变量，模板不自己算时间。 %>
+  <article class="todo-card">
+    <header class="todo-head">
+      <strong>本周待办</strong>
+      <small class="muted">规则不清楚？<a href="/rules">看赛制说明</a></small>
+    </header>
+    <ul class="todo-list">
+      <li class="todo-item <%= me.game_name ? 'is-done' : 'is-todo' %>">
+        <span class="todo-state"><%= me.game_name ? '已设置' : '待办' %></span>
+        <span class="todo-main">
+          <% if (me.game_name) { %>游戏名 <strong><%= me.game_name %></strong>
+          <% } else { %>还没填游戏名 —— Windows 端 OCR 录分认不出你，<a href="/password#game-name">去设置</a><% } %>
+        </span>
+      </li>
+      <li class="todo-item <%= me_images.length ? 'is-done' : (uploadClosed ? 'is-off' : 'is-todo') %>">
+        <span class="todo-state"><%= me_images.length ? '已传' : (uploadClosed ? '未开放' : '待办') %></span>
+        <span class="todo-main">
+          <% if (me_images.length) { %>本期阵容已上传（<a href="/lineup">查看/更换</a>）
+          <% } else if (uploadClosed) { %>阵容要到 <strong><%= uploadOpenAt ? fmt(uploadOpenAt) : '—' %></strong> 才开放
+          <% } else { %>还没传阵容，<a href="/lineup">去上传</a><% } %>
+        </span>
+      </li>
+      <li class="todo-item <%= !canRate ? 'is-off' : (myRatingCount ? 'is-done' : 'is-todo') %>">
+        <span class="todo-state"><%= !canRate ? '已截止' : (myRatingCount ? '已投' : '待办') %></span>
+        <span class="todo-main">
+          <% if (!canRate) { %>打分已于 <strong><%= rateLockAt ? fmt(rateLockAt) : '—' %></strong> 截止，已投 <%= myRatingCount %> 套
+          <% } else if (!allLineupCount) { %>还没有人传阵容，等别人传了再来打分
+          <% } else { %>已投 <%= myRatingCount %> 套<% if (quota.length) { %>；
+            <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><%= q.value %> <%= q.left ? `剩 ${q.left}` : '已用完' %><% }) %>
+          <% } %>，<a href="<%= firstUnrated ? '/#e' + firstUnrated.id : '/' %>">去打分</a><% } %>
+        </span>
+      </li>
+      <li class="todo-item <%= me_entry && me_entry.score !== null ? 'is-done' : 'is-todo' %>">
+        <span class="todo-state"><%= me_entry && me_entry.score !== null ? '已录' : '待办' %></span>
+        <span class="todo-main">
+          <% if (me_entry && me_entry.score !== null) { %>积分 <strong><%= me_entry.score %></strong> 分（<a href="/score">改分</a>）
+          <% } else { %>还没录积分，<a href="/score">去录入</a><% } %>
+        </span>
+      </li>
+    </ul>
+    <p class="muted small">改分或换图会刷新提交时间，同分时排名会靠后；传了阵容就算参赛，但没有积分就没有名次。</p>
+  </article>
 
   <%# 进行中的期**不出「本期排名」那一节**（2026-10-14 用户的口径：结算以前没有名次）。
       这一期 21 套阵容、0 条积分，那一节渲染出来只有一句"还没有人交积分" —— 一个空壳
@@ -39,11 +66,80 @@
       结算之后走下面「没有进行中的期」那个分支，排名表照旧出来（那时名次才定下来）。
       ⚠️ 要在这儿把排名表加回来，先去 routes/main.js 把 ranking 传回来。 %>
 
+  <%# 阵容墙筛选（2026-10-17）。纯 GET 表单，没有 JS 也能用；提交后整页重排，
+      顺序仍由 db.getLineupWall 决定，筛选只在它的结果上做（#N 不重编号）。
+      筛选项只从路由的白名单里取，非法值在路由里就被忽略。 %>
+  <form method="get" action="/" class="wall-filter">
+    <div class="wall-filter-row">
+      <label>武将
+        <select name="hero">
+          <option value="">全部</option>
+          <% heroes.forEach((h) => { %>
+            <option value="<%= h.key %>"<% if (filters.hero === h.key) { %> selected<% } %>><%= (h.variant || '') + h.name %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>势力
+        <select name="faction">
+          <option value="">全部</option>
+          <% factions.forEach((v) => { %>
+            <option value="<%= v %>"<% if (filters.faction === v) { %> selected<% } %>><%= v %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>兵种
+        <select name="arm">
+          <option value="">全部</option>
+          <% arms.forEach((v) => { %>
+            <option value="<%= v %>"<% if (filters.arm === v) { %> selected<% } %>><%= v %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>评级
+        <select name="tier">
+          <option value="">全部</option>
+          <% tiers.forEach((v) => { %>
+            <option value="<%= v %>"<% if (filters.tier === v) { %> selected<% } %>><%= v %></option>
+          <% }) %>
+        </select>
+      </label>
+    </div>
+    <div class="wall-filter-row">
+      <label>积分
+        <select name="scored">
+          <option value="">全部</option>
+          <option value="1"<% if (filters.scored === '1') { %> selected<% } %>>只看已交分</option>
+          <option value="0"<% if (filters.scored === '0') { %> selected<% } %>>只看未交分</option>
+        </select>
+      </label>
+      <label>我的打分
+        <select name="mine">
+          <option value="">全部</option>
+          <option value="rated"<% if (filters.mine === 'rated') { %> selected<% } %>>我打过分</option>
+          <option value="unrated"<% if (filters.mine === 'unrated') { %> selected<% } %>>我还没打分</option>
+        </select>
+      </label>
+      <label>昵称
+        <input name="q" value="<%= filters.q || '' %>" maxlength="20" placeholder="搜昵称">
+      </label>
+      <button type="submit">筛选</button>
+      <% if (filterActive) { %><a role="button" class="secondary outline btn-sm" href="/">清除筛选</a><% } %>
+    </div>
+  </form>
+
   <%# canRate / quota / rateLockAt 都是 routes/main.js 查好的：能打分 = 进行中且还没过截止点
       （每期开期后第一个周四 12:00）；quota 是**我自己**还剩的名额（封盘后是空的）；
       rateLockAt 给墙上显示截止时间。byScore 也在路由里查（db.isWallByScore）：
-      封盘后墙改成按积分排，墙上那句顺序说明跟着换。 %>
-  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt, byScore }) %>
+      封盘后墙改成按积分排，墙上那句顺序说明跟着换。
+      backTo 带着筛选 query，打分/评论/纠错 POST 后跳回来时筛选不丢。 %>
+  <%- include('partials/lineup-gallery', {
+        rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt, byScore,
+        backTo: wallReturn, filterNote,
+      }) %>
+  <% if (!lineups.length) { %>
+    <p class="muted"><%= filterActive ? '没有符合筛选的阵容。' : '本期还没有人传阵容。' %>
+      <% if (filterActive) { %><a href="/">清除筛选</a><% } %></p>
+  <% } %>
 
   <h3>还没交积分（<%= notSubmitted.length %>）</h3>
   <% if (!notSubmitted.length) { %>

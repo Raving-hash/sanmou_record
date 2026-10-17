@@ -5,9 +5,10 @@
   入参：
     entryId  这张卡的 entry id。发表用 /entries/<id>/comments，回跳用 #e<id>
     list     db.getLineupWall 给这张卡挂上的 comments（db.getWallComments 的结果）
-    backTo   '#' 之前那一截，'/' 或 '/wall'。写进 hidden 交给服务端（白名单认，
-             不拿它拼任意地址）—— 成员在首页的墙上看、游客在 /wall 上看，
-             发完都要落回**刚才那张卡**，不能把人甩到另一个页面
+    backTo   '#' 之前那一截：'/'、'/wall'、'/seasons/<id>/wall'，或首页带筛选的
+             '/?hero=…'。原样写进 hidden 的 returnTo，由服务端白名单校验
+             （returnto.js）—— 成员在首页/赛期墙上看、游客在 /wall 上看，
+             发完都要落回**刚才那张卡**，不能把人甩到另一个页面，也不能丢筛选
   me / fmtShort / eyeLevel 这些从 locals 继承（include 传的数据是并进当前 locals 的，
   不是替换掉 —— eye.ejs 一直是这么用的）。
 
@@ -41,7 +42,7 @@
                   （routes/public.js），这里只是不渲染一个注定 403 的按钮。 %>
               <% if (locals.me && (locals.me.is_admin || locals.me.id === c.user_id)) { %>
                 <form method="post" action="/comments/<%= c.id %>/delete" class="cmt-del">
-                  <input type="hidden" name="back" value="<%= backTo === '/wall' ? 'wall' : 'home' %>">
+                  <input type="hidden" name="returnTo" value="<%= backTo %>">
                   <button type="submit" title="删掉这条评论" aria-label="删掉这条评论">删</button>
                 </form>
               <% } %>
@@ -54,7 +55,7 @@
       <p class="cmt-empty">还没有人评论。</p>
     <% } %>
     <form method="post" action="/entries/<%= entryId %>/comments" class="cmt-form">
-      <input type="hidden" name="back" value="<%= backTo === '/wall' ? 'wall' : 'home' %>">
+      <input type="hidden" name="returnTo" value="<%= backTo %>">
       <input name="text" maxlength="20" required autocomplete="off"
              placeholder="说一句（20 字内）" aria-label="评论内容，20 字以内">
       <button type="submit">发表</button>

@@ -1,0 +1,94 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2><%= (hero.variant || '') + hero.name %>
+    <span class="badge"><%= hero.faction %> · <%= hero.arm %></span>
+    <% if (isT0(hero.key)) { %><span class="badge badge-first">T0</span><% } %>
+  </h2>
+  <p class="muted">武将详情 · <a href="/heroes">回武将索引</a> ·
+    <a href="/heroes?a=<%= hero.key %>">找搭档</a></p>
+</hgroup>
+
+<% if (stat) { %>
+  <div class="stat-grid">
+    <article class="stat">
+      <span class="stat-num"><%= stat.entries %></span>
+      <span class="stat-label">出场<% if (stat.openEntries) { %>（本期 <%= stat.openEntries %>）<% } %></span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.users %></span>
+      <span class="stat-label">使用人数</span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.settledEntries %></span>
+      <span class="stat-label">已结算样本</span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.winRate === null ? '—' : stat.winRate + '%' %></span>
+      <span class="stat-label">胜率<%= stat.winRate === null ? `（样本 ${stat.settledEntries}）` : `（${stat.wins} 胜）` %></span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.avgScore === null ? '—' : stat.avgScore %></span>
+      <span class="stat-label">平均分<%= stat.avgScore === null ? `（样本 ${stat.scoredEntries}）` : '' %></span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.avgRating === null ? '—' : stat.avgRating %></span>
+      <span class="stat-label">平均互评<%= stat.ratingN ? `（${stat.ratingN} 票）` : '' %></span>
+    </article>
+    <article class="stat">
+      <span class="stat-num"><%= stat.autoCells || '—' %></span>
+      <span class="stat-label">未核对格子</span>
+    </article>
+  </div>
+  <p class="muted small">
+    出场 / 使用人数算所有期；胜率、平均分、平均互评只算已结算的期，样本少于
+    <%= minSample %> 条显示「—」。机器自动填、还没人核对的格子计入统计，详情里标 <span class="auto-q">?</span>。
+  </p>
+<% } %>
+
+<h3>出现过的阵容（<%= rows.length %>）</h3>
+<% if (!rows.length) { %>
+  <p class="muted">这个武将还没有被识别进任何阵容。</p>
+<% } else { %>
+  <div class="archive-list">
+    <% rows.forEach((r) => {
+         const tier = lineupTier(r.heroes);
+         const hit = r.heroes.find((h) => h.key === hero.key); %>
+      <article class="archive-card">
+        <div class="archive-shot">
+          <% if (r.images[0]) { %>
+            <a href="<%= imgUrl(r.images[0].filename) %>" target="_blank" rel="noopener">
+              <img src="<%= thumbUrl(r.images[0].filename) %>"
+                   alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+            </a>
+          <% } %>
+        </div>
+        <div class="archive-body">
+          <p class="archive-head">
+            <a href="/u/<%= r.uid %>"><%= r.nickname %></a>
+            <a class="muted" href="/seasons/<%= r.season_id %>/wall#e<%= r.id %>"><%= r.season_name %><% if (r.season_status === 'open') { %> · 进行中<% } %></a>
+            <span class="score-pill"><% if (r.score === null) { %>未交分<% } else { %><%= r.score %> 分<% } %></span>
+            <% if (r.rank) { %><span class="shot-rank">#<%= r.rank %></span><% } %>
+          </p>
+          <p class="archive-meta">
+            <span class="reco-tier is-<%= tier.tier.toLowerCase() %>"><%= tier.tier %></span>
+            <% r.heroes.filter((h) => isT0(h.key)).forEach((h) => { %>
+              <span class="hero-chip"><%= (h.variant || '') + h.name %></span>
+            <% }) %>
+            <span class="hero-chip is-target<% if (hit && hit.auto) { %> is-auto<% } %>"
+                  title="<%= hit && hit.auto ? '机器自动识别，尚未核对' : '' %>">
+              目标：<%= (hero.variant || '') + hero.name %><% if (hit && hit.auto) { %> ?<% } %>
+            </span>
+          </p>
+          <p class="muted small">
+            <% if (r.rating.avg === null) { %>互评：还没有人打分
+            <% } else { %>互评均分 <strong><%= r.rating.avg %></strong>（<%= r.rating.n %> 人）<% } %>
+            <% if (r.commentsN) { %> · 💬 <%= r.commentsN %><% } %>
+          </p>
+        </div>
+      </article>
+    <% }) %>
+  </div>
+<% } %>
+
+<%- include('partials/footer') %>

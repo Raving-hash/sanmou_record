@@ -1,0 +1,33 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2><%= season.name %> 阵容墙
+    <% if (season.status === 'settled') { %>
+      <span class="badge badge-settled">已结算</span>
+    <% } else { %>
+      <span class="badge badge-open">进行中</span>
+    <% } %>
+  </h2>
+  <p class="muted">
+    <% if (season.status === 'settled' && season.settled_at) { %>结算于 <%= fmt(season.settled_at) %> · <% } %>
+    只展示阵容卡 · <a href="/seasons/<%= season.id %>">回赛期详情</a>
+    <% if (season.status === 'open') { %> · 打分请回<a href="/">首页阵容墙</a><% } %>
+  </p>
+</hgroup>
+
+<% if (!lineups.length) { %>
+  <p class="muted">这一期还没有人传阵容。</p>
+<% } %>
+
+<%- include('partials/lineup-gallery', {
+      rows: lineups,
+      heading: `${season.name} 阵容`,
+      canRate: false,
+      byScore,
+      showScore: true,
+      backTo,
+    }) %>
+
+<p><a href="/seasons/<%= season.id %>">← 回赛期详情</a> · <a href="/history">全部历史赛期</a></p>
+
+<%- include('partials/footer') %>

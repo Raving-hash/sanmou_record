@@ -1163,7 +1163,7 @@ Pico 在 1280 视口下只给 `1200px`（≥1536 才 1450），而阵容墙要"�
 - ⚠️ `.shot-card` **必须保持"1px 边框 + 零内边距"**：`wall-harness.js` 有一格算的是
   「图框宽 = 卡宽 − 2」，那个 2 就是这两条边框。要留白就加在卡里面的各块上。
 
-### 手机（第 18 节，断点 640 → 700）
+### 手机（窄屏一节，断点 640 → 700）
 
 手机从"两列 150px 的竖卡"改成**一行一张的横排卡**：图在左上角（168×134）、
 顶栏是它右边的一块高面板、打分区 / 说明 / 评论通栏。
@@ -1211,7 +1211,7 @@ Pico 在 1280 视口下只给 `1200px`（≥1536 才 1450），而阵容墙要"�
 
 | 改什么 | 必须一起改 |
 |---|---|
-| 卡宽 / 图框尺寸 / 断点 | `public/style.css`（第 9 节那一档 + 第 18 节那一档）→ **`.devlocal/preview/lb/wall-harness.js` 顶部那几个常数**（`mobile` 判据、`W`、`H`）→ `title-harness.js` 的 `innerWidth > 700` → `comment-harness.js` 的档位判据（它按视口宽判，不拿卡宽猜） |
+| 卡宽 / 图框尺寸 / 断点 | `public/style.css`（第 9 节那一档 + 窄屏那一档）→ **`.devlocal/preview/lb/wall-harness.js` 顶部那几个常数**（`mobile` 判据、`W`、`H`）→ `title-harness.js` 的 `innerWidth > 700` → `comment-harness.js` 的档位判据（它按视口宽判，不拿卡宽猜） |
 | `style.css` 的小节 | 编号必须 **1..N 连续**，且「图片弹层」要排在「窄屏」前面（`test-lightbox.js` 逐条断言）。加小节就得整体重编。 |
 | 色号的值 | 只有 `title-harness.js` 那三条 RGB 通道断言会管你（朱红 R 最高、亮蓝 B 最高、两枚章底色不同）；`--yw-*` 的**名字**被 `test-eye.js` 点着名，别改 |
 | 改墨色（页面/卡片/正文） | ① `.topnav` 与 `.lightbox .lb-btn` 是**硬写的 `rgba()`**，得手动同步；② `<meta name="theme-color">`（`header.ejs`）同理，没人量它，最容易漏；③ 正文和底色要**一起**动，只动一边等于没改（见「柔化」那节） |
@@ -2083,6 +2083,132 @@ OCR 出来的游戏名常有一两个字读错。接口先精确匹配（含竖�
 
 ---
 
+## 武将索引与检索（2026-10-17 加）
+
+**页面**：`/heroes`（成员可见）是武将总表 + 双将/三将组合检索；`/hero/:key` 是单个武将
+的跨期阵容列表。游客访问一律 302 到 `/login`（`routes/main.js` 挂在 `requireLogin` 后面）。
+
+**口径**（`db.getHeroIndex` / `getHeroLineups` / `getHeroPairLineups`，都在 `db.js` 末尾）：
+
+- 只认**卡上第一张阵容图**，和 `getSeasonHeroData` 同一个子查询；老数据里 entry 5/9/16
+  有两张图，第二张的武将不计入。
+- `chosen_key` 非空且能 JOIN 上 `heroes` 才算；同一 entry 同一武将多行时按
+  `(entry_id, key)` 去重，人工行赢 auto 行。
+- `auto = source === 'auto'`；**统计全部计入**（用户定的口径），页面上标 `?`。
+- 出场 / 使用人数算**所有期**（另给 `openEntries`「本期在用」）；胜率、平均分、
+  平均互评只算**已结算期**。样本少于 `HERO_MIN_SAMPLE`（3）时返回 null，页面写
+  「样本不足」，不拿 1 场 100% 当结论。
+- 平均分只算有分的 entry；平均互评按 entry 先算均分再平均（不是把所有票混在一起），
+  避免票多的阵容权重过大。
+- 胜率的分母是「该武将出现过的已结算 entry 数」，包含只传阵容没交分的期（和
+  `STATS_SQL` 的参赛口径一致）。
+
+**组合检索**：`?a=&b=&c=`（至少两个合法 key），走 `db.getHeroPairLineups`。
+先用 `COUNT(DISTINCT chosen_key)` 找「同时含这些 key」的 entry，再在内存里按
+`Math.floor((slot-1)/3)` 做「同一支部队」过滤。`sameUnit=1` 时要求所有人都在同一队里。
+
+**墙上筛选**（首页，成员）：`?hero=`、`?faction=`、`?arm=`、`?tier=T0..T3`、
+`?scored=1/0`、`?mine=rated/unrated`、`?q=昵称`。参数在 `routes/main.js` 的
+`parseWallFilters` 里逐个白名单校验，非法值直接忽略。**过滤放在 `getLineupWall`
+之后**：`rank`（卡上的 `#N`）是全期积分名次，先筛再数会把它重编。空结果由首页给
+「没有符合筛选的阵容」+ 清除链接；`lineup-gallery.ejs` 在 `rows` 为空时本来就不渲染。
+
+**回跳**：墙带筛选时，打分/评论/纠错表单里的 `returnTo` 会带上 `/?hero=…`，
+投完票跳回同一版墙（见 `views/partials/lineup-gallery.ejs` 和 `returnto.js`）。
+
+**自测**：`bash .devlocal/test/run.sh features`（本套里造一个 settled 的第 900 期，
+覆盖第一图口径、auto 计数、样本门槛、组合/同队、筛选集合、`#N` 不重编号、回跳）。
+
+## 历史赛期阵容墙（2026-10-17 加）
+
+`GET /seasons/:id/wall`（登录成员）把**任意一期**的阵容墙单独开一页：复用
+`views/partials/lineup-gallery.ejs`，`canRate:false`（打分只在首页进行中的墙上有），
+`showScore:true`，`byScore:db.isWallByScore(season)`，`backTo:/seasons/<id>/wall`。
+赛期详情页在 `db.countLineupEntries(season.id) > 0` 时出一个「看这一期阵容墙（N 套）」
+入口；没图的空期不出。
+
+历史墙的评论表单把 `returnTo` 指向这一页，发完/删完落回 `#e<entry id>`。
+`routes/public.js` 的 `backTo` 现在接受 `/seasons/<digits>/wall`，并核对期号
+（不能从 A 期的卡跳回 B 期的墙）；游客只允许 `/` 和 `/wall`。
+
+**自测**：`features` 套里的「历史墙」一节（3 张卡、无打分按钮、评论回跳）。
+
+## 个人阵容档案（2026-10-17 加）
+
+`/u/:userId` 保留原来的统计格和历史表，新增三块：
+
+- **近期状态**：`db.getUserRecentForm` 取**最近 N 个已结算期**（不是只取参赛过的期），
+  每期标成 `胜 / 负 / 未交 / 缺`。缺席必须显式出现，否则连胜会把隔了一期的两次胜利
+  算成连续。当前连胜从最近一期往前数，遇到非胜立刻停。`scoreDelta` 只在最近两个
+  有分的期之间算。
+- **常用武将**：`db.getUserCommonHeroes`，第一图口径，前 5，链到 `/hero/:key`。
+- **阵容档案**：`db.getUserLineupArchive` 返回该用户所有**至少有一张阵容图**的 entry
+  （含进行中的期）。卡片显示第一张图、T 级、T0 将、积分/名次/胜负、互评均分/票数、
+  评论数，并链到该期墙的 `#e<entry id>`。`data-shots` 带该 entry 的全部图，
+  和现有 lightbox 翻页兼容；老数据的两张图仍然都能翻。
+
+`getUserLineupArchive` 内部复用 `enrichEntryCards`：图 / 武将 / 互评 / 名次 / 评论数
+都是批量查的，不按 entry 逐条回查。进行中的期 `is_winner`/`final_rank` 是空的，
+模板写「进行中」，不要拿 0 当结果。
+
+**自测**：`features` 套里的「个人档案」一节；多图老数据的第二张图不进常用武将。
+
+## 纪录墙与本期之最（2026-10-17 加）
+
+`GET /records`（成员）把长期目标做成一面墙：最高单期积分、最高单期均分、最长连胜、
+最多胜场、最高胜率、单期最大慧眼涨幅。数据全在 `db.getRecords()` 里现算，不落库；
+并列时把所有人都列出来，样本不够的项返回 null（页面写「—」或「还没有…」）。
+
+**样本门槛与断点**：
+- 最高单期均分至少 `RECORD_MIN_RATERS`（3）人打分；
+- 最高胜率至少 `RECORD_MIN_PLAYS`（3）期参赛，避免 1 场 100% 霸榜；
+- 最长连胜按**所有已结算期**的正序数，缺席、未交分、没赢都会断；
+- 全部已结算期都算，包括占位期 0（和 `/rank`、`/history` 的口径一致）。
+
+**本期之最**：`db.getSeasonHighlights(seasonId)` 给最高分、口碑最好（墙的均分最大）、
+最热武将（第一图出场数）、最大慧眼涨幅。`views/partials/season-bests.ejs` 是
+`/records` 的「最近一期」和 `/seasons/:id` 的已结算区块共用的部分；赛期页只在
+`settled` 时插它，进行中的最高分还会变，不提前发。
+
+**自测**：`features` 套里的「纪录/本期之最」一节（自造第 900 期，断言最高分/均分、
+样本门槛、赛期页入口和本期之最）。
+
+## 本周待办与赛制说明（2026-10-17 加）
+
+首页进行中分支把原来的三段 `mine-card` 合成一张「本周待办」：
+
+| 项 | 完成判据 | 未完成时 |
+|---|---|---|
+| 游戏名 | `me.game_name` 非空 | 链到 `/password#game-name`，说明 OCR 录分认不出你 |
+| 上传阵容 | 本项目有阵容图 | 未到周三 12:00 显示开放时刻；已开放显示「去上传」 |
+| 打分 | `myRatingCount > 0` | 显示已投套数/名额；链到第一张还没打分的卡（`firstUnrated`） |
+| 录积分 | `me_entry.score !== null` | 链到 `/score` |
+
+状态判断全部在 `routes/main.js` 的首页分支里（`uploadOpenAt`/`uploadClosed`/
+`myRatingCount`/`firstUnrated`），模板不自己算时间。打分截止后仍显示「已投 N 套」。
+
+**规则页**：`GET /rules` 放在 `routes/public.js`（`requireLogin` 之前），游客可看。
+所有数字从 `db` 的单一真源传入：`RATE_VALUES`、`RATE_QUOTA`、`TOP_N`、`EYE_BASE`、
+`EYE_GAIN`、`OPEN_WEEKDAY`/`LOCK_WEEKDAY`/`LOCK_HOUR_BJ`（后 5 个是 2026-10-17
+补挂到 `db` 上的只读常量）。入口：游客顶栏、页脚「赛制说明」、注册页、首页待办卡。
+
+**自测**：`features` 套里的「待办/规则/游客边界」一节（游戏名缺失、上传开/关、
+打分截止、游客 302、规则页 200）。
+
+## 回跳白名单 `returnTo`（2026-10-17 加）
+
+打分、阵容纠错、评论、删评论的 POST 现在都带一个 hidden `returnTo`。它可能是：
+`/`、`/wall`、`/seasons/<id>/wall`、`/?<筛选 query>`。**不再用表单里的字符串直接拼
+Location**：`returnto.js` 的 `safe(raw, fallback, { seasonId })` 只放这几种形状，
+其余（`//host`、`https://…`、`/admin`、别的赛期墙、带 `#`/反斜杠的 query）一律回退。
+赛期 id 必须和表单所属 entry 的 `season_id` 一致；游客只允许 `/` 和 `/wall`，
+不会被带去登录后才看得到的赛期墙。旧表单的 `back=wall` 仍然认。
+
+模板侧：`lineup-gallery.ejs` 的打分 form、`reco.ejs` 的纠错 form、`comments.ejs`
+的两个 form 都写 `name="returnTo"`；`backTo` 默认 `/`，首页带筛选时是 `/?…`。
+
+**自测**：`features` 套最后一段的纯函数白名单断言 + 带筛选打分/历史墙评论的回跳。
+
 ## 反爬虫（2026-10-15 加）
 
 起因是图片搬到 R2 之后**全部公开**（见上一节），而全站**一个有效的 robots.txt 都没有**。
@@ -2420,7 +2546,7 @@ node --env-file=.env scripts/r2-pull.js --dest uploads
 ## 自测清单
 
 > ★★ **规矩（用户 2026-10-17 定）：开发完不必跑全量，只跑跟这次改动相关的那几套。**
-> 14 套一起跑是给"动了公共面 / 大改版 / 拿不准"的时候用的，日常太冗余 ——
+> 16 套一起跑是给"动了公共面 / 大改版 / 拿不准"的时候用的，日常太冗余 ——
 > 发布那条路本来就不跑测试（见 `/release`），全量跑并不能替代发布那道门。
 >
 > | 改了什么 | 跑哪些 |
@@ -2453,7 +2579,11 @@ node --env-file=.env scripts/r2-pull.js --dest uploads
 界面美化（2026-10-16 那次大改版没有新增服务端断言：动的全是 CSS 的值与几何，
 所以服务端那十二套的条数一项没变 —— 它的连锁面全在**真浏览器**那边：
 wall 那套多出一整支手机断言，comment / title 两套改了档位判据）
-各跑过一次专项回归，全部通过。**十四套服务端断言合起来 772 项，一次跑完 34 秒、全绿**；
+2026-10-17 的武将索引 / 历史赛期墙 / 个人阵容档案 / 纪录墙与本期之最 / 本周待办 /
+规则页 / `returnTo` 回跳（`features` 一套：自造 settled 第 900 期 + 快照里的开期，
+把第一图口径、auto 计数、样本门槛、组合检索、筛选集合、`#N` 不重编号、重定向白名单
+和游客边界一起钉住）
+各跑过一次专项回归，全部通过。**十六套服务端断言一次跑完约 40 秒、全绿**；
 九套**真浏览器**断言每套都在桌面、手机等几个宽度各跑一遍，一次全跑 390 项。
 （**条数别当指标追** —— 上面这段是从前的流水账，写在这儿是为了说明"这些东西真跑过"；
 日常的开发自测按本节开头那条规矩走：改哪儿跑哪儿。）
@@ -2472,6 +2602,17 @@ wall 那套多出一整支手机断言，comment / title 两套改了档位判�
 - [ ] 点图弹层：背景更深且发虚、图有投影、打开时有一下很轻的淡入
 - [ ] 手机上（375px）阵容墙是一行一张、图在左；登录页的表单填满宽度、按钮够大
 - [ ] 系统开了「减弱动效」时，弹层那下淡入不再动（`prefers-reduced-motion`）
+
+**武将 / 历史墙 / 档案 / 纪录 / 待办（2026-10-17 加）**
+- [ ] `/heroes` 能看到总表；机器填的格子有 `?`；样本不足写「样本不足」
+- [ ] `/hero/:key` 列出跨期阵容；「找搭档」回组合检索；同部队勾选会收窄结果
+- [ ] `/?hero=…`、`?faction=…`、`?tier=…`、`?scored=…`、`?mine=…`、`?q=…` 都能筛；
+      卡上的 `#N` 仍是全期名次；清除筛选能回到全量
+- [ ] 带筛选投一票 → 跳回来还在同一版筛选墙（`returnTo`）
+- [ ] `/seasons/:id` 有「看这一期阵容墙」；历史墙没有打分按钮；评论发完回到那张卡
+- [ ] `/u/:id` 有近期状态（含「缺」）、常用武将、阵容档案；多图老数据能翻第二张
+- [ ] `/records` 并列全列、样本不足写「—/还没有」；赛期页有「本期之最」
+- [ ] 首页待办四项状态对（游戏名/上传/打分/积分）；`/rules` 游客可看
 
 **账号**
 - [ ] 邀请码错误 → 提示"邀请码不正确或已失效"
@@ -2800,14 +2941,17 @@ schema.sql        建表语句
 r2.js             Cloudflare R2 客户端：手写 SigV4（presign PUT / HEAD / 批量删 / 直传 / 拉取 / 列全量 / setCors）
 upload.js         图片的命名 / 签名 / 删除策略（命名规则与 MAX_OUT_BYTES 都只在这儿一处）
 limiter.js        登录/注册失败限流 + 游客发评论限流 + 签发上传令牌限流（内存，重启清零）
+returnto.js       回跳白名单：打分/纠错/评论/删评论的 returnTo 只放站内固定路径与 /?query
 robots.js         反爬虫策略：**两份** robots.txt 的正文（站点那份放行搜索引擎、图床那份一律不爬）
 routes/auth.js    注册、登录、登出、改密码
 routes/uploads.js POST /uploads/sign（发令牌）+ GET /uploads/:name（老链接 302）+ 末尾 404 兜底
-routes/public.js  游客可见的那一点点：/wall、/robots.txt、/favicon.ico、发评论、删评论
-routes/main.js    看板、阵容、积分、打分、历史、排行、个人页、结算战报的拼接（buildReport）
+routes/public.js  游客可见的那一点点：/wall、/rules、/robots.txt、/favicon.ico、发评论、删评论
+routes/main.js    看板、阵容、积分、打分、历史、排行、个人页、结算战报（buildReport）
+                  + 武将索引 / 历史赛期墙 / 纪录墙 / 个人档案 / 墙筛选
 routes/admin.js   赛期、邀请码、成员、修正积分、清空整期打分
-views/            EJS 模板（服务端渲染，全部表单提交；wall.ejs 是游客那版首页）
-public/           pico.min.css（v2.1.1，本地）+ style.css（令牌层 + 18 个小节）
+views/            EJS 模板（服务端渲染，全部表单提交；wall.ejs 是游客那版首页；
+                  heroes/hero/records/rules/season-wall.ejs 是 2026-10-17 新增的）
+public/           pico.min.css（v2.1.1，本地）+ style.css（令牌层 + 20 个小节）
                   + icon.svg / favicon.ico / apple-touch-icon.png（站点图标三份，生成物）
                   + upload.js（**浏览器里压缩 + 直传 R2** + 拖拽）
                   + lightbox.js（点图弹层）+ comments.js（回跳时展开评论区）

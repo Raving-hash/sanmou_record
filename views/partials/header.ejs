@@ -42,6 +42,8 @@
       <li><a href="/" class="<%= path === '/' ? 'active' : '' %>">本期</a></li>
       <li><a href="/history" class="<%= path === '/history' ? 'active' : '' %>">历史</a></li>
       <li><a href="/rank" class="<%= path === '/rank' ? 'active' : '' %>">排行</a></li>
+      <li><a href="/records" class="<%= path === '/records' ? 'active' : '' %>">纪录</a></li>
+      <li><a href="/heroes" class="<%= path.startsWith('/hero') ? 'active' : '' %>">武将</a></li>
       <li><a href="/ratings" class="<%= path === '/ratings' ? 'active' : '' %>">打分</a></li>
       <li><a href="/u/<%= me.user_id %>" class="<%= path.startsWith('/u/') ? 'active' : '' %>">我的</a></li>
       <% if (me.is_admin) { %>
@@ -56,6 +58,7 @@
       </li>
     <% } else { %>
       <li><a href="/wall" class="<%= path === '/wall' ? 'active' : '' %>">阵容墙</a></li>
+      <li><a href="/rules" class="<%= path === '/rules' ? 'active' : '' %>">规则</a></li>
       <li><a href="/login" class="<%= path === '/login' ? 'active' : '' %>">登录</a></li>
       <li><a href="/register" class="<%= path === '/register' ? 'active' : '' %>">注册</a></li>
     <% } %>

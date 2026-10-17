@@ -109,6 +109,9 @@
         <%# 认的是**哪一张图**。卡上摊开的是 images[0]，服务端要按同一个来 ——
             不传的话它只能猜，而老数据里一个 entry 可能有好几张阵容图。 %>
         <input type="hidden" name="filename" value="<%= shownFile %>">
+        <%# 改完回**刚才那一页**（首页可能带筛选，历史墙是 /seasons/<id>/wall）。
+            没传就回首页；服务端只认白名单。 %>
+        <input type="hidden" name="returnTo" value="<%= locals.returnTo || '/' %>">
         <div class="reco-grid">
           <% guesses.forEach((g) => {
                const slot = g.slot;

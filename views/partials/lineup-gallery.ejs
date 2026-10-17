@@ -67,6 +67,8 @@
   // db.isWallByScore 排好**，这里只负责说对那句话；三处调用都传了它，
   // 但仍然用 locals 兜底 —— 模板里引一个没传进来的名字是 ReferenceError。
   const byScore = locals.byScore === true;
+  // 可选：筛选后的说明（首页带 ?hero=… 时由 home.ejs 传进来）。没传就不出这一行。
+  const filterNote = locals.filterNote || null;
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -85,6 +87,7 @@
       顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次（交了积分的才有）。
     <% } %>
   </p>
+  <% if (filterNote) { %><p class="filter-note muted small"><%= filterNote %></p><% } %>
   <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
   <% if (canRate && quotaLeft.size) { %>
     <p class="quota-line">
@@ -211,6 +214,8 @@
                 <p class="rate-note">点别的档位就是改分</p>
               <% } %>
               <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
+                <%# 投完跳回**带筛选的那一版墙**（2026-10-17）。不传的话只能回 /。 %>
+                <input type="hidden" name="returnTo" value="<%= backTo %>">
                 <% rateValues.forEach((v) => {
                      const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
                      const mine = r.rating.mine === v;  // 我给他打的就是这一档
@@ -233,7 +238,7 @@
             public/wall.js 只量 HEAD / NOTE / RATE 三块做同排对齐，这一块高度天然不一
             （有的卡识别过、有的没有），插在那三块中间会把对齐算歪。
             放这儿和评论区作伴：都是"高度不一、放在对齐区之外"的东西。 %>
-        <%- include('./reco', { r }) %>
+        <%- include('./reco', { r, returnTo: backTo }) %>
 
         <%# 卡最下面的评论区（原生 <details> 折叠，见 partials/comments.ejs）。
             数据是 db.getLineupWall 挂在这一行上的 r.comments，不用在这儿另查。 %>

@@ -1,0 +1,71 @@
+<%#
+  某一期的「本期之最」四格：最高分、口碑最好、最热武将、最大慧眼涨幅。
+  入参：
+    highlights  db.getSeasonHighlights(seasonId) 的结果，可能是 null
+    heading     标题（调用方自己拼「第 N 期 · 本期之最」之类）
+  /records 的「最近一期」和 /seasons/:id 的已结算区块共用这一份。
+%>
+<% if (!highlights) { %>
+  <p class="muted">还没有已结算的赛期，本期之最等第一期结算后出现。</p>
+<% } else { %>
+  <h3><%= heading %></h3>
+  <div class="record-grid">
+    <article class="record-card">
+      <h4>最高分</h4>
+      <% if (!highlights.topScore) { %><p class="muted">还没有人交分。</p>
+      <% } else { %>
+        <p class="record-value"><%= highlights.topScore.value %><small>分</small></p>
+        <ul class="record-holders">
+          <% highlights.topScore.holders.forEach((h) => { %>
+            <li><a href="/u/<%= h.uid %>"><%= h.nickname %></a></li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </article>
+
+    <article class="record-card">
+      <h4>口碑最好</h4>
+      <% if (!highlights.topRating) { %><p class="muted">还没有人打分。</p>
+      <% } else { %>
+        <p class="record-value"><%= highlights.topRating.value %><small>均分</small></p>
+        <ul class="record-holders">
+          <% highlights.topRating.holders.forEach((h) => { %>
+            <li>
+              <a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+              · <a href="/seasons/<%= highlights.season.id %>/wall#e<%= h.entryId %>">看阵容</a>
+              <small class="muted">（<%= h.n %> 人打分）</small>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </article>
+
+    <article class="record-card">
+      <h4>最热武将</h4>
+      <% if (!highlights.hottestHeroes) { %><p class="muted">这一期还没有识别出武将。</p>
+      <% } else { %>
+        <p class="record-value"><%= highlights.hottestHeroes.value %><small>套</small></p>
+        <ul class="record-holders">
+          <% highlights.hottestHeroes.holders.forEach((h) => { %>
+            <li><a href="/hero/<%= h.key %>"><%= (h.variant || '') + h.name %></a>
+              <small class="muted"><%= h.faction %> · <%= h.arm %></small></li>
+          <% }) %>
+        </ul>
+        <p class="muted small">包含机器自动识别、尚未核对的格子。</p>
+      <% } %>
+    </article>
+
+    <article class="record-card">
+      <h4>最大慧眼涨幅</h4>
+      <% if (!highlights.eyeGain) { %><p class="muted">这一期没有人的票能加等级。</p>
+      <% } else { %>
+        <p class="record-value">+<%= highlights.eyeGain.value %><small>级</small></p>
+        <ul class="record-holders">
+          <% highlights.eyeGain.holders.forEach((h) => { %>
+            <li><a href="/u/<%= h.uid %>"><%= h.nickname %></a></li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </article>
+  </div>
+<% } %>

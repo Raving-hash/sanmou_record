@@ -1,0 +1,160 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>武将索引</h2>
+  <p class="muted">
+    只统计每套阵容<strong>卡上第一张图</strong>识别出的武将；机器自动填、还没人核对的格子带
+    <span class="auto-q" title="机器自动识别，尚未核对">?</span>。
+    胜率 / 平均分 / 平均互评只算已结算的期，样本少于 <%= minSample %> 条时显示「样本不足」；
+    出场和使用人数包含进行中的期。
+  </p>
+</hgroup>
+
+<form method="get" action="/heroes" class="hero-search">
+  <label>搜索武将
+    <input name="q" value="<%= q %>" maxlength="20" placeholder="名字 / 变体前缀">
+  </label>
+  <button type="submit">搜索</button>
+  <% if (q) { %><a role="button" class="secondary outline btn-sm" href="/heroes">清除</a><% } %>
+</form>
+
+<h3>武将总表（<%= index.length %>）</h3>
+<% if (!index.length) { %>
+  <p class="muted">没有匹配的武将。</p>
+<% } else { %>
+  <div class="table-wrap">
+    <table class="hero-table">
+      <thead>
+        <tr>
+          <th>武将</th>
+          <th>势力 / 兵种</th>
+          <th class="w-score">出场</th>
+          <th class="w-score">使用人数</th>
+          <th class="w-score">已结算样本</th>
+          <th class="w-score">胜率</th>
+          <th class="w-score">平均分</th>
+          <th class="w-score">平均互评</th>
+          <th class="w-score">未核对</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% index.forEach((h) => { %>
+          <tr>
+            <td>
+              <a href="/hero/<%= h.key %>"><%= h.displayName %></a>
+              <% if (isT0(h.key)) { %><span class="badge badge-first">T0</span><% } %>
+            </td>
+            <td><%= h.faction %> · <%= h.arm %></td>
+            <td class="num"><%= h.entries %><% if (h.openEntries) { %>
+              <small class="muted">（本期 <%= h.openEntries %>）</small><% } %></td>
+            <td class="num"><%= h.users %></td>
+            <td class="num"><%= h.settledEntries %></td>
+            <td class="num">
+              <% if (h.winRate === null) { %><small class="muted">样本不足</small>
+              <% } else { %><%= h.winRate %>% <small class="muted">（<%= h.wins %> 胜）</small><% } %>
+            </td>
+            <td class="num">
+              <% if (h.avgScore === null) { %><small class="muted">样本不足</small>
+              <% } else { %><%= h.avgScore %><% } %>
+            </td>
+            <td class="num">
+              <% if (h.avgRating === null) { %><small class="muted">样本不足</small>
+              <% } else { %><%= h.avgRating %><% } %>
+              <% if (h.ratingN) { %><small class="muted">（<%= h.ratingN %> 票）</small><% } %>
+            </td>
+            <td class="num">
+              <% if (h.autoCells) { %>
+                <span class="auto-q" title="机器自动识别、尚未核对的格子数"><%= h.autoCells %> ?</span>
+              <% } else { %><small class="muted">—</small><% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<h3>双将组合检索</h3>
+<p class="muted small">
+  选两个（或三个）武将，找同时带这几个人的阵容；勾上「同一支部队」只看他们在同一队里的。
+  这里用的是卡上第一张图，和上面总表同一个口径。
+</p>
+<form method="get" action="/heroes" class="pair-form">
+  <%
+    const slots = [
+      { name: 'a', label: '武将 A', value: form.a },
+      { name: 'b', label: '武将 B', value: form.b },
+      { name: 'c', label: '武将 C（可选）', value: form.c },
+    ];
+  %>
+  <% slots.forEach((s) => { %>
+    <label><%= s.label %>
+      <select name="<%= s.name %>">
+        <option value="">—</option>
+        <% heroes.forEach((h) => { %>
+          <option value="<%= h.key %>"<% if (s.value === h.key) { %> selected<% } %>><%= (h.variant || '') + h.name %></option>
+        <% }) %>
+      </select>
+    </label>
+  <% }) %>
+  <label class="pair-check">
+    <input type="checkbox" name="sameUnit" value="1"<% if (form.sameUnit) { %> checked<% } %>>
+    同一支部队
+  </label>
+  <button type="submit">查阵容</button>
+  <a role="button" class="secondary outline btn-sm" href="/heroes">重置</a>
+</form>
+
+<% if (pair) { %>
+  <h3>组合结果（<%= pair.rows.length %> 套）</h3>
+  <% if (!pair.rows.length) { %>
+    <p class="muted">没有同时包含这些武将的阵容。
+      <% if (pair.sameUnit) { %>试试不勾「同一支部队」。<% } %></p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>期</th>
+            <th>玩家</th>
+            <th class="w-score">积分 / 名次</th>
+            <th>评级</th>
+            <th>命中武将</th>
+            <th class="w-score">互评</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% pair.rows.forEach((r) => { const tier = lineupTier(r.heroes); %>
+            <tr>
+              <td>
+                <a href="/seasons/<%= r.season_id %>/wall#e<%= r.id %>"><%= r.season_name %></a>
+                <% if (r.season_status === 'open') { %><small class="muted">进行中</small><% } %>
+              </td>
+              <td><a href="/u/<%= r.uid %>"><%= r.nickname %></a></td>
+              <td class="num">
+                <% if (r.score === null) { %><small class="muted">未交分</small>
+                <% } else { %><%= r.score %><% if (r.rank) { %>
+                  <small class="muted">#<%= r.rank %></small><% } %><% } %>
+              </td>
+              <td><span class="reco-tier is-<%= tier.tier.toLowerCase() %>"><%= tier.tier %></span></td>
+              <td>
+                <% pair.keys.forEach((k) => { const hit = r.heroes.find((x) => x.key === k); %>
+                  <% if (hit) { %>
+                    <span class="hero-chip<% if (hit.auto) { %> is-auto<% } %>"
+                          title="<%= hit.auto ? '机器自动识别，尚未核对' : '' %>"><%= (hit.variant || '') + hit.name %><% if (hit.auto) { %> ?<% } %></span>
+                  <% } %>
+                <% }) %>
+              </td>
+              <td class="num">
+                <% if (r.rating.avg === null) { %><small class="muted">—</small>
+                <% } else { %><%= r.rating.avg %> <small class="muted">（<%= r.rating.n %>）</small><% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+<% } %>
+
+<%- include('partials/footer') %>

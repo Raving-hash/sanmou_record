@@ -19,6 +19,28 @@
   </div>
 <% } %>
 
+<% if (recent && recent.length) { %>
+  <h3>近期状态</h3>
+  <p class="form-line">
+    <% recent.slice().reverse().forEach((r) => { %>
+      <span class="form-chip<%= r.is_winner === 1 ? ' is-win' : (!r.participated ? ' is-absent' : (r.score === null ? ' is-noscore' : ' is-loss')) %>"
+            title="<%= r.name %><% if (!r.participated) { %> · 未参赛<% } else if (r.score === null) { %> · 未交积分<% } else if (r.is_winner === 1) { %> · 获胜<% } else { %> · 第 <%= r.final_rank %> 名<% } %>"><% if (r.is_winner === 1) { %>胜<% } else if (!r.participated) { %>缺<% } else if (r.score === null) { %>未交<% } else { %>负<% } %></span>
+    <% }) %>
+    <% if (streak > 0) { %><span class="muted small">当前 <strong><%= streak %></strong> 连胜</span><% } %>
+    <% if (scoreDelta !== null) { %><span class="muted small">较上次交分
+      <strong class="<%= scoreDelta > 0 ? 'delta-up' : scoreDelta < 0 ? 'delta-down' : '' %>"><%= scoreDelta > 0 ? '+' : '' %><%= scoreDelta %></strong></span><% } %>
+  </p>
+<% } %>
+
+<% if (commonHeroes && commonHeroes.length) { %>
+  <h3>常用武将</h3>
+  <p class="hero-chip-row">
+    <% commonHeroes.forEach((h) => { %>
+      <a class="hero-chip" href="/hero/<%= h.key %>"><%= (h.variant || '') + h.name %> <small><%= h.n %></small></a>
+    <% }) %>
+  </p>
+<% } %>
+
 <h3>历史各期</h3>
 <% if (!history.length) { %>
   <p class="muted">还没有参加过的已结算赛期。</p>
@@ -57,6 +79,46 @@
         <% }) %>
       </tbody>
     </table>
+  </div>
+<% } %>
+
+<h3>阵容档案</h3>
+<% if (!archive || !archive.length) { %>
+  <p class="muted">还没有上传过阵容。</p>
+<% } else { %>
+  <div class="archive-list">
+    <% archive.forEach((r) => { const tier = lineupTier(r.heroes); %>
+      <article class="archive-card">
+        <div class="archive-shot">
+          <% if (r.images[0]) { const shots = r.images.map((i) => imgUrl(i.filename)).join(' '); %>
+            <a href="<%= imgUrl(r.images[0].filename) %>" target="_blank" rel="noopener"
+               data-shots="<%= shots %>">
+              <img src="<%= thumbUrl(r.images[0].filename) %>"
+                   alt="<%= r.nickname %> 的阵容截图" loading="lazy">
+            </a>
+          <% } %>
+        </div>
+        <div class="archive-body">
+          <p class="archive-head">
+            <a class="muted" href="/seasons/<%= r.season_id %>/wall#e<%= r.id %>"><%= r.season_name %><% if (r.season_status === 'open') { %> · 进行中<% } %></a>
+            <span class="score-pill"><% if (r.score === null) { %>未交分<% } else { %><%= r.score %> 分<% } %></span>
+            <% if (r.season_status === 'settled') { %>
+              <% if (r.is_winner) { %><span class="badge badge-first">👑 胜者</span>
+              <% } else if (r.final_rank) { %><small class="muted">第 <%= r.final_rank %> 名</small><% } %>
+            <% } else { %><span class="badge badge-open">进行中</span><% } %>
+          </p>
+          <p class="archive-meta">
+            <span class="reco-tier is-<%= tier.tier.toLowerCase() %>"><%= tier.tier %></span>
+            <% r.heroes.filter((h) => isT0(h.key)).forEach((h) => { %>
+              <span class="hero-chip<% if (h.auto) { %> is-auto<% } %>"><%= (h.variant || '') + h.name %><% if (h.auto) { %> ?<% } %></span>
+            <% }) %>
+            <% if (r.rating.avg !== null) { %><span class="muted small">互评 <%= r.rating.avg %>（<%= r.rating.n %>）</span><% } %>
+            <% if (r.commentsN) { %><span class="muted small">💬 <%= r.commentsN %></span><% } %>
+          </p>
+          <% if (r.lineup_note) { %><p class="archive-note"><%= r.lineup_note %></p><% } %>
+        </div>
+      </article>
+    <% }) %>
   </div>
 <% } %>
 

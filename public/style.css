@@ -2237,7 +2237,249 @@ details.report[open] > summary {
 }
 
 /* --------------------------------------------------------------------------
-   19. 窄屏
+   19. 待办 / 筛选 / 武将 / 纪录 / 档案（2026-10-17）
+   -------------------------------------------------------------------------- */
+
+/* 本周待办（首页） */
+.todo-card {
+  background: var(--yw-surface-2);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+  padding: var(--yw-sp-4) var(--yw-sp-5);
+  margin-bottom: var(--yw-sp-5);
+  box-shadow: var(--yw-hi);
+}
+.todo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yw-sp-2) var(--yw-sp-4);
+  margin-bottom: var(--yw-sp-3);
+}
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--yw-sp-2);
+}
+.todo-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--yw-sp-3);
+  padding: var(--yw-sp-1) 0;
+  border-bottom: 1px solid var(--yw-line-soft);
+}
+.todo-item:last-child { border-bottom: 0; }
+.todo-state {
+  flex: 0 0 auto;
+  min-width: 4.2em;
+  text-align: center;
+  font-size: var(--yw-fs-2xs);
+  color: var(--yw-text-mute);
+  border: 1px solid var(--yw-line);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+.todo-item.is-done .todo-state { color: var(--yw-jade-lt); border-color: var(--yw-jade); }
+.todo-item.is-todo .todo-state { color: var(--yw-gold-lt); border-color: var(--yw-gold-dk); }
+.todo-item.is-off .todo-state { color: var(--yw-text-mute); }
+.todo-main { color: var(--yw-text-dim); font-size: var(--yw-fs-sm); }
+.todo-main strong { color: var(--yw-text); }
+
+/* 阵容墙筛选。纯 GET 表单，样式只负责别把整面墙顶得太高。 */
+.wall-filter {
+  display: grid;
+  gap: var(--yw-sp-3);
+  background: var(--yw-surface-2);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+  padding: var(--yw-sp-4);
+  margin: var(--yw-sp-5) 0 var(--yw-sp-4);
+}
+.wall-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--yw-sp-3);
+  margin: 0;
+}
+.wall-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  font-size: var(--yw-fs-xs);
+  color: var(--yw-text-mute);
+}
+.wall-filter select,
+.wall-filter input {
+  margin: 0;
+  padding: 0.28rem 0.45rem;
+  font-size: var(--yw-fs-sm);
+  background: var(--yw-ink-600);
+  border-color: var(--yw-line-2);
+}
+.wall-filter button,
+.wall-filter [role="button"] { margin: 0; }
+.filter-note { color: var(--yw-gold-lt) !important; }
+
+/* 武将索引 / 组合检索 */
+.hero-search,
+.pair-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--yw-sp-3);
+  margin: var(--yw-sp-4) 0;
+}
+.hero-search label,
+.pair-form label {
+  margin: 0;
+  font-size: var(--yw-fs-xs);
+  color: var(--yw-text-mute);
+}
+.pair-form select { margin: 0; padding: 0.28rem 0.45rem; font-size: var(--yw-fs-sm); }
+.pair-check { display: flex; align-items: center; gap: 0.3rem; }
+.pair-check input { margin: 0; }
+.auto-q {
+  display: inline-block;
+  min-width: 1.25em;
+  padding: 0 0.2em;
+  border: 1px dashed var(--yw-gold-dk);
+  border-radius: 999px;
+  color: var(--yw-gold-lt);
+  font-size: var(--yw-fs-2xs);
+  text-align: center;
+  cursor: help;
+}
+.hero-chip {
+  display: inline-block;
+  margin: 0 0.2rem 0.2rem 0;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--yw-line);
+  border-radius: 999px;
+  background: var(--yw-ink-700);
+  color: var(--yw-text-dim);
+  font-size: var(--yw-fs-xs);
+  white-space: nowrap;
+}
+a.hero-chip { color: var(--yw-text); text-decoration: none; }
+a.hero-chip:hover { border-color: var(--yw-gold-dk); }
+.hero-chip small { color: var(--yw-text-mute); }
+.hero-chip.is-auto { border-style: dashed; }
+.hero-chip.is-target { border-color: var(--yw-gold); color: var(--yw-gold-lt); }
+.hero-chip-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+/* 纪录墙 */
+.record-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--yw-sp-4);
+  margin: var(--yw-sp-4) 0 var(--yw-sp-6);
+}
+.record-card {
+  margin: 0;
+  padding: var(--yw-sp-4) var(--yw-sp-5);
+  background: var(--yw-surface-2);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+  box-shadow: var(--yw-hi);
+}
+.record-card h3,
+.record-card h4 {
+  margin: 0 0 var(--yw-sp-3);
+  font-size: var(--yw-fs-md);
+  color: var(--yw-text-dim);
+}
+.record-value {
+  margin: 0 0 var(--yw-sp-3);
+  font-family: var(--yw-serif);
+  font-size: var(--yw-fs-3xl);
+  line-height: 1.1;
+  color: var(--yw-gold-lt);
+}
+.record-value small { margin-left: 0.2rem; font-size: var(--yw-fs-sm); color: var(--yw-text-mute); }
+.record-holders {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--yw-fs-sm);
+  color: var(--yw-text-dim);
+}
+.record-holders li + li { margin-top: 0.15rem; }
+
+/* 个人页 / 武将详情里的阵容档案 */
+.archive-list {
+  display: grid;
+  gap: var(--yw-sp-3);
+  margin: var(--yw-sp-4) 0;
+}
+.archive-card {
+  display: flex;
+  gap: var(--yw-sp-4);
+  margin: 0;
+  padding: var(--yw-sp-3);
+  background: var(--yw-surface-2);
+  border: 1px solid var(--yw-line);
+  border-radius: var(--yw-radius);
+  box-shadow: var(--yw-hi);
+}
+.archive-shot {
+  flex: 0 0 150px;
+  width: 150px;
+  height: 120px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--yw-ink-1000);
+}
+.archive-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.archive-body { min-width: 0; flex: 1 1 auto; }
+.archive-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+  margin: 0 0 0.35rem;
+  font-size: var(--yw-fs-sm);
+}
+.archive-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0 0 0.25rem; }
+.archive-note {
+  margin: 0.25rem 0 0;
+  color: var(--yw-text-mute);
+  font-size: var(--yw-fs-xs);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.form-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+.form-chip {
+  display: inline-block;
+  min-width: 1.8em;
+  padding: 0.02rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--yw-line);
+  font-size: var(--yw-fs-2xs);
+  text-align: center;
+}
+.form-chip.is-win { color: var(--yw-jade-lt); border-color: var(--yw-jade); }
+.form-chip.is-loss { color: var(--yw-cinnabar-lt); border-color: var(--yw-cinnabar); }
+.form-chip.is-noscore { color: var(--yw-gold-lt); border-color: var(--yw-gold-dk); }
+.form-chip.is-absent { color: var(--yw-text-mute); border-style: dashed; }
+
+@media (max-width: 700px) {
+  .wall-filter-row { flex-direction: column; align-items: stretch; }
+  .wall-filter label { width: 100%; }
+  .wall-filter select,
+  .wall-filter input { width: 100%; }
+  .record-grid { grid-template-columns: 1fr; }
+  .archive-card { flex-direction: column; }
+  .archive-shot { flex: 0 0 auto; width: 100%; height: 160px; }
+}
+
+/* --------------------------------------------------------------------------
+   20. 窄屏
    -------------------------------------------------------------------------- */
 @media (max-width: 700px) {
   /* Pico 在 <576px 那档把 .container 的 padding 归零了（靠 max-width 当留白），

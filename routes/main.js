@@ -4,6 +4,7 @@ const {
   removeFile, removeFiles, readKeys, THUMB_SUFFIX, MAX_OUT_BYTES, MAX_LINEUP, IMG_TYPE,
 } = require('../upload');
 const reco = require('../recognize-worker');
+const returnto = require('../returnto');
 const router = require('express').Router();
 
 /* 提交时的**对象复核**。图片是浏览器直传到 R2 的，服务端没见过那些字节，
@@ -132,6 +133,69 @@ const lineupWall = (req, season, viewerId) => {
   return rows;
 };
 
+// ---------- 阵容墙筛选（2026-10-17 加） ----------
+// 墙本身只有十几套，过滤放在 getLineupWall **之后**做：
+// #N 是积分名次，由 getLineupWall 按全期名次算好；先筛再数会把名次重编。
+// 所有参数都只从白名单里取，非法值直接忽略 —— 一个手打地址不该把页面打成 500。
+const FACTION_VALUES = ['魏', '蜀', '吴', '群'];
+const ARM_VALUES = ['骑', '弓', '盾', '枪'];
+const TIER_VALUES = ['T0', 'T1', 'T2', 'T3'];
+
+const parseWallFilters = (query) => {
+  const one = (v) => (Array.isArray(v) ? v[0] : v);
+  const str = (v) => String(one(v) ?? '').trim();
+  const f = {};
+
+  const hero = str(query.hero);
+  if (hero && db.getHero(hero)) f.hero = hero;
+  const faction = str(query.faction);
+  if (FACTION_VALUES.includes(faction)) f.faction = faction;
+  const arm = str(query.arm);
+  if (ARM_VALUES.includes(arm)) f.arm = arm;
+  const tier = str(query.tier).toUpperCase();
+  if (TIER_VALUES.includes(tier)) f.tier = tier;
+  const scored = str(query.scored);
+  if (scored === '1' || scored === '0') f.scored = scored;
+  const mine = str(query.mine);
+  if (mine === 'rated' || mine === 'unrated') f.mine = mine;
+  const text = str(query.q).slice(0, 20);
+  if (text) f.q = text;
+
+  return f;
+};
+
+const filterWall = (rows, f) => {
+  if (!Object.keys(f).length) return rows;
+  const q = f.q ? f.q.toLowerCase() : null;
+  return rows.filter((r) => {
+    if (f.hero && !r.heroes.some((h) => h.key === f.hero)) return false;
+    if (f.faction && !r.heroes.some((h) => h.faction === f.faction)) return false;
+    if (f.arm && !r.heroes.some((h) => h.arm === f.arm)) return false;
+    if (f.tier && db.lineupTier(r.heroes).tier !== f.tier) return false;
+    if (f.scored === '1' && r.score === null) return false;
+    if (f.scored === '0' && r.score !== null) return false;
+    if (f.mine === 'rated' && !r.rating.mine) return false;
+    if (f.mine === 'unrated' && r.rating.mine) return false;
+    if (q && !String(r.nickname).toLowerCase().includes(q)) return false;
+    return true;
+  });
+};
+
+const filterQuery = (f) => {
+  const params = new URLSearchParams();
+  for (const k of ['hero', 'faction', 'arm', 'tier', 'scored', 'mine', 'q']) {
+    if (f[k]) params.set(k, f[k]);
+  }
+  return params.toString();
+};
+
+// 表单里的 returnTo / 旧版 back → 安全的站内地址。赛季墙会核对期号，
+// 免得从 A 期的卡跳回 B 期的墙。取不到就回 fallback。
+const safeReturn = (req, fallback = '/', seasonId = null) => {
+  const raw = req.body.returnTo || (req.body.back === 'wall' ? '/wall' : '/');
+  return returnto.safe(raw, fallback, { seasonId });
+};
+
 // ---------- 本期看板 ----------
 router.get('/', (req, res) => {
   const season = db.getOpenSeason();
@@ -145,6 +209,35 @@ router.get('/', (req, res) => {
     // 手动 POST 却写得进去的错位。
     const rateLockAt = db.getRateLockAt(season);
     const canRate = !db.isRateLocked(season);
+
+    // 墙的筛选（2026-10-17）。**先取全量、再过滤**：#N 是全期积分名次，
+    // 由 db.getLineupWall 先算好；过滤只影响展示，不能重编号。
+    // wallReturn 会写进打分/评论/纠错的 hidden returnTo，投完票跳回来时筛选不丢。
+    const allLineups = lineupWall(req, season, req.user.id);
+    const filters = parseWallFilters(req.query);
+    const filterQS = filterQuery(filters);
+    const lineups = filterWall(allLineups, filters);
+    const wallReturn = filterQS ? `/?${filterQS}` : '/';
+    // 待办卡里「去打分」优先落到第一张还没打分的卡；没有就回墙顶。
+    const firstUnrated = allLineups.find((r) => r.rating.mine === null);
+    // 筛选说明（页面上给一句人话，不把 query 原样吐出来）。
+    const filterLabels = [];
+    if (filters.hero) {
+      const h = db.getHero(filters.hero);
+      if (h) filterLabels.push(`武将 ${h.variant || ''}${h.name}`);
+    }
+    if (filters.faction) filterLabels.push(`势力 ${filters.faction}`);
+    if (filters.arm) filterLabels.push(`兵种 ${filters.arm}`);
+    if (filters.tier) filterLabels.push(`评级 ${filters.tier}`);
+    if (filters.scored === '1') filterLabels.push('只看已交分');
+    if (filters.scored === '0') filterLabels.push('只看未交分');
+    if (filters.mine === 'rated') filterLabels.push('我打过分');
+    if (filters.mine === 'unrated') filterLabels.push('我还没打分');
+    if (filters.q) filterLabels.push(`昵称含「${filters.q}」`);
+    const filterNote = filterQS
+      ? `筛选：${filterLabels.join(' · ')}（${lineups.length} / ${allLineups.length} 套）`
+      : null;
+
     return res.render('home', {
       title: '本期看板',
       season,
@@ -155,7 +248,18 @@ router.get('/', (req, res) => {
       // 反过来说 —— 要在这条分支里再摆一张排名表，得先把 local 传回来：模板里引用一个
       // 没传进来的名字是 ReferenceError（整页 500），而这条分支是开发站天天在走的那条，
       // 一改就能撞出来。
-      lineups: lineupWall(req, season, req.user.id),
+      lineups,
+      allLineupCount: allLineups.length,
+      filters,
+      filterQuery: filterQS,
+      filterActive: !!filterQS,
+      filterNote,
+      wallReturn,
+      heroes: db.getHeroes(),
+      factions: FACTION_VALUES,
+      arms: ARM_VALUES,
+      tiers: TIER_VALUES,
+      firstUnrated,
       // 墙上那句顺序说明要跟数据一致：截止前按均分、截止后按积分（见 db.isWallByScore）。
       // 和 db.getLineupWall 里用的是同一个判断，所以不会出现"页面上写着按积分、卡片却按均分排"。
       byScore: db.isWallByScore(season),
@@ -165,6 +269,10 @@ router.get('/', (req, res) => {
       quota: canRate ? db.getMyQuota(season.id, req.user.id) : [],
       canRate,
       rateLockAt,
+      // 本周待办要用的几个状态（views/home.ejs 的 todo 卡）。
+      uploadOpenAt: db.getUploadOpenAt(season),
+      uploadClosed: db.isLineupClosed(season),
+      myRatingCount: db.countMyRatings(season.id, req.user.id),
       notSubmitted: db.getNotSubmitted(season.id),
       me_entry: entry,
       me_images: entry ? db.getLineupImages(entry.id) : [],
@@ -440,7 +548,7 @@ router.post('/entries/:id/heroes', (req, res) => {
   }
   const me = req.user;
   if (entry.user_id !== me.id && !me.is_admin) return res.status(403).send('不能改别人的识别结果');
-  const back = `/#e${entry.id}`;
+  const back = safeReturn(req, '/', entry.season_id) + `#e${entry.id}`;
 
   // 认的是**哪一张图**，由表单里的 hidden 字段给（卡上摊开的是 images[0]）。
   // ⚠️ 一个 entry 可以有多张阵容图，它们不一定是同一套阵容 ——
@@ -519,7 +627,7 @@ router.post('/entries/:id/rate', (req, res) => {
 
   // 回到那张卡，不是回到页顶：阵容墙在排名表下面，跳页顶会让人以为没生效。
   // 卡上有 id="e<id>"（见 partials/lineup-gallery.ejs）。
-  const back = `/#e${entry.id}`;
+  const back = safeReturn(req, '/', entry.season_id) + `#e${entry.id}`;
 
   const season = db.getSeason(entry.season_id);
   if (!season || season.status !== 'open') {
@@ -602,6 +710,80 @@ router.get('/ratings', (req, res) => {
   });
 });
 
+// ---------- 历史赛期阵容墙（2026-10-17 加） ----------
+// 和首页/游客墙共用 lineup-gallery；这里只是把「某一期」的墙单独开一页，
+// 已结算的期也随时能翻回来。canRate 永远是 false —— 打分只在首页进行中的墙上有。
+router.get('/seasons/:id/wall', (req, res) => {
+  const season = db.getSeason(Number(req.params.id));
+  if (!season) return res.status(404).send('没有这一期');
+  res.render('season-wall', {
+    title: `${season.name} · 阵容墙`,
+    season,
+    lineups: db.getLineupWall(season.id, req.user.id, null, !!req.user.is_admin),
+    byScore: db.isWallByScore(season),
+    backTo: `/seasons/${season.id}/wall`,
+  });
+});
+
+// ---------- 武将索引 / 详情 / 组合检索（2026-10-17 加） ----------
+router.get('/heroes', (req, res) => {
+  const one = (v) => (Array.isArray(v) ? v[0] : v);
+  const value = (v) => String(one(v) ?? '').trim();
+  const a = value(req.query.a);
+  const b = value(req.query.b);
+  const c = value(req.query.c);
+  const q = value(req.query.q).slice(0, 20);
+  const sameUnit = value(req.query.sameUnit) === '1';
+  const keys = [a, b, c].filter(Boolean);
+
+  const all = db.getHeroIndex();
+  const index = q
+    ? all.filter((h) => h.displayName.includes(q) || h.name.includes(q))
+    : all;
+
+  res.render('heroes', {
+    title: '武将索引',
+    index,
+    q,
+    minSample: db.HERO_MIN_SAMPLE,
+    heroes: db.getHeroes(),
+    pair: keys.length >= 2
+      ? { keys, sameUnit, rows: db.getHeroPairLineups(keys, { sameUnit, viewerId: req.user.id }) }
+      : null,
+    form: { a, b, c, sameUnit },
+  });
+});
+
+router.get('/hero/:key', (req, res) => {
+  const key = String(req.params.key || '');
+  // key 是拼音 slug（zuo_ci / sun_jian2），不是显示名；形状不对直接 404，
+  // 不要拿它去查库再拼进任何东西。
+  if (!/^[a-z0-9_]{1,40}$/.test(key)) return res.status(404).send('没有这个武将');
+  const hero = db.getHero(key);
+  if (!hero) return res.status(404).send('没有这个武将');
+
+  res.render('hero', {
+    title: `${hero.variant || ''}${hero.name} · 武将`,
+    hero,
+    stat: db.getHeroIndex().find((h) => h.key === key) || null,
+    minSample: db.HERO_MIN_SAMPLE,
+    rows: db.getHeroLineups(key, req.user.id),
+  });
+});
+
+// ---------- 纪录墙（2026-10-17 加） ----------
+router.get('/records', (req, res) => {
+  const latest = db.prepare(
+    `SELECT id FROM seasons WHERE status='settled' ORDER BY id DESC LIMIT 1`).get();
+  res.render('records', {
+    title: '纪录墙',
+    records: db.getRecords(),
+    highlights: latest ? db.getSeasonHighlights(latest.id) : null,
+    minRaters: db.RECORD_MIN_RATERS,
+    minPlays: db.RECORD_MIN_PLAYS,
+  });
+});
+
 // ---------- 历史 / 详情 / 排行 / 个人 ----------
 router.get('/history', (req, res) => {
   res.render('history', { title: '历史赛期', rows: db.getHistory() });
@@ -636,6 +818,10 @@ router.get('/seasons/:id', (req, res) => {
     // canRate 在这里只用来选措辞（「截止 …」还是「已于 … 截止」）—— 这一页本身没有打分区。
     rateLockAt: settled ? null : db.getRateLockAt(season),
     canRate: !settled && !db.isRateLocked(season),
+    // 「看这一期阵容墙」入口只在真有阵容图的时候出（没图的空墙没有可看的）。
+    wallCount: db.countLineupEntries(season.id),
+    // 「本期之最」只给已结算的期：进行中的最高分/最高均分还会变。
+    highlights: settled ? db.getSeasonHighlights(season.id) : null,
   });
 });
 
@@ -646,11 +832,30 @@ router.get('/rank', (req, res) => {
 router.get('/u/:userId', (req, res) => {
   const u = db.getUserByUid(req.params.userId);
   if (!u) return res.status(404).send('没有这个成员');
+
+  // 近期状态：recent 是「最近 N 个已结算期」倒序，没参加的期也在里面（participated=0）。
+  // 连胜从最近一期往前数，遇到没赢/没参加立刻停 —— 不能跳过缺席期把两段连胜接起来。
+  const recent = db.getUserRecentForm(u.id);
+  let streak = 0;
+  for (const r of recent) {
+    if (r.is_winner === 1) streak++;
+    else break;
+  }
+  // 较上次交分：只在最近两个有分的已结算期之间算；只有一次交分就留空。
+  const scoredRecent = recent.filter((r) => r.score !== null).slice(0, 2);
+  const scoreDelta = scoredRecent.length === 2
+    ? scoredRecent[0].score - scoredRecent[1].score : null;
+
   res.render('user', {
     title: `${u.nickname} 的战绩`,
     u,
     stats: db.getUserStats(u.id),
     history: db.getUserHistory(u.id),
+    recent,
+    streak,
+    scoreDelta,
+    archive: db.getUserLineupArchive(u.id),
+    commonHeroes: db.getUserCommonHeroes(u.id),
   });
 });
 

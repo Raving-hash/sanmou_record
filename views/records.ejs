@@ -1,0 +1,118 @@
+<%- include('partials/header') %>
+
+<hgroup class="page-head">
+  <h2>纪录墙</h2>
+  <p class="muted">
+    只统计已结算的赛期；并列的纪录把所有人都列出来。样本不够的项写「—」，
+    不拿一两场的数据硬凑一个第一。
+  </p>
+</hgroup>
+
+<div class="record-grid">
+  <article class="record-card">
+    <h3>最高单期积分</h3>
+    <% if (!records.topScore) { %>
+      <p class="muted">还没有已结算的积分。</p>
+    <% } else { %>
+      <p class="record-value"><%= records.topScore.value %><small>分</small></p>
+      <ul class="record-holders">
+        <% records.topScore.holders.forEach((h) => { %>
+          <li>
+            <a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            · <a href="/seasons/<%= h.season_id %>/wall#e<%= h.entry_id %>"><%= h.season_name %></a>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </article>
+
+  <article class="record-card">
+    <h3>最高单期均分</h3>
+    <% if (!records.topRating) { %>
+      <p class="muted">还没有哪套阵容拿到 <%= minRaters %> 人以上的打分。</p>
+    <% } else { %>
+      <p class="record-value"><%= records.topRating.value %><small>分</small></p>
+      <ul class="record-holders">
+        <% records.topRating.holders.forEach((h) => { %>
+          <li>
+            <a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            · <a href="/seasons/<%= h.season_id %>/wall#e<%= h.entry_id %>"><%= h.season_name %></a>
+            <small class="muted">（<%= h.n %> 人打分）</small>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </article>
+
+  <article class="record-card">
+    <h3>最长连胜</h3>
+    <% if (!records.longestStreak) { %>
+      <p class="muted">还没有人赢过。</p>
+    <% } else { %>
+      <p class="record-value"><%= records.longestStreak.value %><small>连胜</small></p>
+      <ul class="record-holders">
+        <% records.longestStreak.holders.forEach((h) => { %>
+          <li>
+            <a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            <small class="muted">（截至 <%= h.endSeasonName %>）</small>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </article>
+
+  <article class="record-card">
+    <h3>最多胜场</h3>
+    <% if (!records.mostWins) { %>
+      <p class="muted">还没有人赢过。</p>
+    <% } else { %>
+      <p class="record-value"><%= records.mostWins.value %><small>胜</small></p>
+      <ul class="record-holders">
+        <% records.mostWins.holders.forEach((h) => { %>
+          <li><a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            <small class="muted">（<%= h.plays %> 期 · <%= h.win_rate %>%）</small></li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </article>
+
+  <article class="record-card">
+    <h3>最高胜率</h3>
+    <% if (!records.bestWinRate) { %>
+      <p class="muted">至少 <%= minPlays %> 期参赛的人里，还没有正胜率。</p>
+    <% } else { %>
+      <p class="record-value"><%= records.bestWinRate.value %>%</p>
+      <ul class="record-holders">
+        <% records.bestWinRate.holders.forEach((h) => { %>
+          <li><a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            <small class="muted">（<%= h.wins %> / <%= h.plays %> 期）</small></li>
+        <% }) %>
+      </ul>
+      <p class="muted small">只算参赛满 <%= minPlays %> 期的人，避免 1 场 100% 霸榜。</p>
+    <% } %>
+  </article>
+
+  <article class="record-card">
+    <h3>单期最大慧眼涨幅</h3>
+    <% if (!records.eyeGain) { %>
+      <p class="muted">还没有结算过能加等级的票。</p>
+    <% } else { %>
+      <p class="record-value">+<%= records.eyeGain.value %><small>级</small></p>
+      <ul class="record-holders">
+        <% records.eyeGain.holders.forEach((h) => { %>
+          <li>
+            <a href="/u/<%= h.uid %>"><%= h.nickname %></a>
+            · <a href="/seasons/<%= h.season_id %>"><%= h.season_name %></a>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </article>
+</div>
+
+<%- include('partials/season-bests', {
+      highlights,
+      heading: `${highlights ? highlights.season.name : '最近一期'} · 本期之最`,
+    }) %>
+
+<%- include('partials/footer') %>

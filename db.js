@@ -1251,6 +1251,430 @@ db.getEyeAdjustments = (seasonId) => db.prepare(`
   ORDER BY a.delta DESC, u.id ASC
 `).all(seasonId);
 
+// ---------- 武将索引 / 检索 / 档案 / 纪录（2026-10-17 加） ----------
+// 这一整段的公共口径（README 里也写着，改之前先看）：
+//   · 只认**卡上第一张阵容图**：老数据里一个 entry 可能有两张图（两套阵容），
+//     混起来数会算出假的出场率和 T 级。下面每条带 hero_guesses 的查询都带这个子查询。
+//   · chosen_key 为空 / source='none' 的格子 JOIN 不上 heroes，自然排除。
+//   · auto = source === 'auto'；统计**全部计入**（用户定的口径），页面上标 ?。
+//   · 同一 entry 同一武将如果有多行（历史误填），按 (entry_id, key) 去重，
+//     人工行赢 auto 行 —— 和 getSeasonHeroData 完全同一个做法。
+//   · 胜率 / 平均分 / 平均互评只算**已结算**期；出场和使用人数算所有期（含进行中）。
+//   · 样本不足时返回 null，模板印「样本不足」，不要拿 1 场 100% 当纪录。
+const HERO_MIN_SAMPLE = 3;
+const RECORD_MIN_PLAYS = 3;
+const RECORD_MIN_RATERS = 3;
+db.HERO_MIN_SAMPLE = HERO_MIN_SAMPLE;
+db.RECORD_MIN_PLAYS = RECORD_MIN_PLAYS;
+db.RECORD_MIN_RATERS = RECORD_MIN_RATERS;
+
+const FIRST_IMG = `(SELECT li.filename FROM lineup_images li
+                    WHERE li.entry_id = g.entry_id ORDER BY li.id LIMIT 1)`;
+
+const round1 = (n) => Math.round(n * 10) / 10;
+const displayHeroName = (h) => `${h.variant || ''}${h.name}`;
+
+// 跨赛季按武将聚合。返回**全部武将**（含 0 出场的），这样新武将也能在索引里看到。
+db.getHeroIndex = () => {
+  const rows = db.prepare(`
+    SELECT g.entry_id, g.source, h.key, h.name, h.faction, h.arm, h.variant, h.sort,
+           e.user_id, e.score, e.is_winner,
+           s.id AS season_id, s.status AS season_status,
+           (SELECT AVG(r.value) FROM ratings r WHERE r.entry_id = e.id) AS entry_avg,
+           (SELECT COUNT(*) FROM ratings r WHERE r.entry_id = e.id) AS entry_rating_n
+    FROM hero_guesses g
+    JOIN heroes h ON h.key = g.chosen_key
+    JOIN entries e ON e.id = g.entry_id
+    JOIN seasons s ON s.id = e.season_id
+    WHERE g.filename = ${FIRST_IMG}
+  `).all();
+
+  const byHero = new Map();
+  for (const h of db.getHeroes()) {
+    byHero.set(h.key, {
+      key: h.key, name: h.name, variant: h.variant, faction: h.faction,
+      arm: h.arm, sort: h.sort, displayName: displayHeroName(h),
+      entries: new Set(), users: new Set(), openEntries: new Set(),
+      settledEntries: 0, wins: 0, scoredEntries: 0, scores: [],
+      ratingN: 0, ratingEntryAvgs: [], autoCells: 0, lastSeasonId: null,
+    });
+  }
+
+  // 同一个 entry 同一个武将只算一次；人工行赢 auto 行。
+  const seen = new Map();          // `${entry_id}:${key}` → { auto }
+  for (const r of rows) {
+    const hero = byHero.get(r.key);
+    if (!hero) continue;           // 库里删了、chosen_key 还留着的孤儿
+    const k = `${r.entry_id}:${r.key}`;
+    const auto = r.source === 'auto';
+    const prev = seen.get(k);
+    if (prev) {
+      // 先出现的是 auto、后出现的是人工：把这一格的 auto 计数退回去。
+      if (prev.auto && !auto) { prev.auto = false; hero.autoCells--; }
+      continue;
+    }
+    const rec = { auto };
+    seen.set(k, rec);
+
+    hero.entries.add(r.entry_id);
+    hero.users.add(r.user_id);
+    if (r.season_status === 'open') hero.openEntries.add(r.entry_id);
+    if (r.season_status === 'settled') {
+      hero.settledEntries++;
+      hero.wins += r.is_winner ? 1 : 0;
+      if (r.score !== null) {
+        hero.scoredEntries++;
+        hero.scores.push(r.score);
+      }
+      if (r.entry_rating_n > 0) {
+        hero.ratingN += r.entry_rating_n;
+        hero.ratingEntryAvgs.push(r.entry_avg);
+      }
+    }
+    if (r.lastSeasonId === null || r.season_id > r.lastSeasonId) hero.lastSeasonId = r.season_id;
+    if (auto) hero.autoCells++;
+  }
+
+  return [...byHero.values()]
+    .map((h) => ({
+      key: h.key, name: h.name, variant: h.variant, faction: h.faction, arm: h.arm,
+      sort: h.sort, displayName: h.displayName,
+      entries: h.entries.size, users: h.users.size, openEntries: h.openEntries.size,
+      settledEntries: h.settledEntries, wins: h.wins, scoredEntries: h.scoredEntries,
+      ratingN: h.ratingN, autoCells: h.autoCells, lastSeasonId: h.lastSeasonId,
+      winRate: h.settledEntries >= HERO_MIN_SAMPLE
+        ? round1((100 * h.wins) / h.settledEntries) : null,
+      avgScore: h.scoredEntries >= HERO_MIN_SAMPLE
+        ? round1(h.scores.reduce((a, b) => a + b, 0) / h.scoredEntries) : null,
+      avgRating: h.ratingN >= HERO_MIN_SAMPLE && h.ratingEntryAvgs.length
+        ? round1(h.ratingEntryAvgs.reduce((a, b) => a + b, 0) / h.ratingEntryAvgs.length) : null,
+    }))
+    .sort((a, b) => b.entries - a.entries || a.sort - b.sort);
+};
+
+// 给一组 entry id 补齐「卡上要展示的东西」：图、第一图武将、互评汇总、积分名次、
+// 评论数。武将详情、组合检索、个人档案共用这一份，避免三处各写一遍口径。
+const enrichEntryCards = (entryIds, viewerId) => {
+  if (!entryIds.length) return [];
+  const ph = entryIds.map(() => '?').join(',');
+  const entries = db.prepare(`
+    SELECT e.id, e.season_id, e.user_id, e.score, e.score_submitted_at, e.lineup_note,
+           e.final_rank, e.is_winner,
+           s.name AS season_name, s.status AS season_status, s.created_at AS season_created_at,
+           u.user_id AS uid, u.nickname
+    FROM entries e
+    JOIN seasons s ON s.id = e.season_id
+    JOIN users   u ON u.id = e.user_id
+    WHERE e.id IN (${ph})
+    ORDER BY s.id DESC, e.score IS NULL, e.score DESC, e.score_submitted_at ASC, e.id ASC
+  `).all(...entryIds);
+
+  const images = new Map();
+  for (const img of db.prepare(
+    `SELECT * FROM lineup_images WHERE entry_id IN (${ph}) ORDER BY id`).all(...entryIds)) {
+    if (!images.has(img.entry_id)) images.set(img.entry_id, []);
+    images.get(img.entry_id).push(img);
+  }
+
+  const heroes = new Map();
+  for (const g of db.prepare(`
+    SELECT g.entry_id, g.slot, g.source, h.key, h.name, h.faction, h.arm, h.variant
+    FROM hero_guesses g
+    JOIN heroes h ON h.key = g.chosen_key
+    WHERE g.entry_id IN (${ph}) AND g.filename = ${FIRST_IMG}
+    ORDER BY h.sort
+  `).all(...entryIds)) {
+    if (!heroes.has(g.entry_id)) heroes.set(g.entry_id, []);
+    const list = heroes.get(g.entry_id);
+    const auto = g.source === 'auto';
+    const hit = list.find((h) => h.key === g.key);
+    if (hit) { if (!auto) hit.auto = false; continue; }
+    list.push({ key: g.key, name: g.name, faction: g.faction, arm: g.arm,
+                variant: g.variant, slot: g.slot, auto });
+  }
+
+  const comments = new Map();
+  for (const c of db.prepare(
+    `SELECT entry_id, COUNT(*) AS n FROM comments WHERE entry_id IN (${ph}) GROUP BY entry_id`
+  ).all(...entryIds)) comments.set(c.entry_id, c.n);
+
+  // 一期一次查打分/名次，期内缓存；不按 entry 逐条回查。
+  const seasonCache = new Map();
+  const seasonData = (seasonId) => {
+    if (!seasonCache.has(seasonId)) {
+      const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId);
+      const ranks = new Map();
+      db.getRanking(seasonId).forEach((r, i) => ranks.set(r.id, i + 1));
+      seasonCache.set(seasonId, { ratings, ranks });
+    }
+    return seasonCache.get(seasonId);
+  };
+
+  return entries.map((e) => {
+    const sd = seasonData(e.season_id);
+    return {
+      ...e,
+      images: images.get(e.id) || [],
+      heroes: heroes.get(e.id) || [],
+      rating: sd.ratings.get(e.id) || db.EMPTY_RATING,
+      rank: sd.ranks.get(e.id) || null,
+      commentsN: comments.get(e.id) || 0,
+    };
+  });
+};
+
+// 某个武将出现过的全部阵容（含进行中），按赛季倒序。viewerId 用来标「我打了几分」。
+db.getHeroLineups = (key, viewerId = null) => {
+  const ids = db.prepare(`
+    SELECT DISTINCT g.entry_id FROM hero_guesses g
+    WHERE g.chosen_key = ? AND g.filename = ${FIRST_IMG}
+  `).all(key).map((r) => r.entry_id);
+  return enrichEntryCards(ids, viewerId);
+};
+
+// 双将 / 三将组合检索：先按「同时含这些 key」找 entry，再在内存里做同部队过滤。
+// 用 COUNT(DISTINCT) 而不是 N 个 EXISTS —— 一套阵容里同一个武将在两格误填时，
+// EXISTS 写法会把「两个 key 其实是同一个」也算成命中，COUNT 不会。
+db.getHeroPairLineups = (keys, { sameUnit = false, viewerId = null } = {}) => {
+  const clean = [...new Set(keys.filter((k) => db.getHero(k)))];
+  if (clean.length < 2) return [];
+  const ph = clean.map(() => '?').join(',');
+  const ids = db.prepare(`
+    SELECT g.entry_id FROM hero_guesses g
+    WHERE g.chosen_key IN (${ph}) AND g.filename = ${FIRST_IMG}
+    GROUP BY g.entry_id
+    HAVING COUNT(DISTINCT g.chosen_key) = ?
+  `).all(...clean, clean.length).map((r) => r.entry_id);
+  const rows = enrichEntryCards(ids, viewerId);
+  if (!sameUnit) return rows;
+  return rows.filter((r) => {
+    const units = clean.map((k) => {
+      const h = r.heroes.find((x) => x.key === k);
+      return h ? Math.floor((h.slot - 1) / 3) : null;
+    });
+    return units.every((u) => u !== null && u === units[0]);
+  });
+};
+
+// 个人页的阵容档案：该用户所有**至少有一张阵容图**的 entry（含进行中）。
+db.getUserLineupArchive = (userPk) => {
+  const ids = db.prepare(`
+    SELECT e.id FROM entries e
+    WHERE e.user_id = ?
+      AND EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id)
+  `).all(userPk).map((r) => r.id);
+  return enrichEntryCards(ids, userPk);
+};
+
+// 近 N 期（**所有已结算期**，含没参加的那几期）。缺席必须显式出现，
+// 否则连胜会把隔了一期的两次胜利算成连续。
+db.getUserRecentForm = (userPk, limit = 5) => db.prepare(`
+  SELECT s.id, s.name, s.created_at, e.score, e.final_rank, e.is_winner,
+         CASE WHEN e.id IS NULL THEN 0
+              WHEN e.score IS NOT NULL THEN 1
+              WHEN EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id) THEN 1
+              ELSE 0 END AS participated
+  FROM seasons s
+  LEFT JOIN entries e ON e.season_id = s.id AND e.user_id = ?
+  WHERE s.status = 'settled'
+  ORDER BY s.id DESC
+  LIMIT ?
+`).all(userPk, limit);
+
+// 常用武将前 N（第一图口径；含进行中的期）。
+db.getUserCommonHeroes = (userPk, limit = 5) => db.prepare(`
+  SELECT h.key, h.name, h.variant, COUNT(DISTINCT g.entry_id) AS n, h.sort
+  FROM hero_guesses g
+  JOIN heroes h ON h.key = g.chosen_key
+  JOIN entries e ON e.id = g.entry_id
+  WHERE e.user_id = ? AND g.filename = ${FIRST_IMG}
+  GROUP BY h.key
+  ORDER BY n DESC, h.sort ASC
+  LIMIT ?
+`).all(userPk, limit);
+
+// 首页待办用。「已投 N 套」不能只数墙上的行：图被删掉之后票还在库里。
+db.countMyRatings = (seasonId, raterId) => db.prepare(`
+  SELECT COUNT(*) AS n FROM ratings r JOIN entries e ON e.id = r.entry_id
+  WHERE e.season_id = ? AND r.rater_id = ?
+`).get(seasonId, raterId).n;
+
+db.countLineupEntries = (seasonId) => db.prepare(`
+  SELECT COUNT(*) AS n FROM entries e
+  WHERE e.season_id = ?
+    AND EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id)
+`).get(seasonId).n;
+
+// 全站纪录。全部现算、不落库；并列全给，样本不足的项返回 null。
+db.getRecords = () => {
+  // 最高单期积分
+  const scoreRows = db.prepare(`
+    SELECT e.score, e.id AS entry_id, u.user_id AS uid, u.nickname,
+           s.id AS season_id, s.name AS season_name
+    FROM entries e
+    JOIN seasons s ON s.id = e.season_id
+    JOIN users   u ON u.id = e.user_id
+    WHERE s.status = 'settled' AND e.score IS NOT NULL
+    ORDER BY e.score DESC
+  `).all();
+  const topScore = scoreRows.length
+    ? { value: scoreRows[0].score, holders: scoreRows.filter((r) => r.score === scoreRows[0].score) }
+    : null;
+
+  // 最高单期均分（至少 RECORD_MIN_RATERS 人打分）
+  const ratingRows = db.prepare(`
+    SELECT r.entry_id, AVG(r.value) AS avg, COUNT(*) AS n,
+           u.user_id AS uid, u.nickname,
+           s.id AS season_id, s.name AS season_name
+    FROM ratings r
+    JOIN entries e ON e.id = r.entry_id
+    JOIN seasons s ON s.id = e.season_id
+    JOIN users   u ON u.id = e.user_id
+    WHERE s.status = 'settled'
+    GROUP BY r.entry_id
+    HAVING COUNT(*) >= ?
+    ORDER BY avg DESC
+  `).all(RECORD_MIN_RATERS);
+  let topRating = null;
+  if (ratingRows.length) {
+    const best = ratingRows[0].avg;
+    topRating = {
+      value: round1(best),
+      holders: ratingRows.filter((r) => r.avg === best)
+        .map((r) => ({ ...r, avg: round1(r.avg) })),
+    };
+  }
+
+  // 最长连胜：只算已结算期；缺席、没交分、没赢都断。
+  const settled = db.prepare(`SELECT id, name FROM seasons WHERE status='settled' ORDER BY id ASC`).all();
+  const seasonIds = settled.map((s) => s.id);
+  const seasonName = new Map(settled.map((s) => [s.id, s.name]));
+  const streakRows = db.prepare(`
+    SELECT e.user_id, u.user_id AS uid, u.nickname, s.id AS season_id, e.is_winner
+    FROM entries e
+    JOIN seasons s ON s.id = e.season_id
+    JOIN users   u ON u.id = e.user_id
+    WHERE s.status = 'settled'
+      AND (e.score IS NOT NULL
+           OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))
+    ORDER BY e.user_id, s.id ASC
+  `).all();
+  const byUser = new Map();
+  for (const r of streakRows) {
+    if (!byUser.has(r.user_id)) {
+      byUser.set(r.user_id, { uid: r.uid, nickname: r.nickname, seasons: new Map() });
+    }
+    byUser.get(r.user_id).seasons.set(r.season_id, r.is_winner ? 1 : 0);
+  }
+  let longestStreak = null;
+  for (const u of byUser.values()) {
+    let cur = 0;
+    let best = 0;
+    let bestEnd = null;
+    for (const sid of seasonIds) {
+      if (u.seasons.get(sid) === 1) {
+        cur++;
+        if (cur > best) { best = cur; bestEnd = sid; }
+      } else cur = 0;
+    }
+    if (best <= 0) continue;
+    const holder = {
+      uid: u.uid, nickname: u.nickname,
+      endSeasonId: bestEnd, endSeasonName: seasonName.get(bestEnd) || '',
+    };
+    if (!longestStreak || best > longestStreak.value) {
+      longestStreak = { value: best, holders: [holder] };
+    } else if (best === longestStreak.value) {
+      longestStreak.holders.push(holder);
+    }
+  }
+
+  // 最多胜场 / 最高胜率（至少 RECORD_MIN_PLAYS 期参赛）
+  const board = db.getRankBoard();
+  const mostWins = board.length && board[0].wins > 0
+    ? { value: board[0].wins, holders: board.filter((r) => r.wins === board[0].wins) }
+    : null;
+  const rateBoard = board
+    .filter((r) => r.plays >= RECORD_MIN_PLAYS)
+    .sort((a, b) => b.win_rate - a.win_rate || b.wins - a.wins
+      || String(a.joined_at).localeCompare(String(b.joined_at)));
+  const bestWinRate = rateBoard.length && rateBoard[0].win_rate > 0
+    ? { value: rateBoard[0].win_rate, holders: rateBoard.filter((r) => r.win_rate === rateBoard[0].win_rate) }
+    : null;
+
+  // 单期最大慧眼涨幅
+  const eyeRows = db.prepare(`
+    SELECT a.delta, u.user_id AS uid, u.nickname,
+           s.id AS season_id, s.name AS season_name
+    FROM eye_adjustments a
+    JOIN users   u ON u.id = a.user_id
+    JOIN seasons s ON s.id = a.season_id
+    ORDER BY a.delta DESC
+  `).all();
+  const eyeGain = eyeRows.length && eyeRows[0].delta > 0
+    ? { value: eyeRows[0].delta, holders: eyeRows.filter((r) => r.delta === eyeRows[0].delta) }
+    : null;
+
+  return { topScore, topRating, longestStreak, mostWins, bestWinRate, eyeGain };
+};
+
+// 某一期的「本期之最」：最高分、口碑最好、最热武将、最大慧眼涨幅。
+// 已结算期和进行中的期都能用；进行中的期没有慧眼涨幅（结算时才写）。
+db.getSeasonHighlights = (seasonId) => {
+  const season = db.getSeason(seasonId);
+  if (!season) return null;
+  const ranking = season.status === 'settled'
+    ? db.getFinalRanking(seasonId) : db.getRanking(seasonId);
+  const topScore = ranking.length
+    ? {
+      value: ranking[0].score,
+      holders: ranking.filter((r) => r.score === ranking[0].score)
+        .map((r) => ({ uid: r.uid, nickname: r.nickname, score: r.score })),
+    }
+    : null;
+
+  const wall = db.getLineupWall(seasonId, null);
+  const rated = wall.filter((r) => r.rating.avg !== null);
+  let topRating = null;
+  if (rated.length) {
+    const best = Math.max(...rated.map((r) => r.rating.avg));
+    topRating = {
+      value: best,
+      holders: rated.filter((r) => r.rating.avg === best)
+        .map((r) => ({ uid: r.uid, nickname: r.nickname, entryId: r.id, avg: r.rating.avg, n: r.rating.n })),
+    };
+  }
+
+  const heroRows = db.prepare(`
+    SELECT h.key, h.name, h.variant, h.faction, h.arm,
+           COUNT(DISTINCT g.entry_id) AS n, h.sort
+    FROM hero_guesses g
+    JOIN heroes h ON h.key = g.chosen_key
+    JOIN entries e ON e.id = g.entry_id
+    WHERE e.season_id = ? AND g.filename = ${FIRST_IMG}
+    GROUP BY h.key
+    ORDER BY n DESC, h.sort ASC
+  `).all(seasonId);
+  const hottestHeroes = heroRows.length
+    ? { value: heroRows[0].n, holders: heroRows.filter((r) => r.n === heroRows[0].n) }
+    : null;
+
+  const eye = db.getEyeAdjustments(seasonId);
+  const eyeGain = eye.length && eye[0].delta > 0
+    ? { value: eye[0].delta, holders: eye.filter((r) => r.delta === eye[0].delta) }
+    : null;
+
+  return { season, topScore, topRating, hottestHeroes, eyeGain };
+};
+
+// 规则页要展示的「单一真源」常量。EYE_GAIN / EYE_BASE / 周几本来只在模块内部用，
+// 这里补挂到 db 上（只读），免得 /rules 的文案和代码悄悄分家。
+db.EYE_BASE = EYE_BASE;
+db.EYE_GAIN = EYE_GAIN;
+db.OPEN_WEEKDAY = OPEN_WEEKDAY;
+db.LOCK_WEEKDAY = LOCK_WEEKDAY;
+db.LOCK_HOUR_BJ = LOCK_HOUR_BJ;
+
 // ---------- 结算 / 撤销（一个事务里做完） ----------
 // **积分前 TOP_N 名都算胜者**（用户 2026-10-15 定的口径，从前只有第一名算）。
 // 名次照旧一人一个（final_rank 1, 2, 3…），is_winner 才是"算不算赢"那一列 ——

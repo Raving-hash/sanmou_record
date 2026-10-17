@@ -24,6 +24,12 @@
   </p>
 </hgroup>
 
+<% if (wallCount > 0) { %>
+  <p>
+    <a role="button" class="secondary" href="/seasons/<%= season.id %>/wall">看这一期阵容墙（<%= wallCount %> 套）</a>
+  </p>
+<% } %>
+
 <%# 结算战报：一段能直接贴群里的纯文本，拼法在 routes/main.js 的 buildReport。
     **只有已结算的期才有**（进行中的期名次还会变，发出去的"冠军"过两天就成了假消息），
     其余时候 report 是 null，整段不出。
@@ -55,6 +61,7 @@
     塞在十几张截图卡下面就得滚很久才看得到。 %>
 <% if (settled) { %>
   <%- include('partials/eye-board', { rows: eye, heading: '本期慧眼等级变动' }) %>
+  <%- include('partials/season-bests', { highlights, heading: `${season.name} · 本期之最` }) %>
 <% } %>
 
 <% if (!rows.length) { %>
