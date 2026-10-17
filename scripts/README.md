@@ -18,7 +18,7 @@
 | `install-rank-task.ps1` | 注册 / 修改 / 移除计划任务（每日、每 N 分钟、每周某天某几段） |
 | `win-rank.ps1` | 提权下按标题找窗口、发滚轮、抓客户区像素 |
 | `win-ocr.ps1` | 调 `Windows.Media.Ocr` 出词框（带坐标） |
-| `rank-mock-receiver.js` | 本地假接口，形状与真接口一致，离线联调用 |
+| `rank-mock-receiver.js` | 本地假接口，报文形状与真接口一致，离线联调用（不认人，也不做模糊匹配） |
 
 ## 环境要求
 
@@ -97,14 +97,17 @@ Get-ScheduledTask -TaskName yanwu-rank-shot | Select-Object State
 | `data/rank-shots/logs/runs.log` | 每轮一行摘要，出问题时先看它 |
 
 `send-report.json` 里的字段：`sent / entries / requests / written / unchanged / notOnSite /
-failed / aborted`。**`notOnSite` 不是失败**——榜是整个赛区的，站点上只登记了自己这群人。
+failed / fuzzy / ambiguous / aborted`。`fuzzy` 是后端按相似度**猜着写进去**的那些（分已经改了、
+人是谁是猜的，要复核）；`ambiguous` 是后端觉得像的名字不止一个、一个字都没写。
+**`notOnSite` 不是失败**——榜是整个赛区的，站点上只登记了自己这群人。
 
 游戏没开时这一轮直接跳过，`runs.log` 里是 `skip: game not running`，退出码 0，不报错。
 
 ## 已知限制
 
-- OCR 会稳定认错个别字（「秦」→「剿」等），脚本**不猜**错字：猜错就是把别人的分写给别人。
-  详见接口文档最后一节。
+- OCR 会稳定认错个别字（「秦」→「剿」等）。**客户端不猜**（猜错就是把别人的分写给别人），
+  现在由后端的相似度匹配兜底，猜中的会回 `match:"fuzzy"`，客户端把它单独打出来等复核。
+  详见接口文档文末。
 - 计划任务用的是 `Interactive` 登录类型：**没人登录不跑**，停在登录界面也不跑。
 - `WakeToRun` 默认关着。机器要是会睡眠/合盖，到点不会自己醒——需要的话在注册时补上。
 - 游戏没有开机自启，所以机器重启后要手动把游戏打开，否则那一轮只会留下

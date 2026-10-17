@@ -115,7 +115,9 @@ try {
   if ($newest) {
     $r = Get-Content (Join-Path $newest.FullName 'send-report.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $summary = "sent=$($r.sent) written=$($r.written) unchanged=$($r.unchanged) " +
-      "notOnSite=$(@($r.notOnSite).Count) failed=$(@($r.failed).Count) +$($r.scoreOffset) round=$($r.round)"
+      "notOnSite=$(@($r.notOnSite).Count) failed=$(@($r.failed).Count) " +
+      "fuzzy=$(@($r.fuzzy).Count) ambiguous=$(@($r.ambiguous).Count) " +
+      "+$($r.scoreOffset) round=$($r.round)"
     Add-Content -Path $log -Value "send-report: $summary" -Encoding UTF8
   }
 } catch {

@@ -17,6 +17,8 @@
 // 收到什么就打印什么，并逐条追加到 --log（默认 data/rank-import.jsonl）。
 //
 // **不写站点库、不认人** —— 它唯一的作用是回答"客户端到底发了什么"，别拿它当后端。
+// 它**没有**真接口的模糊匹配/歧义弃权那一层：任何名字都回 ok + exact，所以拿它跑一轮会看到
+// "全匹配"（`notOnSite=0`），那个数字不能当真，只用来验报文形状和回执统计。
 const fs = require('fs');
 const path = require('path');
 const http = require('http');

@@ -1073,7 +1073,20 @@ async function deliver(rows, dir) {
 
   // 一条 OCR 行算不算成功：它展开的写法里**任意一条**被认下来就算，全都 unknown
   // 才算"不在站点上"。前缀、竖线这些写法差异就这么一次消化掉，不用逐行重试。
-  const best = new Map();               // idx -> {name_used, changed}
+  //
+  // 回执的 status 有五种（2026-10-17 后端加了模糊匹配之后）：
+  //   ok        → 认下来了。match=exact 是字符完全相等（竖线 丨/|/｜ 等价）；
+  //               match=fuzzy 是后端按相似度**猜**的 —— 接口是覆盖语义，分已经写进去了，
+  //               所以"猜"就等于"有可能改了别人的分"，必须单独列出来给人复核。
+  //   unknown   → 站点上没有这个人。正常，不算失败。
+  //   ambiguous → 有几个名字同样像，后端弃权、一个字都没写。要人看，但不是失败。
+  //   disabled  → 那个账号被禁用了，没写。
+  //   invalid   → 这条报文不合法 —— 是我们自己发错了，得修客户端。
+  const best = new Map();               // idx -> {name_used, changed, match, similarity, matched}
+  const fuzzy = [];                     // 猜着写的（分已落库）
+  const ambiguous = [];                 // 后端分不清、没写
+  const seenFuzzy = new Set();
+  const seenAmbig = new Set();
   const unknown = new Map();            // idx -> 服务端的原话
   const failure = new Map();            // idx -> {status, text}
   entries.forEach((e, i) => {
@@ -1081,10 +1094,43 @@ async function deliver(rows, dir) {
     const r = results[i];
     if (!r) return;
     const row = r.row;
-    if (row && row.status && row.status !== 'unknown') {
-      if (!best.has(idx)) best.set(idx, { name_used: e.game_name, changed: row.changed !== false });
-    } else if (row && row.status === 'unknown') {
+    const st = row && row.status;
+    if (st === 'ok') {
+      const hit = {
+        name_used: e.game_name,
+        changed: row.changed !== false,
+        match: row.match || 'exact',
+        similarity: typeof row.similarity === 'number' ? row.similarity : null,
+        matched: row.matched_game_name || row.game_name,
+      };
+      // 同一行展开的几条写法有可能落到**两个人**身上（一条 exact、一条 fuzzy）。
+      // 精确的那条才是这个人；模糊的那条照样要报到下面那张警告单里。
+      const cur = best.get(idx);
+      if (!cur || (cur.match === 'fuzzy' && hit.match === 'exact')) best.set(idx, hit);
+      if (hit.match === 'fuzzy') {
+        // 同一行的 丨/| 两种写法会模糊到同一个人，只报一次
+        const key = `${idx}|${hit.matched}`;
+        if (!seenFuzzy.has(key)) {
+          seenFuzzy.add(key);
+          fuzzy.push({
+            game_name: items[idx].game_name, score: items[idx].score,
+            name_used: e.game_name, matched_game_name: hit.matched,
+            similarity: hit.similarity, also_exact: !!cur && cur.match === 'exact',
+          });
+        }
+      }
+    } else if (st === 'ambiguous') {
+      if (!seenAmbig.has(idx)) {
+        seenAmbig.add(idx);
+        ambiguous.push({
+          idx, game_name: items[idx].game_name, score: items[idx].score,
+          name_used: e.game_name, candidates: row.candidates || [],
+        });
+      }
+    } else if (st === 'unknown') {
       if (!unknown.has(idx)) unknown.set(idx, row.error || '没有这个游戏名对应的用户');
+    } else if (st === 'disabled' || st === 'invalid') {
+      if (!failure.has(idx)) failure.set(idx, { status: st, text: row.error || st });
     } else if (!failure.has(idx)) {
       failure.set(idx, { status: r.http || 0, text: r.text || '没有响应' });
     }
@@ -1096,10 +1142,14 @@ async function deliver(rows, dir) {
   items.forEach((it, idx) => {
     const hit = best.get(idx);
     if (hit) {
-      ok.push({ ...it, name_used: hit.name_used, changed: hit.changed });
+      ok.push({
+        ...it, name_used: hit.name_used, changed: hit.changed,
+        match: hit.match, similarity: hit.similarity, matched: hit.matched,
+      });
       if (hit.name_used !== it.game_name) fallbackUsed++;
       return;
     }
+    if (seenAmbig.has(idx)) return;     // 后端弃权：既不算写进去、也不算失败
     if (unknown.has(idx)) { bad.push({ ...it, status: 'unknown', text: unknown.get(idx) }); return; }
     const f = failure.get(idx) || { status: 0, text: aborted || '没有响应' };
     bad.push({ ...it, status: f.status, text: f.text });
@@ -1109,6 +1159,26 @@ async function deliver(rows, dir) {
   console.log(`✓ 写入 ${ok.length - unchanged} 行${unchanged ? `，另有 ${unchanged} 行分数没变` : ''}` +
     (fallbackUsed ? `（其中 ${fallbackUsed} 行是靠换了写法才对上的）` : '') +
     `　[${requests.length} 个请求 / ${entries.length} 条写法]`);
+
+  // 模糊命中：分已经写进去了，但"是谁"是后端按相似度猜的。接口是覆盖语义，
+  // 猜错就等于把别人的分改掉了 —— 这一屏是唯一能发现它的地方，所以单列。
+  if (fuzzy.length) {
+    console.log(`⚠ ${fuzzy.length} 条是后端按相似度猜着写的（可能记到别人头上，请复核）：`);
+    for (const f of fuzzy.slice(0, 10)) {
+      console.log(`   ${f.game_name}（${f.score}）→ ${f.matched_game_name}` +
+        `　相似度 ${f.similarity ?? '-'}` +
+        (f.also_exact ? '　← 同一行另有精确命中，这条尤其可疑' : ''));
+    }
+    if (fuzzy.length > 10) console.log(`   ……还有 ${fuzzy.length - 10} 条，见 send-report.json`);
+  }
+  if (ambiguous.length) {
+    console.log(`? ${ambiguous.length} 行后端分不清是谁（有同样像的名字），一个字都没写：`);
+    for (const a of ambiguous.slice(0, 5)) {
+      const names = (a.candidates || []).map((c) => `${c.game_name}(${c.similarity})`).join(' / ');
+      console.log(`   ${a.game_name}（${a.score}）→ ${names || '多个候选'}`);
+    }
+    if (ambiguous.length > 5) console.log(`   ……还有 ${ambiguous.length - 5} 行，见 send-report.json`);
+  }
 
   // 名字对不上**不算失败**：榜单是整个赛区的，站点上只有自己这群人，
   // 那些陌生玩家本来就不该写进来（2026-10-18 用户口径："无需处理失败的人，
@@ -1139,6 +1209,14 @@ async function deliver(rows, dir) {
     requests,
     written: ok.length - unchanged,
     unchanged,
+    // 猜着写的：分已经落库，但人可能猜错。定时任务没人盯控制台，所以这份文件是复核入口。
+    fuzzy: fuzzy.map((f) => ({
+      game_name: f.game_name, score: f.score, name_used: f.name_used,
+      matched_game_name: f.matched_game_name, similarity: f.similarity, alsoExact: f.also_exact,
+    })),
+    ambiguous: ambiguous.map((a) => ({
+      game_name: a.game_name, score: a.score, candidates: a.candidates,
+    })),
     notOnSite: stranger.map((b) => ({ game_name: b.game_name, score: b.score })),
     failed: broken.map((b) => ({ game_name: b.game_name, score: b.score, status: b.status, error: b.text })),
     matchedViaPrefixStrip: fallbackUsed,
