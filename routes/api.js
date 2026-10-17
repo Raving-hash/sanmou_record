@@ -50,13 +50,15 @@ const db = require('../db');
 const router = express.Router();
 
 const SCORE_RE = /^\d{1,9}$/;
-const MAX_ITEMS = 100;              // 一屏最多几十个人，100 足够，也挡住了拿它当批量写库用
+// 2026-10-17 用户定的上限：一次 1000 条（原来是 100）。一屏几十个人绰绰有余，
+// 也还挡得住拿它当批量写库用。
+const MAX_ITEMS = 1000;
 
-// 这个接口只收 JSON（Windows 端拼 JSON 最省事）。体积给 128KB：
-// 100 条游戏名 + 分数也就几 KB，留够余量即可。
+// 这个接口只收 JSON（Windows 端拼 JSON 最省事）。体积给 512KB：
+// 1000 条 × 最长 32 字的游戏名 ≈ 150KB，留够余量。
 // 注意 app.js 里还有全局的 express.urlencoded：表单形状（game_name=…&score=…）
 // 也能被解析，顺手兼容 curl 手测。
-router.use(express.json({ limit: '128kb' }));
+router.use(express.json({ limit: '512kb' }));
 
 // 坏 JSON / 体积超限要回 JSON，不能落到全局那个纯文本处理器上 ——
 // 桌面端是按 content-type 解析的，拿到一坨 HTML 只会报一个看不懂的错。
