@@ -143,13 +143,24 @@ db.createUser = ({ userId, nickname, passwordHash, isAdmin = 0 }) =>
   db.prepare(`INSERT INTO users (user_id, nickname, password_hash, is_admin) VALUES (?, ?, ?, ?)`)
     .run(userId, nickname, passwordHash, isAdmin ? 1 : 0);
 
+// 游戏名里**盟标分隔竖线**有几种写法，不能要求两边打的是同一个码点：
+// 玩家在游戏里看到的是「善丨皮皮王」（丨 = U+4E28），OCR 常认成半角 `|`，
+// 手机输入法还可能给出全角 `｜`。统一折成 丨 再比，见 normalizeGameName。
+const GAME_NAME_SEP = /[|｜丨│┃]/g;
+const normalizeGameName = (name) =>
+  String(name ?? '').trim().replace(GAME_NAME_SEP, '丨').toLowerCase();
+db.normalizeGameName = normalizeGameName;
+
 // 按**游戏名**找本站用户。积分录入接口（POST /api/scores）唯一的反查入口。
 // 大小写不敏感（和 uniq_users_game_name 那条唯一索引同一个口径），前后空白在写入时
 // 已经 trim 过，这里再 trim 一次是防接口调用方手滑多打空格。
+// 分隔竖线按等价字符比（见上面），所以库里存的是哪种写法都能认出来。
+// 用户只有几十个，直接拉出来在 JS 里比 —— 比在 SQL 里 REPLACE 五层清楚得多。
 db.getUserByGameName = (name) => {
-  const n = String(name ?? '').trim();
+  const n = normalizeGameName(name);
   if (!n) return undefined;
-  return db.prepare(`SELECT * FROM users WHERE game_name COLLATE NOCASE = ?`).get(n);
+  return db.prepare(`SELECT * FROM users WHERE game_name IS NOT NULL`).all()
+    .find((u) => normalizeGameName(u.game_name) === n);
 };
 
 // 设置游戏名。本人（/password）和管理员（/admin）两条路共用这一份校验 ——
