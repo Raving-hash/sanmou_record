@@ -321,40 +321,69 @@ async function recognize(input, topN = 3, given = null) {
   });
 }
 
-// 把两路识别的结果合起来，决定**自动填哪个**、以及**可信不可信**。
+// 把**三路**识别的结果合起来，决定**自动填哪个**、以及**可信不可信**。
 //
-// ★ 为什么"一致"能当置信度用：2026-10-16 在玩家标注过的 63 格真值上实测 ——
-//   两路头名一致的 28 格（44%）**28/28 全对**；不一致的 56% 里 VLM 对 19、NCC 对 13、都错 3。
-//   所以：一致 → 直接填、标 high；不一致 → 填 VLM 的（它更准），标 low。
-//   注意低置信**也照填**（用户定的"照填 + 标待核对"），不是留空。
+// ★ 为什么"多数一致"能当置信度用：每路错的格子不一样，所以互相印证才有信息量。
+//   2026-10-16 实测（142 个人工核对过的格子 / 17 张真图）：
+//     NCC 41/58 = 70.7%   视觉模型 97/142 = 68.3%   本地 OCR 111/120 = 92.5%
+//   三路里 ≥2 路头名一致时 —— 95/95 全对（覆盖 66.9%）。
+//   作对照：加第三路之前那套"两路一致"只覆盖 **17.6%**（25/142）。
+//
+// ★ 优先级 OCR > 视觉模型 > NCC 是**按实测准确率**排的，不是拍脑袋：
+//   没有多数一致时（三路各说各的），填最准那一路的答案。注意低置信**也照填**
+//   （用户定的"照填 + 标待核对"），不是留空。
 //
 // 这是纯函数（不碰库、不联网），**断言直接喂假数据进来测** —— 见 .devlocal/test/test-heroes.js。
 //
 // 返回的每一项正好是 db.saveGuesses 要的形状。
-function merge(nccList, vlmList) {
-  const nccBySlot = new Map();
-  for (const s of nccList || []) nccBySlot.set(s.slot, s.candidates || []);
-  const vlmBySlot = new Map();
-  for (const s of vlmList || []) vlmBySlot.set(s.slot, s.candidates || []);
+function merge(nccList, vlmList, ocrList) {
+  const bySlot = (list) => {
+    const m = new Map();
+    for (const s of list || []) m.set(s.slot, s.candidates || []);
+    return m;
+  };
+  const nccBySlot = bySlot(nccList);
+  const vlmBySlot = bySlot(vlmList);
+  const ocrBySlot = bySlot(ocrList);
 
   const out = [];
   for (let slot = 1; slot <= 9; slot++) {
     const ncc = nccBySlot.get(slot) || [];
     const vlm = vlmBySlot.get(slot) || [];
-    const nccKey = ncc[0] ? ncc[0].key : null;
-    const vlmKey = vlm[0] ? vlm[0].key : null;
+    const ocr = ocrBySlot.get(slot) || [];
+    const keys = {
+      ocr: ocr[0] ? ocr[0].key : null,
+      vlm: vlm[0] ? vlm[0].key : null,
+      ncc: ncc[0] ? ncc[0].key : null,
+    };
+
+    // 数票。任一 key 拿到 ≥2 票就是"多数一致"。
+    const tally = new Map();
+    for (const k of Object.values(keys)) if (k) tally.set(k, (tally.get(k) || 0) + 1);
+    let winner = null;
+    for (const [k, n] of tally) if (n >= 2 && (!winner || n > tally.get(winner))) winner = k;
 
     let auto_key = null, confidence = null;
-    if (nccKey && vlmKey) {
-      auto_key = vlmKey;                                    // 一致时两个都一样，写谁都行
-      confidence = nccKey === vlmKey ? 'high' : 'low';
-    } else if (vlmKey) {
-      auto_key = vlmKey; confidence = 'low';                // NCC 一无所获（卡框没对上、图不是那个页）
-    } else if (nccKey) {
-      auto_key = nccKey; confidence = 'low';                // VLM 没跑或跑挂了 —— 降级，但必须标出来
+    if (winner) {
+      auto_key = winner;
+      confidence = 'high';
+    } else {
+      // 没有多数：按准确率优先级退让。全空则保持 null（"这格机器什么都没说"）。
+      const first = keys.ocr || keys.vlm || keys.ncc;
+      if (first) { auto_key = first; confidence = 'low'; }
     }
 
-    out.push({ slot, candidates: ncc, vlm, auto_key, confidence });
+    // ★ vlm / ocr 这两列要能区分**两件不同的事**（`db.filenamesMissingVlm/Ocr` 靠它）：
+    //   · 这一路**根本没跑**（没配、服务挂了）→ 整个列表传进来就是 null → 存 NULL
+    //   · 这一路**跑了但这格没候选** → 存 `[]`
+    //   从前这里一律传每格数组，`[]` 落库成 `'[]'`，于是 `WHERE vlm IS NULL` **永远匹配不到**
+    //   （2026-10-16 实测线上 216 行里 NULL 是 0 行、`'[]'` 有 29 行），补跑入口等于死的。
+    out.push({
+      slot, candidates: ncc,
+      vlm: vlmList ? vlm : null,
+      ocr: ocrList ? ocr : null,
+      auto_key, confidence,
+    });
   }
   return out;
 }

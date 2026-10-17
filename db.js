@@ -31,6 +31,24 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('confidence')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN confidence TEXT`);
 }
 
+// 第三路识别（2026-10-16 加）：本地 OCR 认「自带战法名」→ 反查武将。
+// 老库里这一列没有，补上；**补完之后是 NULL**，`filenamesMissingOcr()` 正是靠这个
+// 把历史图扫出来（但那个入口是手动脚本，不进 sweep，理由见那个函数）。
+{
+  const cols = db.prepare(`PRAGMA table_info(hero_guesses)`).all().map((c) => c.name);
+  if (!cols.includes('ocr')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN ocr TEXT`);
+}
+
+// 武将库补 `skill`（自带战法名，第三路的词典）。heroes 之前没有迁移块，这里开一个。
+// ⚠️ 补出来是 NULL 是**正常且安全**的：identify 那一路会因此整体不启用，
+//    行为退回到"只有 NCC + 视觉模型"的原样（recognize-ocr.js 的 available()）。
+//    要真正启用，得把带 skill 的 herodata/index.json 放到线上目录（它 git-ignored，
+//    release.sh 带不过去），重启进程让 seedHeroes 播种。
+{
+  const cols = db.prepare(`PRAGMA table_info(heroes)`).all().map((c) => c.name);
+  if (!cols.includes('skill')) db.exec(`ALTER TABLE heroes ADD COLUMN skill TEXT`);
+}
+
 // ---------- 配置 / 邀请码 ----------
 db.getSetting = (k) => db.prepare(`SELECT value FROM settings WHERE key=?`).get(k)?.value ?? null;
 db.setSetting = (k, v) => db.prepare(
@@ -108,11 +126,17 @@ db.getLineupImage = (id) => db.prepare(`SELECT * FROM lineup_images WHERE id=?`)
 // 这样改了 herodata/index.json（补一个武将、修一个兵种）重启就生效，不用手工改库。
 // 不删多余的 key：库里少一个武将时，历史上玩家对它的确认仍然要留着（见 schema.sql）。
 db.seedHeroes = (heroes) => {
+  // ⚠️ 这里**一定要把新字段也列出来** —— seedHeroes 传的是整个 `{...h}`，
+  //    但 SQL 里没点名的列会被静默忽略。只改 herodata/index.json 不加这一列，
+  //    表现是"改了 JSON 重启了却没生效"，很难查。
   const up = db.prepare(`
-    INSERT INTO heroes (key, name, faction, arm, variant, sort) VALUES (@key, @name, @faction, @arm, @variant, @sort)
+    INSERT INTO heroes (key, name, faction, arm, variant, skill, sort) VALUES (@key, @name, @faction, @arm, @variant, @skill, @sort)
     ON CONFLICT(key) DO UPDATE SET name=excluded.name, faction=excluded.faction,
-                                   arm=excluded.arm, variant=excluded.variant, sort=excluded.sort`);
-  db.transaction((rows) => rows.forEach((h, i) => up.run({ ...h, variant: h.variant || null, sort: i })))(heroes);
+                                   arm=excluded.arm, variant=excluded.variant,
+                                   skill=excluded.skill, sort=excluded.sort`);
+  db.transaction((rows) => rows.forEach((h, i) => up.run({
+    ...h, variant: h.variant || null, skill: h.skill || null, sort: i,
+  })))(heroes);
 };
 
 db.getHeroes = () => db.prepare(`SELECT * FROM heroes ORDER BY sort`).all();
@@ -171,11 +195,12 @@ db.getEntryGuesses = (entryId) =>
 //   —— 它记的是机器的意见，玩家改的是 chosen_key，两者本来就该分开存。
 db.saveGuesses = (entryId, filename, list) => {
   const up = db.prepare(`
-    INSERT INTO hero_guesses (entry_id, filename, slot, candidates, vlm, auto_key, confidence, chosen_key, source)
-    VALUES (@entry_id, @filename, @slot, @candidates, @vlm, @auto_key, @confidence, @auto_key, 'auto')
+    INSERT INTO hero_guesses (entry_id, filename, slot, candidates, vlm, ocr, auto_key, confidence, chosen_key, source)
+    VALUES (@entry_id, @filename, @slot, @candidates, @vlm, @ocr, @auto_key, @confidence, @auto_key, 'auto')
     ON CONFLICT(filename, slot) DO UPDATE SET
       candidates = excluded.candidates,
       vlm        = excluded.vlm,
+      ocr        = excluded.ocr,
       confidence = excluded.confidence,
       auto_key   = excluded.auto_key,
       chosen_key = CASE WHEN hero_guesses.decided_at IS NULL THEN excluded.chosen_key ELSE hero_guesses.chosen_key END,
@@ -183,7 +208,12 @@ db.saveGuesses = (entryId, filename, list) => {
   db.transaction((rows) => rows.forEach((g) => up.run({
     entry_id: entryId, filename, slot: g.slot,
     candidates: JSON.stringify(g.candidates || []),
-    vlm: g.vlm ? JSON.stringify(g.vlm) : null,
+    // ⚠️ 判空必须是 `== null`，**不能写成 `g.vlm ? ... : null`** ——
+    //    空数组 `[]` 在 JS 里是真值，那样写会把"这一路跑了但这格没候选"也存成 NULL，
+    //    两种含义就再也分不开了（`filenamesMissingVlm/Ocr` 的 `IS NULL` 判据全靠它）。
+    //    见 recognize.js 的 merge() 尾部注释：那一版线上 216 行里 NULL 是 0 行。
+    vlm: g.vlm == null ? null : JSON.stringify(g.vlm),
+    ocr: g.ocr == null ? null : JSON.stringify(g.ocr),
     auto_key: g.auto_key || null,
     confidence: g.confidence || null,
   })))(list);
@@ -210,9 +240,26 @@ db.filenamesMissingGuesses = () => db.prepare(`
 // 这是**历史图重跑的入口** —— 改版前那批图只有 NCC 候选，靠这个条件被扫出来补一遍。
 // ⚠️ 调用方（recognize-worker 的 sweep）必须**只在 vlm 启用时才**用它，
 //    否则没配 key 的环境每次启动都会把全部历史图重推一遍。
+//
+// ⚠️ **历史遗留**：2026-10-16 之前的 saveGuesses 会把"跑了但没候选"也存成 `'[]'`，
+//    所以老库里的 `'[]'` **不能**当作"还没跑过"——那 29 行确实跑过了。
+//    修好之后新写入的行才会正确区分 NULL / `[]`（见 saveGuesses 和 merge 的注释）。
+//    **不要**为了"把老的也补上"把条件改成 `IS NULL OR vlm='[]'` —— 那会在下次重启时
+//    把几十张历史图重新推给视觉模型，是要花 API token 的。要补就显式跑脚本。
 db.filenamesMissingVlm = () => db.prepare(`
   SELECT DISTINCT g.filename, g.entry_id FROM hero_guesses g
   WHERE g.vlm IS NULL`).all();
+
+// 还没跑过第三路（本地 OCR）的阵容图。
+//
+// ⚠️ **这个函数只有一个调用方：scripts/reco-backfill-ocr.js（手动跑）。**
+//    故意**不接进 recognize-worker 的 sweep**，理由是真金白银的：
+//    worker 的 runJob 是**三路一起跑**的（NCC + 视觉模型 + OCR），把几百张历史图
+//    推给 sweep 就等于把视觉模型也重跑一遍 —— 那是要花 API token 的。
+//    想补历史图就显式跑那个脚本，别顺手把它加进 sweep。
+db.filenamesMissingOcr = () => db.prepare(`
+  SELECT DISTINCT g.filename, g.entry_id FROM hero_guesses g
+  WHERE g.ocr IS NULL`).all();
 
 // （2026-10-16 删掉了 getConfirmedHeroes —— 它是上一版的遗留，没有任何调用方
 //   （阵容墙走的是 getSeasonHeroData 的批量版），而且改版后"已确认"这个说法本身
@@ -332,13 +379,20 @@ db.lineupTier = (heroes) => {
 //     要么是两个长得像的武将。照着这份名单修，比重新跑一遍分析便宜得多。
 db.getRecoStats = () => {
   const rows = db.prepare(`
-    SELECT auto_key, confidence, chosen_key, other_name, decided_at
+    SELECT auto_key, confidence, chosen_key, other_name, decided_at, candidates, vlm, ocr
     FROM hero_guesses`).all();
 
   const s = { total: rows.length, filled: 0, high: 0, low: 0,
-              reviewed: 0, kept: 0, corrected: 0, added: 0, cleared: 0 };
+              reviewed: 0, kept: 0, corrected: 0, added: 0, cleared: 0,
+              // 三路各自的准确率（2026-10-16 加第三路时补的）。合并后的数字看不出
+              // "是哪一路在干活"，而三路差的格子不一样 —— 这一栏是调参/换模型的依据。
+              paths: { ncc: { answered: 0, right: 0 }, vlm: { answered: 0, right: 0 },
+                       ocr: { answered: 0, right: 0 } } };
   const pairs = new Map();
   const unresolved = [];
+  const topKey = (json) => {
+    try { const a = JSON.parse(json || '[]'); return a[0] ? a[0].key : null; } catch { return null; }
+  };
 
   for (const r of rows) {
     if (r.auto_key) {
@@ -362,6 +416,19 @@ db.getRecoStats = () => {
     //    （见 routes/main.js），所以这个数组只会越来越旧、不会长。留着是因为
     //    "库里漏了哪个武将"这件事仍然值得回头看一眼 —— 名单本身已经集齐了。
     if (!r.chosen_key && r.other_name) unresolved.push(r.other_name);
+
+    // 三路各自的准不准。分母口径：**人核对过、而且给出了明确名字**的格子 ——
+    // 只有这种格子才有"真值"可比；「人判不确定」和"没人看过"都不该进分母
+    // （和上面 kept/corrected 的切法是同一套理由，见函数头）。
+    // 注意一条路的"有输出"不等于"自动填的用的是它" —— 这里量的是每路自己的判断力。
+    if (r.decided_at && r.chosen_key) {
+      for (const [name, col] of [['ncc', 'candidates'], ['vlm', 'vlm'], ['ocr', 'ocr']]) {
+        const k = topKey(r[col]);
+        if (!k) continue;
+        s.paths[name].answered++;
+        if (k === r.chosen_key) s.paths[name].right++;
+      }
+    }
   }
 
   // 纠正排行翻成显示名。库里已经查不到的 key 就原样显示 —— 那本身也是条线索。

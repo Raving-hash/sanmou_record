@@ -8,13 +8,18 @@
 // 这里照那个路子来：**一个进程内的数组 + 一个定时器 + 严格串行**。
 // 串行是故意的 —— NCC 是 CPU 密集的，并行跑只会互相拖慢，还抢 Express 的线程。
 //
-// 两路识别（本地 NCC + 远端视觉模型）**都在这一条队列里跑完再写库**，
-// 因为它们要合起来才能定置信度（见 recognize.merge）。
+// **三路**识别（本地 NCC + 远端视觉模型 + 本地 OCR 认自带战法）都在这一条队列里
+// 跑完再写库，因为它们要合起来才能定置信度（见 recognize.merge）。
 //
 // 进程重启后内存队列会丢，所以启动时扫一遍库：
 //   · 没有 hero_guesses 行的阵容图 —— 全流程补跑（见 db.filenamesMissingGuesses）
 //   · 有行但 vlm 还是 NULL 的 —— 补跑第二路（见 db.filenamesMissingVlm）。
 //     这条正是"历史 24 张重跑"的入口，不用另外写脚本。
+//
+// ⚠️ **第三路故意没有对应的 sweep 批次。** 补历史图要跑
+//    `node --env-file=.env scripts/reco-backfill-ocr.js`，别把 db.filenamesMissingOcr()
+//    接进 sweep —— runJob 是三路一起跑的，把几百张历史图推进队列会连带重跑视觉模型，
+//    那是要花 API token 的。
 
 const fs = require('fs');
 const path = require('path');
@@ -22,6 +27,7 @@ const db = require('./db');
 const { imgUrl } = require('./upload');
 const recognize = require('./recognize');
 const vlmModel = require('./recognize-vlm');
+const ocrPath = require('./recognize-ocr');
 const locate = require('./locate');
 
 const INDEX = path.join(__dirname, 'herodata', 'index.json');
@@ -84,7 +90,20 @@ async function runJob(job) {
     }
   }
 
-  const merged = recognize.merge(ncc, vlm);
+  // 第三路：本地 OCR 认自带战法名（见 recognize-ocr.js）。**契约与前两路一样** ——
+  // 挂了就置 null 让 merge 标 low，绝不让一路拖垮整张图。
+  // 它和 NCC 不一样：**一张图 9 格同生共死**（服务挂掉 = 整张图这条路全空），
+  // 所以这里失败时打出来的 ocrGot 会是 0/9 而不是"某几格"。
+  let ocr = null;
+  if (ocrPath.available()) {
+    try {
+      ocr = await ocrPath.identify(buf);
+    } catch (e) {
+      console.error(`[识别] 本地 OCR 失败，这张降级为不用第三路：${e.message}`);
+    }
+  }
+
+  const merged = recognize.merge(ncc, vlm, ocr);
   db.saveGuesses(job.entryId, job.filename, merged);
 
   const filled = merged.filter((m) => m.auto_key).length;
@@ -92,13 +111,14 @@ async function runJob(job) {
   // NCC 有几个格子拿到了候选 —— **这一行是判断定位对不对的主要实据**：
   // 横屏以前恒为 0/9（坐标是按竖屏写死的），现在应该接近 9/9。
   const nccGot = ncc.filter((s) => (s.candidates || []).length).length;
+  const ocrGot = (ocr || []).filter((s) => (s.candidates || []).length).length;
   // 从前这里打的是九个 `?`（没有候选时），看着像报错、其实是正常的 ——
   // 玩家传的要不是「阵容配置」页，九格本来就一个都认不出来。改成人话。
+  const tail = ` · NCC ${nccGot}/9 · OCR ${ocr === null ? '未启用/失败' : `${ocrGot}/9`}`
+    + ` · 版面 ${grid ? grid.layoutName : '未定位→回退竖屏坐标'}`;
   console.log(filled
-    ? `[识别] ${job.filename} 填了 ${filled}/9 格（两路一致 ${high}）`
-      + ` · NCC ${nccGot}/9 · 版面 ${grid ? grid.layoutName : '未定位→回退竖屏坐标'}`
-    : `[识别] ${job.filename} 一个都没认出来（多半传的不是「阵容配置」页）`
-      + ` · NCC ${nccGot}/9 · 版面 ${grid ? grid.layoutName : '未定位→回退竖屏坐标'}`);
+    ? `[识别] ${job.filename} 填了 ${filled}/9 格（三路多数一致 ${high}）${tail}`
+    : `[识别] ${job.filename} 一个都没认出来（多半传的不是「阵容配置」页）${tail}`);
 }
 
 async function tick() {
@@ -150,16 +170,21 @@ function start() {
   try {
     const idx = JSON.parse(fs.readFileSync(INDEX, 'utf8'));
     db.seedHeroes(idx.heroes);
-    // 视觉模型那边有一份"显示名 → 武将"的缓存，库刚变过，得让它重建
+    // 视觉模型那边有一份"显示名 → 武将"的缓存、第三路有一份"战法名 → 武将"的，
+    // 库刚变过（可能刚补上 skill），两份都得重建
     vlmModel.resetCache();
+    ocrPath.resetCache();
     console.log(`[识别] 武将库 ${idx.heroes.length} 个已就位`);
   } catch (e) {
     console.error('[识别] 武将库播种失败，识别不启用：', e.message);
     return;
   }
-  console.log(vlmModel.enabled()
-    ? '[识别] 两路都开：本地 NCC + 远端视觉模型'
-    : '[识别] 只跑本地 NCC（没配 DS_API_KEY，视觉模型那一路关闭）');
+  // 三路各自可能因为没配而关闭，启动时把"到底跑几路、为什么少"一次说清楚 ——
+  // 否则线上只能靠"置信度怎么看都不 high"去反推，很费时间。
+  console.log('[识别] 在跑：本地 NCC'
+    + (vlmModel.enabled() ? ' + 远端视觉模型' : '（没配 DS_API_KEY，视觉模型那一路关闭）')
+    + (ocrPath.available() ? ' + 本地 OCR 自带战法'
+      : `（本地 OCR 那一路关闭：${!process.env.OCR_URL ? '没配 OCR_URL' : '武将库里没有 skill'}）`));
   // 库还没热的时候第一张要等一两秒（102 张卡面要解码 + 算模板），
   // 提前热一下，免得第一个玩家的图白等。
   recognize.load().catch((e) => console.error('[识别] 预热失败：', e.message));

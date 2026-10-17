@@ -128,14 +128,22 @@ CREATE TABLE IF NOT EXISTS heroes (
   faction TEXT NOT NULL,          -- 魏 / 蜀 / 吴 / 群
   arm     TEXT NOT NULL,          -- 骑 / 弓 / 盾 / 枪
   variant TEXT,                   -- NULL | 'SP' | '群雄' —— 同名两版靠它区分，显示时缀在名字前
+  -- **自带战法名**（2026-10-16 加）。游戏里每张卡右边三行战法名，第一行就是这个。
+  -- 它在 102 个武将里**零撞名**，连同名变体都各不相同（诸葛亮=草船借箭 /
+  -- SP诸葛亮=星罗棋布，孙坚=武烈破虏 / 群雄孙坚=诛凶殄逆）—— 所以它是比"看脸"
+  -- 更硬的身份证：本地 OCR 认出这一行就直接定将（见 recognize-ocr.js）。
+  -- 同样取自 sgmdtx.com（`wj.skill`）。只作匹配用，界面上不显示。
+  skill   TEXT,
   sort    INTEGER NOT NULL DEFAULT 0
 );
 
 -- 识别结果（2026-10-16 加）：一张阵容图 9 个格子，一格一行。
 --
 -- 产品形态（2026-10-16 改版）：**上传后后台自动跑，直接填好结果，玩家事后在阵容卡上纠正。**
--- 两路识别各出一套候选 —— 本地 NCC 模板匹配（`candidates`）+ 远端视觉模型（`vlm`）；
--- 两路**头名一致时实测 28/28 全对**，所以"一不一致"直接当置信度用（`confidence`）。
+-- **三路**识别各出一套候选（第三路 2026-10-16 加）：
+--   本地 NCC 模板匹配（`candidates`）+ 远端视觉模型（`vlm`）+ 本地 OCR 认自带战法（`ocr`）。
+-- 三路里**≥2 路头名一致**才算高置信（`confidence`）—— 见 recognize.js 的 merge()。
+-- （改三路之前是"两路一致"，实测只覆盖 17.6% 的格子；加第三路后覆盖 66.9%、精确率不变。）
 -- 玩家的每次纠错都在攒真值，`auto_key` 留住"机器原本说什么"，纠正分析全靠它。
 CREATE TABLE IF NOT EXISTS hero_guesses (
   id         INTEGER PRIMARY KEY,
@@ -146,6 +154,13 @@ CREATE TABLE IF NOT EXISTS hero_guesses (
   -- 而"当时机器猜的是什么"是历史事实，反馈分析要的就是它，不该被后来的库覆盖。
   candidates TEXT NOT NULL,       -- NCC 的前 3 个
   vlm        TEXT,                -- 视觉模型的前 3 个（JSON）。没跑或跑挂了为 NULL
+  -- 本地 OCR（认自带战法名）的结果（JSON）。**每格最多一个**，不是"前 3 个"——
+  -- 这一路的答案是"这格第一行印的是哪个自带战法"，是一对一的，没有第二名可言。
+  -- 没跑或跑挂了为 NULL。
+  -- ⚠️ 它**不是每格独立裁窗**算出来的：整块阵容区 OCR 一遍，拿 102 个自带战法名去撞、
+  --    按文字块的坐标聚成 3×3，再取每格最靠上的那个。所以一张图是**同生共死**的：
+  --    服务挂掉时 9 格全 NULL（不像 NCC 会"某几格没候选"）。
+  ocr        TEXT,
   -- 卡上显示的那个：机器自动填的和玩家纠正后的，都写这儿。
   -- **故意不写 REFERENCES heroes(key)**：库是播种出来的、可能被重播，
   -- 而玩家的决定是这张表里最值钱的数据，不能因为库里少了一个武将就被级联删掉或写不进去。
@@ -153,7 +168,7 @@ CREATE TABLE IF NOT EXISTS hero_guesses (
   -- 机器自动填的那个。玩家改过之后 chosen_key 就变了，而这一列**永不覆盖** ——
   -- /admin 那块「定期总结修复」的排行榜（机器说 X → 玩家改成 Y）全靠它。
   auto_key   TEXT,
-  confidence TEXT,                -- 'high'（NCC 与 VLM 头名一致）/ 'low'（不一致，或无 VLM）
+  confidence TEXT,                -- 'high'（三路里 ≥2 路头名一致）/ 'low'（没有多数，或只有一路有输出）
   source     TEXT,                -- 'auto'（机器填的）/ 'pick' / 'other' / 'none'（后三个是玩家动作）
   other_name TEXT,                -- source='other' 时玩家手输的原文，哪怕没能对上库里任何一个
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
