@@ -321,17 +321,18 @@ async function recognize(input, topN = 3, given = null) {
   });
 }
 
-// 把**三路**识别的结果合起来，决定**自动填哪个**、以及**可信不可信**。
+// 把**三路**识别的结果合起来，决定**自动填哪个**、以及**这个答案有几路支持**。
 //
-// ★ 为什么"多数一致"能当置信度用：每路错的格子不一样，所以互相印证才有信息量。
-//   2026-10-16 实测（142 个人工核对过的格子 / 17 张真图）：
-//     NCC 41/58 = 70.7%   视觉模型 97/142 = 68.3%   本地 OCR 111/120 = 92.5%
-//   三路里 ≥2 路头名一致时 —— 95/95 全对（覆盖 66.9%）。
-//   作对照：加第三路之前那套"两路一致"只覆盖 **17.6%**（25/142）。
+// ★★ 2026-10-17 起：**阵容以 OCR 为准**（用户口径「按照 ocr 的结果直接确定玩家的阵容」）。
+//   第三路认的是每张卡第一行的**自带战法名**，102 个名字零撞名 ——
+//   实测 142 个人工核对过的格子上：OCR 111/120 = 92.5%，视觉模型 68.3%，NCC 70.7%。
+//   所以它只要给出了答案就照它填，**不再让"另外两路碰巧一致"把它顶掉**。
+//   另外两路只在这格 OCR 没认出东西（服务没跑 / 生僻字漏检）时兜底，
+//   顺序按各自的实测准确率：视觉模型 > NCC。
 //
-// ★ 优先级 OCR > 视觉模型 > NCC 是**按实测准确率**排的，不是拍脑袋：
-//   没有多数一致时（三路各说各的），填最准那一路的答案。注意低置信**也照填**
-//   （用户定的"照填 + 标待核对"），不是留空。
+// ★ `confidence` 的含义随之收紧成一句话：**这个答案有几路支持**（≥2 路 = high）。
+//   它只喂 `/admin` 的准确率统计，不再决定玩家侧要不要"待确认" ——
+//   卡上那套「待核对 / 自动弹窗」已经拿掉了，改由一个显式的「编辑阵容」按钮进入面板。
 //
 // 这是纯函数（不碰库、不联网），**断言直接喂假数据进来测** —— 见 .devlocal/test/test-heroes.js。
 //
@@ -357,20 +358,15 @@ function merge(nccList, vlmList, ocrList) {
       ncc: ncc[0] ? ncc[0].key : null,
     };
 
-    // 数票。任一 key 拿到 ≥2 票就是"多数一致"。
-    const tally = new Map();
-    for (const k of Object.values(keys)) if (k) tally.set(k, (tally.get(k) || 0) + 1);
-    let winner = null;
-    for (const [k, n] of tally) if (n >= 2 && (!winner || n > tally.get(winner))) winner = k;
+    // ★ OCR 优先：它认的是自带战法名（102 个零撞名），实测最准。OCR 没输出才轮到
+    //   视觉模型，再没有才用 NCC。**注意这不是"投票决定填谁"** —— 投票只用来算置信度。
+    const auto_key = keys.ocr || keys.vlm || keys.ncc;
 
-    let auto_key = null, confidence = null;
-    if (winner) {
-      auto_key = winner;
-      confidence = 'high';
-    } else {
-      // 没有多数：按准确率优先级退让。全空则保持 null（"这格机器什么都没说"）。
-      const first = keys.ocr || keys.vlm || keys.ncc;
-      if (first) { auto_key = first; confidence = 'low'; }
+    // 置信度 = 选中的这个答案有几路支持。三路各说各的时 support=1 → low。
+    let confidence = null;
+    if (auto_key) {
+      const support = Object.values(keys).filter((k) => k === auto_key).length;
+      confidence = support >= 2 ? 'high' : 'low';
     }
 
     // ★ vlm / ocr 这两列要能区分**两件不同的事**（`db.filenamesMissingVlm/Ocr` 靠它）：

@@ -79,19 +79,21 @@ async function runJob(job) {
   const grid = await locate.locate(buf);
   const ncc = await recognize.recognize(buf, 3, grid && grid.boxes);
 
-  // 第二路：视觉模型。**它挂了不能拖垮整张图** —— 降级成"只有 NCC"，
-  // merge 会把那些格子标成 low（照填，但标记「待核对」），而不是整张图失败。
+  // 第二路：视觉模型。**它挂了不能拖垮整张图** —— 降级成"只有 NCC + OCR"，
+  // merge 照样填（阵容以 OCR 为准），只是这格少一路支持、`confidence` 可能变 low。
+  // low 只影响 /admin 的统计，不影响玩家看到的阵容，也不是失败。
   let vlm = null;
   if (vlmModel.enabled()) {
     try {
       vlm = await vlmModel.identify(buf);
     } catch (e) {
-      console.error(`[识别] 视觉模型失败，这张降级为只用 NCC：${e.message}`);
+      console.error(`[识别] 视觉模型失败，这张降级为不用第二路：${e.message}`);
     }
   }
 
   // 第三路：本地 OCR 认自带战法名（见 recognize-ocr.js）。**契约与前两路一样** ——
-  // 挂了就置 null 让 merge 标 low，绝不让一路拖垮整张图。
+  // 挂了就置 null，绝不让一路拖垮整张图。它是**定阵容的那一路**（OCR 优先，见 merge），
+  // 所以它挂掉时另外两路兜底；产线上的表现是"这一张可能没那么准"，不是整张图失败。
   // 它和 NCC 不一样：**一张图 9 格同生共死**（服务挂掉 = 整张图这条路全空），
   // 所以这里失败时打出来的 ocrGot 会是 0/9 而不是"某几格"。
   let ocr = null;

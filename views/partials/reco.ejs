@@ -10,9 +10,15 @@
     ② 纠正面板 —— **只有本人和管理员可见**（r.guesses 非空就说明能改，
        见 db.getSeasonHeroData：候选 JSON 只给能改这张卡的人查）。
        ⚠️ 它在卡上是个**原生 `<details>`**（没 JS 时就该是这么多：点开就地改），
-       而 public/reco.js 会把里面的表单**搬进一个弹窗**（点那一行打开）—— 卡只有 228px，
-       九格挤在里面每格 70px，连 placeholder 都放不下。**没 JS 时一个字都不变**：
+       而 public/reco.js 会把里面的表单**搬进一个弹窗**（点「编辑阵容」打开）——
+       卡只有 228px，九格挤在里面每格 70px，连 placeholder 都放不下。**没 JS 时一个字都不变**：
        脚本不跑就还是那个原生折叠块，功能一样不少。
+
+  ★ 2026-10-17 用户口径：「按照 ocr 的结果直接确定玩家的阵容，并提供玩家本人一个
+    编辑阵容按钮，点击以后跳到现在的待确认界面，不需要自动弹出窗口了」。
+    所以卡上那一行现在是**一个显式的「编辑阵容」按钮**，机器填的结果直接当阵容用；
+    从前"卡主有待核对就自动弹一次"那条路（服务端挂 data-auto、脚本进页面就弹）**已删掉**。
+    认得准不准仍然标着（虚框 + 问号），但**要不要改由玩家自己走过来点**，不再追着人弹窗。
 
   ⚠️ 布局约束（2026-10-16 改过一次，**这次是反直觉的那个方向**）：
      这一块的 `<div class="reco">` **永远渲染，哪怕一个字的内容都没有**。
@@ -49,10 +55,6 @@
    //    （快照里 entry 5/9/16 就是两张图的老数据；2026-10-16 起每期只许传一张了。）
    const shownFile = r.images[0] ? r.images[0].filename : null;
    const guesses = (r.guesses || []).filter((g) => g.filename === shownFile);
-   // 「待核对」= 机器填的、还没人看过（source==='auto' 且没落 decided_at）。
-   // 这个数就是折叠面板标题上那个 N。
-   const pending = guesses.filter((g) => g.source === 'auto').length;
-   const reviewed = guesses.filter((g) => g.decided_at).length;
    // 有没有任何一格识别出东西（NCC 候选、VLM 候选、或已经填上了）。
    // ⚠️ **判据不能只看 NCC** —— 会有"NCC 一无所获、视觉模型认出来了"的图，
    //    只看 candidates 的话那种图整块不渲染，等于白认。
@@ -86,20 +88,13 @@
     </p>
   <% } %>
 
-  <%# ★ 这是**本人的卡、而且还有没核对过的格子** → 打上 data-auto：
-      public/reco.js 见了就把面板弹窗自己打开（用户 2026-10-16 晚定的：「识别结果如果是
-      待确认的就直接开一个小弹窗进行输入」、「只给本人弹窗，其他人观看不弹窗也不需要确认」）。
-      ⚠️ 判据里必须有 `mine` —— 管理员在别人的卡上也能改（下面那句"管理员要能改"），
-      但"弹窗提醒他去核对"这件事只对**卡主**做，不然管理员一进首页就被弹一脸。
-      多张都带 data-auto 时由脚本挑 id 最大的那张（最新的一套），见 reco.js。 %>
-  <% const mine = locals.me && r.user_id === locals.me.id; %>
+  <%# ★ 「编辑阵容」按钮（2026-10-17 用户口径：识别结果直接定阵容，要改自己点进来）。
+      它是个 `<summary>`，所以**没 JS 时点开就地改**（原生 details），有 JS 时
+      public/reco.js 把表单搬进弹窗。不再挂任何"自动打开"的标记 —— 自动弹窗已删。
+      只有能改这张卡的人才会走到这儿（guesses 非空 = 本人或管理员）。 %>
   <% if (hasCands) { %>
-    <details class="reco-box"<% if (mine && pending) { %> data-auto="1"<% } %>>
-      <summary>
-        <% if (pending) { %>识别结果 · 待核对 <%= pending %> 格<% } %>
-        <% if (pending && reviewed) { %> · <% } %>
-        <% if (reviewed) { %>已核对 <%= reviewed %>/<%= guesses.length %><% } %>
-      </summary>
+    <details class="reco-box">
+      <summary class="reco-edit" title="改这套阵容的九个格子（机器认错了就来这里改）">编辑阵容</summary>
       <%# 说明两件事：机器填的可以直接改；传的不是「阵容配置」页的话候选会不靠谱。
           9 个框是按那个页面的版式算的（见 recognize.js），换个页面框就落在别处了。 %>
       <p class="reco-tip">

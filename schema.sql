@@ -142,8 +142,9 @@ CREATE TABLE IF NOT EXISTS heroes (
 -- 产品形态（2026-10-16 改版）：**上传后后台自动跑，直接填好结果，玩家事后在阵容卡上纠正。**
 -- **三路**识别各出一套候选（第三路 2026-10-16 加）：
 --   本地 NCC 模板匹配（`candidates`）+ 远端视觉模型（`vlm`）+ 本地 OCR 认自带战法（`ocr`）。
--- 三路里**≥2 路头名一致**才算高置信（`confidence`）—— 见 recognize.js 的 merge()。
--- （改三路之前是"两路一致"，实测只覆盖 17.6% 的格子；加第三路后覆盖 66.9%、精确率不变。）
+-- **阵容以 OCR 为准**（2026-10-17 用户口径）：OCR 有输出就填它，另两路兜底。
+-- `confidence` 只记"这个答案有几路支持"（≥2 路 = high），喂 /admin 的准确率统计 ——
+-- 不再决定玩家侧要不要"待确认"（那套自动弹窗已删）。见 recognize.js 的 merge()。
 -- 玩家的每次纠错都在攒真值，`auto_key` 留住"机器原本说什么"，纠正分析全靠它。
 CREATE TABLE IF NOT EXISTS hero_guesses (
   id         INTEGER PRIMARY KEY,
@@ -168,7 +169,7 @@ CREATE TABLE IF NOT EXISTS hero_guesses (
   -- 机器自动填的那个。玩家改过之后 chosen_key 就变了，而这一列**永不覆盖** ——
   -- /admin 那块「定期总结修复」的排行榜（机器说 X → 玩家改成 Y）全靠它。
   auto_key   TEXT,
-  confidence TEXT,                -- 'high'（三路里 ≥2 路头名一致）/ 'low'（没有多数，或只有一路有输出）
+  confidence TEXT,                -- 'high'（选中的答案 ≥2 路支持）/ 'low'（只有一路支持）
   source     TEXT,                -- 'auto'（机器填的）/ 'pick' / 'other' / 'none'（后三个是玩家动作）
   other_name TEXT,                -- source='other' 时玩家手输的原文，哪怕没能对上库里任何一个
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

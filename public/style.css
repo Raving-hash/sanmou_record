@@ -1890,6 +1890,20 @@ details.cmt[open] > summary {
 
 /* 纠正面板 */
 .reco-box { margin-top: 0.35rem; font-size: var(--yw-fs-2xs); }
+/* 「编辑阵容」—— 2026-10-17 起这是卡上**唯一**进入纠正面板的入口（自动弹窗已删）。
+   它仍然是个 <summary>（没 JS 时点开就地改），只是画成一颗小按钮的样子。
+   `list-style: none` + 两条 marker 规则是去掉 details 默认那个三角（Pico 自带）。 */
+.reco-edit {
+  display: inline-block; width: auto; margin: 0;
+  padding: 0.12rem 0.6rem; border-radius: 5px;
+  font-size: var(--yw-fs-2xs); line-height: 1.5;
+  border: 1px solid var(--yw-line); color: var(--yw-text-dim);
+  background: var(--yw-ink-700); cursor: pointer;
+  list-style: none;
+}
+.reco-edit::-webkit-details-marker { display: none; }
+.reco-edit::marker { content: ''; }
+.reco-edit:hover { color: var(--yw-gold-lt); border-color: var(--yw-gold); }
 .reco-tip { color: var(--yw-text-mute); margin: 0.35rem 0 0.5rem; line-height: 1.5; }
 .reco-grid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));

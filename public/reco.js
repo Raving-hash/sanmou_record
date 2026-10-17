@@ -12,20 +12,28 @@
 
    于是脚本干两件事：
 
-     ① **把整个纠正面板搬进一个 `<dialog>`**：卡上只留「识别结果 · 待核对 N 格」那一行，
+     ① **把整个纠正面板搬进一个 `<dialog>`**：卡上只留**「编辑阵容」按钮**，
         点它弹窗，九格在窗口里宽宽松松地排（宽屏三列、窄屏一列，见 style.css）。
+        **不再进页面就自动弹** —— 见下面 2026-10-17 那条口径。
      ② **手输武将再套一层小弹窗**：那一格的窄 input 藏起来（**值照样提交** —— hidden
         只是不画，不是 disabled），旁边立一个按钮；点它（或者点「其他」那个单选框）弹出
         第二个 `<dialog>`：一整行的输入框 + 按打字实时筛选的名单，点一个就填进去。
         （两层弹窗是叠着的，浏览器原生支持，Esc 先关上面那层。）
 
+   ★ 2026-10-17 用户口径，**「自动弹一次」那条已作废**：
+
+     「按照 ocr 的结果直接确定玩家的阵容，并提供玩家本人一个编辑阵容按钮，
+       点击以后跳到现在的待确认界面，不需要自动弹出窗口了」
+
+   所以卡上那一行从「识别结果 · 待核对 N 格」变成**「编辑阵容」按钮**，
+   脚本里那段 `data-auto` 自动开窗的逻辑**整个删掉**了。
+
    ── 打给谁看 ──
 
-   **只有卡主自己**会被"自动弹一次"提醒（模板给的 `data-auto`，见 reco.ejs）：
-   他有没核对过的格子时，一进页面就把面板弹出来。同一页有多张时**只弹 id 最大的那张**
-   （最新的一套）—— 一进首页被弹一脸是不可接受的。管理员在别人的卡上能改、但不弹
-   （判据在服务端，模板里那个 `mine`）。游客和别的成员**连这一块都不渲染**，
-   所以谈不上弹窗，也没有"要不要确认"这回事。
+   这一整块（按钮 + 面板）**只渲染给能改这张卡的人**：卡主本人和管理员
+   （服务端只给他们候选 JSON，见 views/partials/reco.ejs）。游客和别的成员
+   **连这一块都没有**，所以谈不上弹窗，也没有"要不要确认"这回事。
+   注意**管理员也能改别人的卡**，所以按钮不是"只有卡主看得见"。
 
    ── 名单从哪来 ──
 
@@ -65,11 +73,6 @@
   //   同步做掉**，光挂在 close 事件上的话，关掉之后还有那么一小会儿页面是错的
   //   （锁还挂着、单选框还停在"其他"上）。这里每个自己控制的关法都直接调 syncLock()，
   //   close 事件那条路留着兜 **Esc**（浏览器自己关的，拦不住）。
-  // 卡 id 是 `e<entry id>`（见 lineup-gallery.ejs），数字越大越新
-  function cardId(box) {
-    var card = box.closest ? box.closest('.shot-card') : null;
-    return card && /^e\d+$/.test(card.id) ? Number(card.id.slice(1)) : 0;
-  }
 
   // ---------- 一、整个面板搬进弹窗 ----------
   // 一张卡一个弹窗，**第一次点开时才建**（一页十几张卡，没人会去看的那些不必建）。
@@ -84,7 +87,7 @@
     body.className = 'reco-dlg-body';
     var head = document.createElement('h3');
     head.className = 'reco-dlg-head';
-    head.textContent = sum.textContent.replace(/\s+/g, ' ').trim();   // 「识别结果 · 待核对 9 格」
+    head.textContent = sum.textContent.replace(/\s+/g, ' ').trim();   // 「编辑阵容」
     body.appendChild(head);
     body.appendChild(form);        // ★ 搬进来 —— 不是另建一份，见文件头那条 ⚠️
     var close = document.createElement('button');
@@ -118,12 +121,9 @@
     });
   });
 
-  // 卡主自己的、还有没核对过的格子 → 自动弹一次。多张只弹最新那张（见文件头）。
-  var autos = [].slice.call(document.querySelectorAll('details.reco-box[data-auto]'));
-  if (autos.length) {
-    autos.sort(function (a, b) { return cardId(b) - cardId(a); });
-    openPanel(autos[0]);
-  }
+  // ★ 这里从前有一段「卡主有待核对就自动弹一次」（读 `data-auto`、多张只弹 id 最大的那张）。
+  //   2026-10-17 用户明确不要了：「不需要自动弹出窗口了」—— 模板也不再挂那个标记。
+  //   别因为"空着可惜"把它加回来：玩家现在从卡上的「编辑阵容」按钮自己点进来。
 
   // ---------- 二、手输武将那一层 ----------
   var slots = [].slice.call(document.querySelectorAll('.reco-other'));
