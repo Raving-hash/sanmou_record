@@ -29,12 +29,18 @@
 //   {
 //     "ok": true, "season": "第32期", "updated": 2,
 //     "results": [
-//       { "game_name": "张三", "status": "ok", "user_id": "zhangsan",
+//       { "game_name": "张三", "status": "ok", "user_id": "zhangsan", "match": "exact",
 //         "nickname": "张三", "score": 1234, "previous": 1200, "changed": true },
-//       { "game_name": "王五", "status": "unknown", "error": "没有这个游戏名对应的用户" }
+//       { "game_name": "张三丰", "status": "ok", "match": "fuzzy", "similarity": 0.8,
+//         "matched_game_name": "张三", "user_id": "zhangsan", "score": 1234 },
+//       { "game_name": "王五", "status": "unknown", "error": "没有这个游戏名对应的用户" },
+//       { "game_name": "一路长兰", "status": "ambiguous", "candidates": [{"game_name": "善丨一路长虹", …}] }
 //     ]
 //   }
-//   status 取值：ok / unknown（游戏名没人认领）/ disabled（账号被禁用）/ invalid（这条报文不合法）。
+//   status 取值：ok / unknown（游戏名没人认领）/ ambiguous（有几个同样像的名字，弃权不写）/
+//                disabled（账号被禁用）/ invalid（这条报文不合法）。
+//   ok 里 match=exact 是完全相等（含竖线等价、忽略大小写）；match=fuzzy 是 OCR 错字后
+//   按相似度猜的（见 resolveGameName），相似度和库里原名都在回包里，方便人工复核。
 //   —— 批量调用里一条坏数据不该把整批打回，所以坏的那条就地报错，好的照写。
 
 const crypto = require('crypto');
@@ -93,6 +99,67 @@ const parseScore = (v) => {
   return SCORE_RE.test(s) ? Number(s) : null;
 };
 
+// ---------- 游戏名的模糊匹配（2026-10-17 加）----------
+//
+// OCR 出来的游戏名常有一两个字读错（生僻字尤其）。完全相等找不到人时，
+// 退一步按相似度找：
+//   · 相似度 = 1 − 编辑距离 / 较长串长度，按**码点**算（一个汉字算一个）；
+//   · 头名要 ≥ FUZZY_MIN 才算候选，否则照旧 unknown；
+//   · 头名和第二名必须拉开 ≥ FUZZY_MARGIN，否则报 ambiguous、**一个字都不写**。
+//
+// 那个"拉不开就弃权"的判据不是谨慎过头：库里真有「一路长虹 / 一路长鸿 /
+// 一路长红」这种只差一字的三个真人。模糊匹配最贵的错误就是把分记给隔壁，
+// 而覆盖语义下记错就是改掉了别人的分 —— 宁可不写、让 Windows 端报出来人工看。
+//
+// 阈值用常数而不是 env：这是产品规则（跟 MAX_ITEMS 一样），不是部署旋钮；
+// 放在 env 里 dev 和线上会悄悄分家。
+const FUZZY_MIN = 0.65;      // 6 字名错 2 个字 = 0.667，刚好收；4 字名错 2 个 = 0.5，不收
+const FUZZY_MARGIN = 0.08;   // 头名领先第二名不到 8 个百分点 → 认定"分不清"
+
+const editDistance = (a, b) => {
+  const s = [...a];
+  const t = [...b];
+  let prev = Array.from({ length: t.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= s.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= t.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1),
+      );
+    }
+    prev = cur;
+  }
+  return prev[t.length];
+};
+
+const similarity = (a, b) => {
+  const len = Math.max([...a].length, [...b].length);
+  return len ? 1 - editDistance(a, b) / len : 1;
+};
+
+// 先精确、再模糊。返回 { user, match, similarity?, near? }：
+//   near 非空 = 头名和第二名分不清，调用方要报 ambiguous 且不落库。
+const resolveGameName = (raw) => {
+  const exact = db.getUserByGameName(raw);
+  if (exact) return { user: exact, match: 'exact' };
+
+  const n = db.normalizeGameName(raw);
+  if (!n) return {};
+  const scored = db.prepare(`SELECT * FROM users WHERE game_name IS NOT NULL`).all()
+    .map((u) => ({ u, sim: similarity(n, db.normalizeGameName(u.game_name)) }))
+    .sort((x, y) => y.sim - x.sim);
+
+  const best = scored[0];
+  if (!best || best.sim < FUZZY_MIN) return {};
+  const near = scored.filter((x) => best.sim - x.sim < FUZZY_MARGIN);
+  if (near.length > 1) return { match: 'fuzzy', similarity: best.sim, near };
+  return { user: best.u, match: 'fuzzy', similarity: best.sim };
+};
+
+const round3 = (v) => Math.round(v * 1000) / 1000;
+
 router.post('/scores', (req, res) => {
   if (!process.env.SCORE_API_TOKEN) {
     return res.status(503).json({
@@ -144,7 +211,19 @@ router.post('/scores', (req, res) => {
         continue;
       }
 
-      const user = db.getUserByGameName(gameName);
+      const hit = resolveGameName(gameName);
+      if (hit.near) {
+        results.push({
+          ...base, score, status: 'ambiguous',
+          error: '有不止一个相似的游戏名，无法确定是谁，请人工核对',
+          candidates: hit.near.map((x) => ({
+            game_name: x.u.game_name, nickname: x.u.nickname, user_id: x.u.user_id,
+            similarity: round3(x.sim),
+          })),
+        });
+        continue;
+      }
+      const user = hit.user;
       if (!user) {
         results.push({ ...base, score, status: 'unknown', error: '没有这个游戏名对应的用户' });
         continue;
@@ -171,6 +250,12 @@ router.post('/scores', (req, res) => {
       results.push({
         ...base, score, status: 'ok',
         user_id: user.user_id, nickname: user.nickname,
+        // 模糊命中的那条要能一眼看出来：Windows 端据此提醒"这条是猜的"。
+        // matched_game_name 是库里存的原名，方便人核对到底记给了谁。
+        match: hit.match,
+        ...(hit.match === 'fuzzy'
+          ? { similarity: round3(hit.similarity), matched_game_name: user.game_name }
+          : {}),
         previous, changed,
       });
     }
