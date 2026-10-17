@@ -2,7 +2,7 @@
 
 <hgroup class="page-head">
   <h2>录入积分 · <%= season.name %></h2>
-  <p class="muted">必须附上积分截图才能提交</p>
+  <p class="muted">填整数就能交，积分截图不再是必填（2026-10-17 起）</p>
 </hgroup>
 
 <% if (error) { %><div class="flash flash-err"><%= error %></div><% } %>
@@ -11,12 +11,15 @@
   <article class="mine-card">
     <p>当前成绩：<strong class="num"><%= entry.score %></strong> 分
       <small class="muted">（提交于 <%= fmt(entry.score_submitted_at) %>）</small></p>
-    <p>
-      <a href="<%= imgUrl(entry.score_image) %>" target="_blank" rel="noopener">
-        <img class="thumb-lg" src="<%= thumbUrl(entry.score_image) %>" alt="当前积分截图">
-      </a>
-    </p>
-    <p class="muted small">改分或换截图会刷新提交时间，同分时排名会靠后。</p>
+    <%# 截图改成可选之后，老用户库里可能还留着从前传的那张 —— 有就照样展示，没有就不画空框 %>
+    <% if (entry.score_image) { %>
+      <p>
+        <a href="<%= imgUrl(entry.score_image) %>" target="_blank" rel="noopener">
+          <img class="thumb-lg" src="<%= thumbUrl(entry.score_image) %>" alt="当时的积分截图">
+        </a>
+      </p>
+    <% } %>
+    <p class="muted small">改分会刷新提交时间，同分时排名会靠后。</p>
     <form method="post" action="/score/withdraw"
           onsubmit="return confirm('撤回后本期就没有名次了，确定吗？')">
       <button type="submit" class="outline secondary">撤回积分</button>
@@ -24,25 +27,12 @@
   </article>
 <% } %>
 
-<%# 同上（views/lineup.ejs 那边写了为什么不能有 enctype、为什么文件 input 不能有 name） %>
-<form method="post" action="/score"
-      data-upload-kind="score" data-key-field="image_key"
-      data-upload-max-bytes="<%= maxOutBytes %>">
+<form method="post" action="/score">
   <label>积分
     <input type="number" name="score" min="0" max="999999999" step="1" required
            value="<%= entry && entry.score !== null ? entry.score : '' %>" placeholder="填整数">
   </label>
-  <label>积分截图
-    <input type="file" accept="image/jpeg,image/png,image/webp"
-           <%= entry && entry.score_image ? '' : 'required' %>>
-    <small class="muted"><%= entry && entry.score_image ? '不选就沿用现在这张' : 'jpg / png / webp' %></small>
-  </label>
   <button type="submit"><%= entry && entry.score !== null ? '更新积分' : '提交积分' %></button>
-  <noscript><p class="flash flash-err">你的浏览器禁用了 JavaScript，传不了图。
-    请换个浏览器、或者把本站的 JS 放开。</p></noscript>
 </form>
-
-<%# 拖拽上传，同上（/lineup 那边的注释更详细） %>
-<script src="/public/upload.js?v=<%= assetVer.upload %>"></script>
 
 <%- include('partials/footer') %>

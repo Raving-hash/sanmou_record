@@ -136,7 +136,7 @@ router.post('/entries/:id', (req, res) => {
   const back = `/seasons/${entry.season_id}`;
 
   if (season.status !== 'open') { err(req, '只能修正进行中的赛期'); return res.redirect(back); }
-  if (entry.score === null) { err(req, '这个人还没交积分，得他本人上传积分截图才能录分'); return res.redirect(back); }
+  if (entry.score === null) { err(req, '这个人还没交积分，得他本人先录分'); return res.redirect(back); }
 
   const raw = String(req.body.score ?? '').trim();
   if (!SCORE_RE.test(raw)) { err(req, '积分请填 0 到 999999999 之间的整数'); return res.redirect(back); }

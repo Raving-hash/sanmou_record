@@ -49,6 +49,60 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('skill')) db.exec(`ALTER TABLE heroes ADD COLUMN skill TEXT`);
 }
 
+// R4 改口径（2026-10-17 用户：「上传积分不需要再上传截图了，直接填写积分就可以」）：
+// **积分截图从必填变成可选**，而分数和提交时间仍然同生共死。
+// SQLite **改不了 CHECK**（不像加列那样 ALTER 一句就行），只能整表重建 ——
+// 判据看 sqlite_master 里的建表语句：老口径那句里有 `score_image IS NOT NULL`。
+// 重建就是官方那套的简化版：新表 → 拷数据 → 删旧表 → 改名 → 重建索引。跑几遍都幂等。
+//
+// ⚠️ 三步都不能省：
+//   ① `foreign_keys = OFF` **必须在事务外**设（SQLite 在事务里改它是个空操作），
+//      否则 DROP TABLE entries 会顺着 ON DELETE CASCADE 把 lineup_images / ratings /
+//      comments / hero_guesses 里挂在这张表上的真数据一起清空。
+//   ② 拷数据要**按列名列**，别写 `SELECT *` —— 将来列序一变就会静默错位。
+//   ③ 重建完立刻 `foreign_key_check`，断了就抛，别带着坏库继续跑。
+{
+  const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'`).get();
+  if (row && /score_image IS NOT NULL/.test(row.sql)) {
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE entries_new (
+            id                 INTEGER PRIMARY KEY,
+            season_id          INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+            user_id            INTEGER NOT NULL REFERENCES users(id),
+            lineup_note        TEXT,
+            score              INTEGER,
+            score_image        TEXT,
+            score_submitted_at TEXT,
+            final_rank         INTEGER,
+            is_winner          INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (season_id, user_id),
+            CHECK ((score IS NULL AND score_submitted_at IS NULL)
+                OR (score IS NOT NULL AND score_submitted_at IS NOT NULL))
+          );
+          INSERT INTO entries_new
+            (id, season_id, user_id, lineup_note, score, score_image,
+             score_submitted_at, final_rank, is_winner)
+            SELECT id, season_id, user_id, lineup_note, score, score_image,
+                   score_submitted_at, final_rank, is_winner FROM entries;
+          DROP TABLE entries;
+          ALTER TABLE entries_new RENAME TO entries;
+          CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
+          CREATE INDEX IF NOT EXISTS idx_entries_user   ON entries(user_id);
+        `);
+      })();
+      const broken = db.pragma('foreign_key_check');
+      if (broken.length) {
+        throw new Error(`entries 重建后外键不一致：${JSON.stringify(broken)}`);
+      }
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
+}
+
 // ---------- 配置 / 邀请码 ----------
 db.getSetting = (k) => db.prepare(`SELECT value FROM settings WHERE key=?`).get(k)?.value ?? null;
 db.setSetting = (k, v) => db.prepare(

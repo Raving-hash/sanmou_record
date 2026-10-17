@@ -323,9 +323,10 @@ router.get('/score', (req, res) => {
   });
 });
 
-/* 提交积分。和 /lineup 同一套：字节直传，这里只收一个 `image_key` 令牌。
-   不选图（只改分数）时隐藏字段是空的，于是沿用库里那张 —— 和从前 `@req.file` 为空
-   时沿用 `entry.score_image` 是同一个分支。 */
+/* 提交积分（2026-10-17 改口径：**只填分就行，截图不是必填**）。
+   和 /lineup 同一套字节直传：这里只收一个 `image_key` 令牌，收不到就当没图。
+   老用户库里可能还留着从前传的截图 —— 不带图再提交时**沿用那一张**（不主动删），
+   真要清掉走「撤回积分」（它会把分和截图一起清）。 */
 router.post('/score', async (req, res) => {
   const season = db.getOpenSeason();
   if (!season) return res.redirect('/');
@@ -351,8 +352,9 @@ router.post('/score', async (req, res) => {
   if (!/^\d{1,9}$/.test(raw)) return render('积分请填 0 到 999999999 之间的整数');
 
   const entry = db.getOrCreateEntry(season.id, req.user.id);
+  // 截图可选（2026-10-17）：有图就用新的，没带就沿用库里原来那张；
+  // 两边都没有就是 NULL —— R4 的 CHECK 已经放宽成"分数/提交时间同生共死"，写得进去。
   const imageName = given || entry.score_image;
-  if (!imageName) return render('必须上传积分截图才能提交（R4）');
 
   if (given) {
     const { ok, bad: unverified } = await verifyUploaded([given]);

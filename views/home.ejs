@@ -107,9 +107,14 @@
                 <td class="num"><strong><%= r.score %></strong></td>
                 <td><small class="muted"><%= fmt(r.score_submitted_at) %></small></td>
                 <td>
-                  <a href="<%= imgUrl(r.score_image) %>" target="_blank" rel="noopener">
-                    <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="积分截图" loading="lazy">
-                  </a>
+                  <%# 截图 2026-10-17 起不是必填 —— 没有就画一个破折号，别让 thumbUrl(null) 拼出坏链接 %>
+                  <% if (r.score_image) { %>
+                    <a href="<%= imgUrl(r.score_image) %>" target="_blank" rel="noopener">
+                      <img class="thumb" src="<%= thumbUrl(r.score_image) %>" alt="积分截图" loading="lazy">
+                    </a>
+                  <% } else { %>
+                    <small class="muted">—</small>
+                  <% } %>
                 </td>
                 <td>
                   <% if (r.images.length) { %>

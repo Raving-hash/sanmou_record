@@ -40,14 +40,17 @@ CREATE TABLE IF NOT EXISTS entries (
   user_id            INTEGER NOT NULL REFERENCES users(id),
   lineup_note        TEXT,
   score              INTEGER,
-  score_image        TEXT,                     -- uploads/ 下的文件名
+  score_image        TEXT,                     -- uploads/ 下的文件名；**2026-10-17 起可为空**
   score_submitted_at TEXT,                     -- ISO 时间，可以直接按字符串比较
   final_rank         INTEGER,                  -- 结算时写入
   is_winner          INTEGER NOT NULL DEFAULT 0,
   UNIQUE (season_id, user_id),
-  -- R4：积分、截图、提交时间三个要么都有，要么都没有
-  CHECK ((score IS NULL AND score_image IS NULL AND score_submitted_at IS NULL)
-      OR (score IS NOT NULL AND score_image IS NOT NULL AND score_submitted_at IS NOT NULL))
+  -- R4（2026-10-17 改口径）：**积分截图不再是必填项**，只填分数就能交。
+  -- 仍然守住的不变量是"分数和提交时间同生共死"（有分必有时间、撤分两个一起清）。
+  -- ⚠️ 老库上这条 CHECK 是旧口径（三个字段同生共死），改它只能整表重建 ——
+  --    迁移在 db.js 开头那个 `entries_new → entries` 的块里，别只改这儿。
+  CHECK ((score IS NULL AND score_submitted_at IS NULL)
+      OR (score IS NOT NULL AND score_submitted_at IS NOT NULL))
 );
 
 -- 阵容截图
