@@ -93,6 +93,10 @@ app.use((req, res, next) => {
   res.locals.maxOutBytes = MAX_OUT_BYTES;
   // 打分的五个档位。唯一真源在 db.js，这里只是让模板能直接 forEach 出按钮
   res.locals.rateValues = db.RATE_VALUES;
+  // 评论开关（2026-10-17 起暂时关掉，见 db.js 的 COMMENTS_ENABLED）。
+  // 模板里一律读这个 locals 判要不要渲染评论区 / 引 comments.js；
+  // 开关本体只写在 db.js 一处，这里不重复定义值。
+  res.locals.commentsEnabled = db.COMMENTS_ENABLED;
   // 「前两名」这个数（结算时算赢 / 慧眼等级认的人 / 墙上描边，见 db.js 的 TOP_N）。
   // 模板里凡是要判"这行算不算胜者"的地方都读它，别在模板里写死 2 ——
   // 用户 2026-10-15 改的就是这个数，写死的话下次改规矩得满页面找。

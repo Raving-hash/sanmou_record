@@ -241,8 +241,12 @@
         <%- include('./reco', { r, returnTo: backTo }) %>
 
         <%# 卡最下面的评论区（原生 <details> 折叠，见 partials/comments.ejs）。
-            数据是 db.getLineupWall 挂在这一行上的 r.comments，不用在这儿另查。 %>
-        <%- include('./comments', { entryId: r.id, list: r.comments, backTo }) %>
+            数据是 db.getLineupWall 挂在这一行上的 r.comments，不用在这儿另查。
+            commentsEnabled 是 2026-10-17 加的总开关（真源 db.js 的 COMMENTS_ENABLED）：
+            关着时整块不渲染，库里已有的留言原样留着，开回来就照旧显示。 %>
+        <% if (commentsEnabled) { %>
+          <%- include('./comments', { entryId: r.id, list: r.comments, backTo }) %>
+        <% } %>
       </figure>
     <% }) %>
   </div>

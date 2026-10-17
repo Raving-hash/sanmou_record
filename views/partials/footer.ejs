@@ -14,8 +14,13 @@
 <script src="/public/wall.js?v=<%= assetVer.wall %>"></script>
 <%# 评论区的自动展开（public/comments.js）：发完评论会跳回 /#e<id>，那张卡的评论区得自己打开，
     否则看着就像"评论没发出去"。和 lightbox 一样挂页脚 —— 它直接找元素、不等 DOMContentLoaded，
-    所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。 %>
-<script src="/public/comments.js?v=<%= assetVer.comments %>"></script>
+    所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。
+    评论功能暂时关闭时（2026-10-17，见 db.js 的 COMMENTS_ENABLED）连脚本也不引：
+    页面上已经没有评论区了，再挂一个只找 details.cmt 的脚本就是白下。
+    注意它和上面 wall.js 的先后顺序只在**都引**的时候才有意义。 %>
+<% if (commentsEnabled) { %>
+  <script src="/public/comments.js?v=<%= assetVer.comments %>"></script>
+<% } %>
 <%# 「全选战报」那一下（public/report.js）：只有 /seasons/:id 有那段文本框，
     脚本自己找不到元素就退出，所以跟 lightbox 一样全站引一份。 %>
 <script src="/public/report.js?v=<%= assetVer.report %>"></script>

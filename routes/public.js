@@ -147,6 +147,14 @@ router.post('/entries/:id/comments', (req, res) => {
 
   const back = backTo(req, entry.id, entry.season_id);
 
+  // 评论功能暂时关闭（2026-10-17，开关见 db.js 的 COMMENTS_ENABLED）。
+  // 页面上已经不渲染评论区了，这里防的是缓存里的旧页面和手搓请求：
+  // 一律不写库，只给一句提示再弹回那张卡，免得让人以为是自己的网络出了问题。
+  if (!db.COMMENTS_ENABLED) {
+    flash(req, 'err', '评论功能暂时关闭');
+    return res.redirect(back);
+  }
+
   // 没传阵容 = 墙上根本没有他的卡，评论发出去谁也不会看到 —— 和打分同一道关
   // （routes/main.js 的「他还没传阵容，不能打分」）。
   if (!db.getLineupImages(entry.id).length) {
@@ -192,6 +200,10 @@ router.post('/comments/:id/delete', (req, res) => {
   // 没登录的一律 403 —— **包括"这条评论根本不存在"的情形**（所以资格判定在查库之前）：
   // 反过来的话，外人就能拿 403 和 302 的差别去问"这个 id 存不存在"。
   if (!me) return res.status(403).send('不能删这条评论');
+
+  // 功能关着的时候连删也不接：数据要原样留着，等开回来再一并处置。
+  // 放在登录判定之后，是为了保住上面那条"没登录一律 403"的面（不暴露 id 存不存在）。
+  if (!db.COMMENTS_ENABLED) return res.status(403).send('评论功能暂时关闭');
 
   const c = db.getComment(Number(req.params.id));
   if (!c) {

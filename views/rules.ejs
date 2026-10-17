@@ -102,8 +102,8 @@
 <article>
   <h3>谁能看到什么</h3>
   <ul>
-    <li><strong>游客</strong>（没登录）：阵容墙 <a href="/wall">/wall</a>（阵容、说明、互评、评论）、本页、登录/注册。看不到积分、名次、历史、成员、上传和打分。</li>
-    <li><strong>成员</strong>：登录后能看排名、历史、个人页、武将索引、纪录墙，并上传阵容、录积分、打分、评论。</li>
+    <li><strong>游客</strong>（没登录）：阵容墙 <a href="/wall">/wall</a>（阵容、说明、互评<% if (commentsEnabled) { %>、评论<% } %>）、本页、登录/注册。看不到积分、名次、历史、成员、上传和打分。</li>
+    <li><strong>成员</strong>：登录后能看排名、历史、个人页、武将索引、纪录墙，并上传阵容、录积分、打分<% if (commentsEnabled) { %>、评论<% } %>。</li>
     <li><strong>管理员</strong>：额外能开期、结算、撤销、修正积分、管理成员和邀请码。</li>
   </ul>
 </article>

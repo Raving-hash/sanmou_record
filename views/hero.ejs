@@ -83,7 +83,7 @@
           <p class="muted small">
             <% if (r.rating.avg === null) { %>互评：还没有人打分
             <% } else { %>互评均分 <strong><%= r.rating.avg %></strong>（<%= r.rating.n %> 人）<% } %>
-            <% if (r.commentsN) { %> · 💬 <%= r.commentsN %><% } %>
+            <% if (commentsEnabled && r.commentsN) { %> · 💬 <%= r.commentsN %><% } %>
           </p>
         </div>
       </article>

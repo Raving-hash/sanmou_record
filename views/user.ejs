@@ -113,7 +113,7 @@
               <span class="hero-chip<% if (h.auto) { %> is-auto<% } %>"><%= (h.variant || '') + h.name %><% if (h.auto) { %> ?<% } %></span>
             <% }) %>
             <% if (r.rating.avg !== null) { %><span class="muted small">互评 <%= r.rating.avg %>（<%= r.rating.n %>）</span><% } %>
-            <% if (r.commentsN) { %><span class="muted small">💬 <%= r.commentsN %></span><% } %>
+            <% if (commentsEnabled && r.commentsN) { %><span class="muted small">💬 <%= r.commentsN %></span><% } %>
           </p>
           <% if (r.lineup_note) { %><p class="archive-note"><%= r.lineup_note %></p><% } %>
         </div>

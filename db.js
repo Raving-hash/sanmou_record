@@ -983,6 +983,15 @@ db.getMyRatings = (userPk) => db.prepare(`
   ORDER BY s.id DESC, r.created_at DESC, r.id DESC
 `).all(userPk);
 
+// ★ 评论功能总开关。**2026-10-17 用户要求「暂时屏蔽评论功能」，所以这里是 false**；
+//   改回 true 就原样恢复 —— 不迁移、不动库、已有的留言一条不删。
+//   关着的时候三件事一起发生（都读这一个常量，别在别处再写一份开关）：
+//     · 阵容卡不再渲染评论区（partials/lineup-gallery.ejs 的 include，经 res.locals）；
+//     · 页脚不再引 comments.js（partials/footer.ejs）；
+//     · 两条 POST（发表 / 删除）直接挡回，见 routes/public.js —— 挡的是
+//       浏览器缓存里的旧页面和手搓请求，不是靠"藏起按钮"假装没有这个接口。
+db.COMMENTS_ENABLED = false;
+
 // ---------- 评论（阵容卡下面的短留言，每条 ≤20 字） ----------
 // 一期一次全查回来、在 JS 里按 entry_id 归并，和打分那边（getSeasonRatings →
 // summarizeRatings）是同一个套路：留言是「人数 × 阵容数」，量级很小，
