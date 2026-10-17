@@ -6,18 +6,17 @@
 //
 // ── 为什么需要它 ──
 //
-// 2026-10-17 用户改了口径：「按照 ocr 的结果直接确定玩家的阵容」。`recognize.merge()` 随之
-// 从"三票多数定填谁"改成"**OCR 优先**，另外两路兜底"。新上传的图自然走新规则，但**库里
-// 已经算好的行还是旧规则的结果**（视觉+NCC 一致时会把 OCR 的答案顶掉）。
-// 这张表的三路快照（`candidates` / `vlm` / `ocr`）都存着，所以重算**不需要**再取图、
-// 再调视觉模型、再跑 OCR —— 纯本地、零成本、幂等。
+// 2026-10-17 用户改了口径：「按照 ocr 的结果直接确定玩家的阵容」「去除视觉模型，
+// OCR 认不出就 NCC」。`recognize.merge()` 随之变成"**OCR 优先，NCC 兜底**"。
+// 新上传的图自然走新规则，但**库里已经算好的行还是旧规则的结果**。
+// 这张表存着 `candidates` / `ocr` 两列快照，所以重算**不需要**再取图、再跑识别 ——
+// 纯本地、零成本、幂等。
 //
 // ★ 只改**没人核对过**的行：`db.saveGuesses` 里的 `CASE ... decided_at IS NULL` 兜着，
 //   玩家手工确认过的结论一个字节都不会动。这条和补跑脚本是同一条护栏。
 //
-// ★ 不碰 `ocr IS NULL` 的行？**碰，但结果不变**：那些行 merge 会走"视觉 > NCC"的兜底，
-//   和旧规则里的退让顺序本来就是一回事（旧规则在没有多数时也是视觉优先）。
-//   所以这里不用 `filenamesMissingOcr` 那种筛选，直接全量重算最省事。
+// ★ 不碰 `ocr IS NULL` 的行？**碰，但结果不变**：那些行 merge 会走 NCC 兜底，
+//   和旧规则里"没有 OCR 时用 NCC"本来就是一回事。所以不做筛选，全量重算最省事。
 
 const db = require('../db');
 const recognize = require('../recognize');
@@ -40,8 +39,7 @@ console.log(`库里 ${files.length} 张阵容图${DRY ? '（演练，不写库�
 let changedFiles = 0, changedSlots = 0, undecided = 0;
 for (const f of files) {
   const rows = db.getGuesses(f.filename);
-  const merged = recognize.merge(
-    perSlot(rows, 'candidates'), perSlot(rows, 'vlm'), perSlot(rows, 'ocr'));
+  const merged = recognize.merge(perSlot(rows, 'candidates'), perSlot(rows, 'ocr'));
   const before = new Map(rows.map((r) => [r.slot, r]));
 
   let touched = 0;

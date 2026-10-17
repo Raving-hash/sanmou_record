@@ -42,11 +42,9 @@ router.get('/', (req, res) => {
     // 机器推的头名对不对、正确答案在不在给的三个候选里、玩家手输了哪些库里没有的名字。
     reco: db.getRecoStats(),
     recoEnabled: require('../recognize-worker').enabled(),
-    // 视觉模型那一路开着没有。关着的时候上面那些数字会明显难看（少一路可比对，
-    // 高置信覆盖会掉一半）—— 页面要说清楚原因，否则管理员会以为识别退化了。
-    vlmEnabled: require('../recognize-vlm').enabled(),
-    // 第三路（本地 OCR 认自带战法）开着没有。available() 而不是 enabled()：
+    // 本地 OCR（认自带战法）开着没有。available() 而不是 enabled()：
     // 配了地址但武将库里没有 skill 时它照样干不了活，页面要按"关"来报。
+    // （2026-10-17 起远端视觉模型已移除，只剩它和 NCC 两路。）
     ocrEnabled: require('../recognize-ocr').available(),
   });
 });

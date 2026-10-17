@@ -321,62 +321,54 @@ async function recognize(input, topN = 3, given = null) {
   });
 }
 
-// 把**三路**识别的结果合起来，决定**自动填哪个**、以及**这个答案有几路支持**。
+// 把**两路**识别的结果合起来，决定**自动填哪个**、以及**这个答案有几路支持**。
 //
-// ★★ 2026-10-17 起：**阵容以 OCR 为准**（用户口径「按照 ocr 的结果直接确定玩家的阵容」）。
-//   第三路认的是每张卡第一行的**自带战法名**，102 个名字零撞名 ——
-//   实测 142 个人工核对过的格子上：OCR 111/120 = 92.5%，视觉模型 68.3%，NCC 70.7%。
-//   所以它只要给出了答案就照它填，**不再让"另外两路碰巧一致"把它顶掉**。
-//   另外两路只在这格 OCR 没认出东西（服务没跑 / 生僻字漏检）时兜底，
-//   顺序按各自的实测准确率：视觉模型 > NCC。
+// ★★ 2026-10-17 用户口径：
+//   ①「按照 ocr 的结果直接确定玩家的阵容」—— 阵容以 OCR 为准；
+//   ②「去除视觉模型，OCR 认不出就 NCC」—— 远端视觉模型那一整路已删除。
 //
-// ★ `confidence` 的含义随之收紧成一句话：**这个答案有几路支持**（≥2 路 = high）。
-//   它只喂 `/admin` 的准确率统计，不再决定玩家侧要不要"待确认" ——
+// OCR 认的是每张卡第一行的**自带战法名**，102 个名字零撞名。
+// 实测 142 个人工核对过的格子上：OCR 111/120 = 92.5%、NCC 41/58 = 70.7%
+// （被删掉的视觉模型是 68.3%）。所以它只要给出了答案就照它填；
+// OCR 没输出（服务没跑 / 生僻字漏检）时才用 NCC 兜底。
+//
+// ★ `confidence` 的含义是：**选中的答案有几路支持**（两路都说是它 = high）。
+//   它只喂 `/admin` 的准确率统计，不决定玩家侧要不要"待确认" ——
 //   卡上那套「待核对 / 自动弹窗」已经拿掉了，改由一个显式的「编辑阵容」按钮进入面板。
 //
 // 这是纯函数（不碰库、不联网），**断言直接喂假数据进来测** —— 见 .devlocal/test/test-heroes.js。
 //
 // 返回的每一项正好是 db.saveGuesses 要的形状。
-function merge(nccList, vlmList, ocrList) {
+function merge(nccList, ocrList) {
   const bySlot = (list) => {
     const m = new Map();
     for (const s of list || []) m.set(s.slot, s.candidates || []);
     return m;
   };
   const nccBySlot = bySlot(nccList);
-  const vlmBySlot = bySlot(vlmList);
   const ocrBySlot = bySlot(ocrList);
 
   const out = [];
   for (let slot = 1; slot <= 9; slot++) {
     const ncc = nccBySlot.get(slot) || [];
-    const vlm = vlmBySlot.get(slot) || [];
     const ocr = ocrBySlot.get(slot) || [];
     const keys = {
       ocr: ocr[0] ? ocr[0].key : null,
-      vlm: vlm[0] ? vlm[0].key : null,
       ncc: ncc[0] ? ncc[0].key : null,
     };
 
-    // ★ OCR 优先：它认的是自带战法名（102 个零撞名），实测最准。OCR 没输出才轮到
-    //   视觉模型，再没有才用 NCC。**注意这不是"投票决定填谁"** —— 投票只用来算置信度。
-    const auto_key = keys.ocr || keys.vlm || keys.ncc;
+    // ★ OCR 优先；它没认出东西时用 NCC 兜底。
+    const auto_key = keys.ocr || keys.ncc;
 
-    // 置信度 = 选中的这个答案有几路支持。三路各说各的时 support=1 → low。
+    // 置信度 = 两路都指向同一个人 = high；只有一路有输出 = low。
     let confidence = null;
     if (auto_key) {
       const support = Object.values(keys).filter((k) => k === auto_key).length;
       confidence = support >= 2 ? 'high' : 'low';
     }
 
-    // ★ vlm / ocr 这两列要能区分**两件不同的事**（`db.filenamesMissingVlm/Ocr` 靠它）：
-    //   · 这一路**根本没跑**（没配、服务挂了）→ 整个列表传进来就是 null → 存 NULL
-    //   · 这一路**跑了但这格没候选** → 存 `[]`
-    //   从前这里一律传每格数组，`[]` 落库成 `'[]'`，于是 `WHERE vlm IS NULL` **永远匹配不到**
-    //   （2026-10-16 实测线上 216 行里 NULL 是 0 行、`'[]'` 有 29 行），补跑入口等于死的。
     out.push({
       slot, candidates: ncc,
-      vlm: vlmList ? vlm : null,
       ocr: ocrList ? ocr : null,
       auto_key, confidence,
     });

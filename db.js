@@ -31,7 +31,7 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('confidence')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN confidence TEXT`);
 }
 
-// 第三路识别（2026-10-16 加）：本地 OCR 认「自带战法名」→ 反查武将。
+// OCR 这一路（2026-10-16 加，2026-10-17 起是主路）：本地 OCR 认「自带战法名」→ 反查武将。
 // 老库里这一列没有，补上；**补完之后是 NULL**，`filenamesMissingOcr()` 正是靠这个
 // 把历史图扫出来（但那个入口是手动脚本，不进 sweep，理由见那个函数）。
 {
@@ -39,9 +39,9 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('ocr')) db.exec(`ALTER TABLE hero_guesses ADD COLUMN ocr TEXT`);
 }
 
-// 武将库补 `skill`（自带战法名，第三路的词典）。heroes 之前没有迁移块，这里开一个。
+// 武将库补 `skill`（自带战法名，OCR 的词典）。heroes 之前没有迁移块，这里开一个。
 // ⚠️ 补出来是 NULL 是**正常且安全**的：identify 那一路会因此整体不启用，
-//    行为退回到"只有 NCC + 视觉模型"的原样（recognize-ocr.js 的 available()）。
+//    行为退回到"只有 NCC"（recognize-ocr.js 的 available()）。
 //    要真正启用，得把带 skill 的 herodata/index.json 放到线上目录（它 git-ignored，
 //    release.sh 带不过去），重启进程让 seedHeroes 播种。
 {
@@ -191,15 +191,19 @@ db.getEntryGuesses = (entryId) =>
 // ★ 整个 Upsert 的关键是那几个 `CASE ... decided_at IS NULL`：
 //   **有人核对过的格子，重跑识别一律不许覆盖。** 这是"定期重跑"能安全存在的前提 ——
 //   否则补一次识别就把玩家所有的纠正冲掉了。decided_at 是判据（只有人动过才会写它）。
-//   candidates / vlm / confidence 是"机器当时看到什么"，无条件刷新；auto_key 也是
+//   candidates / ocr / confidence 是"机器当时看到什么"，无条件刷新；auto_key 也是
 //   —— 它记的是机器的意见，玩家改的是 chosen_key，两者本来就该分开存。
+//
+// ★ 2026-10-17 用户砍掉了远端视觉模型（「去除视觉模型，OCR 认不出就 NCC」）：
+//   `vlm` 这一列从此是**历史存档**，不再有新的写入。更新的那一句写成 COALESCE，
+//   是为了**别让一次重跑把老行里的 VLM 快照抹成 NULL**（新行本来就没有，仍是 NULL）。
 db.saveGuesses = (entryId, filename, list) => {
   const up = db.prepare(`
     INSERT INTO hero_guesses (entry_id, filename, slot, candidates, vlm, ocr, auto_key, confidence, chosen_key, source)
     VALUES (@entry_id, @filename, @slot, @candidates, @vlm, @ocr, @auto_key, @confidence, @auto_key, 'auto')
     ON CONFLICT(filename, slot) DO UPDATE SET
       candidates = excluded.candidates,
-      vlm        = excluded.vlm,
+      vlm        = COALESCE(excluded.vlm, hero_guesses.vlm),
       ocr        = excluded.ocr,
       confidence = excluded.confidence,
       auto_key   = excluded.auto_key,
@@ -208,10 +212,9 @@ db.saveGuesses = (entryId, filename, list) => {
   db.transaction((rows) => rows.forEach((g) => up.run({
     entry_id: entryId, filename, slot: g.slot,
     candidates: JSON.stringify(g.candidates || []),
-    // ⚠️ 判空必须是 `== null`，**不能写成 `g.vlm ? ... : null`** ——
+    // ⚠️ 判空必须是 `== null`，**不能写成 `g.ocr ? ... : null`** ——
     //    空数组 `[]` 在 JS 里是真值，那样写会把"这一路跑了但这格没候选"也存成 NULL，
-    //    两种含义就再也分不开了（`filenamesMissingVlm/Ocr` 的 `IS NULL` 判据全靠它）。
-    //    见 recognize.js 的 merge() 尾部注释：那一版线上 216 行里 NULL 是 0 行。
+    //    两种含义就再也分不开了（`filenamesMissingOcr` 的 `IS NULL` 判据全靠它）。
     vlm: g.vlm == null ? null : JSON.stringify(g.vlm),
     ocr: g.ocr == null ? null : JSON.stringify(g.ocr),
     auto_key: g.auto_key || null,
@@ -236,27 +239,17 @@ db.filenamesMissingGuesses = () => db.prepare(`
   SELECT DISTINCT li.filename, li.entry_id FROM lineup_images li
   WHERE NOT EXISTS (SELECT 1 FROM hero_guesses g WHERE g.filename = li.filename)`).all();
 
-// 还没跑过视觉模型的阵容图：已经有 NCC 的行，但 vlm 那一列还是 NULL。
-// 这是**历史图重跑的入口** —— 改版前那批图只有 NCC 候选，靠这个条件被扫出来补一遍。
-// ⚠️ 调用方（recognize-worker 的 sweep）必须**只在 vlm 启用时才**用它，
-//    否则没配 key 的环境每次启动都会把全部历史图重推一遍。
-//
-// ⚠️ **历史遗留**：2026-10-16 之前的 saveGuesses 会把"跑了但没候选"也存成 `'[]'`，
-//    所以老库里的 `'[]'` **不能**当作"还没跑过"——那 29 行确实跑过了。
-//    修好之后新写入的行才会正确区分 NULL / `[]`（见 saveGuesses 和 merge 的注释）。
-//    **不要**为了"把老的也补上"把条件改成 `IS NULL OR vlm='[]'` —— 那会在下次重启时
-//    把几十张历史图重新推给视觉模型，是要花 API token 的。要补就显式跑脚本。
-db.filenamesMissingVlm = () => db.prepare(`
-  SELECT DISTINCT g.filename, g.entry_id FROM hero_guesses g
-  WHERE g.vlm IS NULL`).all();
-
-// 还没跑过第三路（本地 OCR）的阵容图。
+// 还没跑过本地 OCR 的阵容图。
 //
 // ⚠️ **这个函数只有一个调用方：scripts/reco-backfill-ocr.js（手动跑）。**
-//    故意**不接进 recognize-worker 的 sweep**，理由是真金白银的：
-//    worker 的 runJob 是**三路一起跑**的（NCC + 视觉模型 + OCR），把几百张历史图
-//    推给 sweep 就等于把视觉模型也重跑一遍 —— 那是要花 API token 的。
-//    想补历史图就显式跑那个脚本，别顺手把它加进 sweep。
+//    故意**不接进 recognize-worker 的 sweep**：runJob 会重取图、重跑 NCC（2.5 秒/张），
+//    几百张历史图推给 sweep 就是一次白跑。想补历史图就显式跑那个脚本。
+//    （2026-10-17 移除了视觉模型之后，这条补跑仍然是"只补 ocr 那一列、拿库里的 NCC
+//    快照重新 merge"，所以很便宜。）
+//
+// ⚠️ **历史遗留**：2026-10-16 之前的 saveGuesses 会把"跑了但没候选"也存成 `'[]'`，
+//    所以老库里的 `'[]'` **不能**当作"还没跑过"。修好之后新写入的行才会正确区分
+//    NULL（这一路没跑）/ `[]`（跑了但这格没候选）（见 saveGuesses 和 merge 的注释）。
 db.filenamesMissingOcr = () => db.prepare(`
   SELECT DISTINCT g.filename, g.entry_id FROM hero_guesses g
   WHERE g.ocr IS NULL`).all();
@@ -379,14 +372,14 @@ db.lineupTier = (heroes) => {
 //     要么是两个长得像的武将。照着这份名单修，比重新跑一遍分析便宜得多。
 db.getRecoStats = () => {
   const rows = db.prepare(`
-    SELECT auto_key, confidence, chosen_key, other_name, decided_at, candidates, vlm, ocr
+    SELECT auto_key, confidence, chosen_key, other_name, decided_at, candidates, ocr
     FROM hero_guesses`).all();
 
   const s = { total: rows.length, filled: 0, high: 0, low: 0,
               reviewed: 0, kept: 0, corrected: 0, added: 0, cleared: 0,
-              // 三路各自的准确率（2026-10-16 加第三路时补的）。合并后的数字看不出
-              // "是哪一路在干活"，而三路差的格子不一样 —— 这一栏是调参/换模型的依据。
-              paths: { ncc: { answered: 0, right: 0 }, vlm: { answered: 0, right: 0 },
+              // 两路各自的准确率。合并后的数字看不出"是哪一路在干活" ——
+              // 这一栏是调参/换模型的依据（2026-10-17 起视觉模型那一路已移除）。
+              paths: { ncc: { answered: 0, right: 0 },
                        ocr: { answered: 0, right: 0 } } };
   const pairs = new Map();
   const unresolved = [];
@@ -417,12 +410,12 @@ db.getRecoStats = () => {
     //    "库里漏了哪个武将"这件事仍然值得回头看一眼 —— 名单本身已经集齐了。
     if (!r.chosen_key && r.other_name) unresolved.push(r.other_name);
 
-    // 三路各自的准不准。分母口径：**人核对过、而且给出了明确名字**的格子 ——
+    // 两路各自的准不准。分母口径：**人核对过、而且给出了明确名字**的格子 ——
     // 只有这种格子才有"真值"可比；「人判不确定」和"没人看过"都不该进分母
     // （和上面 kept/corrected 的切法是同一套理由，见函数头）。
     // 注意一条路的"有输出"不等于"自动填的用的是它" —— 这里量的是每路自己的判断力。
     if (r.decided_at && r.chosen_key) {
-      for (const [name, col] of [['ncc', 'candidates'], ['vlm', 'vlm'], ['ocr', 'ocr']]) {
+      for (const [name, col] of [['ncc', 'candidates'], ['ocr', 'ocr']]) {
         const k = topKey(r[col]);
         if (!k) continue;
         s.paths[name].answered++;

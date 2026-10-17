@@ -1,7 +1,8 @@
 <%#
   阵容识别（2026-10-16 加，同日改版）。改版要点：**不再让玩家做初始选择**——
-  上传后后台自动跑（本地 NCC + 远端视觉模型），直接填好结果，玩家看到了再纠正。
-  见 recognize.js / recognize-vlm.js / recognize-worker.js。
+  上传后后台自动跑（本地 OCR 认自带战法 + 本地 NCC），直接填好结果，玩家看到了再纠正。
+  见 recognize.js / recognize-ocr.js / recognize-worker.js。
+  （2026-10-17 用户砍掉了远端视觉模型：「去除视觉模型，OCR 认不出就 NCC」。）
 
   两块内容，可见范围不同：
     ① 阵容那一行 —— **所有人可见**。挂两样东西：**搭配评级牌**（T0~T3，一定有，见
@@ -55,12 +56,12 @@
    //    （快照里 entry 5/9/16 就是两张图的老数据；2026-10-16 起每期只许传一张了。）
    const shownFile = r.images[0] ? r.images[0].filename : null;
    const guesses = (r.guesses || []).filter((g) => g.filename === shownFile);
-   // 有没有任何一格识别出东西（NCC 候选、VLM 候选、或已经填上了）。
-   // ⚠️ **判据不能只看 NCC** —— 会有"NCC 一无所获、视觉模型认出来了"的图，
+   // 有没有任何一格识别出东西（NCC 候选、OCR 候选、或已经填上了）。
+   // ⚠️ **判据不能只看 NCC** —— 会有"NCC 一无所获、OCR 认出来了"的图，
    //    只看 candidates 的话那种图整块不渲染，等于白认。
    //    另一头也不能松：9 格全空仍然一个字都不输出（传排行榜截图的玩家不该看到 9 个空格子）。
    const hasCands = guesses.some((g) =>
-     g.chosen_key || (g.candidates || []).length || (g.vlm || []).length); %>
+     g.chosen_key || (g.candidates || []).length || (g.ocr || []).length); %>
 <%# ★ 盒子**无条件**渲染（见文件头的布局约束）。里面没内容时它是个空 div，
     public/wall.js 会把它和同排别的一起撑到一样高，这样整排才对得齐。 %>
 <div class="reco">
@@ -114,18 +115,18 @@
                const team = Math.floor((slot - 1) / 3) + 1;
                const pos = ((slot - 1) % 3) + 1;
                const cands = g.candidates || [];
-               const vlm = g.vlm || [];
+               const ocrCands = g.ocr || [];
                // ⚠️ `'auto'` 必须一起判 —— 机器自动填的那一格 chosen_key 是有值的，
                //    但 source 不是 'pick'。漏掉它的话，那种格子在页面上
                //    **没有任何单选框是选中的**（「不确定」也不选中，因为 chosen_key 非空），
                //    看着像识别结果丢了 —— 上一版就在这儿栽过一次。
                const picked = (k) =>
                  (g.source === 'pick' || g.source === 'auto') && g.chosen_key === k ? ' checked' : '';
-               // 候选 = NCC 前 3 ∪ 视觉模型前 3，**按 key 去重**（两路常常给出同一个名字）。
-               // 两路合起来实测几乎打满（7 张里 6 张 9/9），所以玩家点一下就能改对。
+               // 候选 = NCC 前 3 ∪ OCR 那一个，**按 key 去重**（两路常常给出同一个名字）。
+               // 自动填的那个（OCR 优先）本来就在里面，所以玩家点一下就能改对。
                const opts = [];
                const seen = new Set();
-               for (const c of [...cands, ...vlm]) {
+               for (const c of [...cands, ...ocrCands]) {
                  if (c && c.key && !seen.has(c.key)) { seen.add(c.key); opts.push(c); }
                }
                // 再补上**玩家之前确认过的那个**（如果它不在两路候选里）——

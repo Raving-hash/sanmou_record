@@ -212,13 +212,10 @@
     <p class="muted small">herodata/ 不在，识别未启用。卡面素材是游戏版权图、不进仓库，
       线上要手工放一份（同 deploy/ 和 .env）。</p>
   <% } %>
-  <% if (!vlmEnabled) { %>
-    <p class="muted small">⚠️ 没配 DS_API_KEY，视觉模型那一路关着。
-      剩下两路还能互相印证，但覆盖率会明显低一截。</p>
-  <% } %>
   <% if (!ocrEnabled) { %>
     <p class="muted small">⚠️ 本地 OCR（认自带战法）那一路关着 —— 没配 OCR_URL，
-      或者 herodata/index.json 里没有 skill。它是最准的一路（实测 92.5%），关着很吃亏。</p>
+      或者 herodata/index.json 里没有 skill。它是最准的一路（实测 92.5%），关着很吃亏：
+      没它就只能靠 NCC（约 70.7%）兜底。</p>
   <% } %>
   <% const pctOf = (n, d) => (d ? `（${Math.round(n * 100 / d)}%）` : '');
      // 准确率的分母是"机器填了、且人核对过的" —— **不含"机器原本空着、人补上的"**：
@@ -228,9 +225,9 @@
     <table>
       <tbody>
         <tr><th>识别过的格子</th><td class="num"><%= reco.total %></td>
-            <td class="muted small">一张阵容图 9 格，上传后自动跑三路（本地 NCC + 视觉模型 + 本地 OCR）</td></tr>
+            <td class="muted small">一张阵容图 9 格，上传后自动跑两路（本地 OCR 认自带战法 + 本地 NCC）</td></tr>
         <tr><th>机器自动填了</th><td class="num"><%= reco.filled %></td>
-            <td class="muted small">其中三路里 ≥2 路一致（可信）<%= reco.high %> · 存疑 <%= reco.low %></td></tr>
+            <td class="muted small">其中两路一致（可信）<%= reco.high %> · 只有一路有输出 <%= reco.low %></td></tr>
         <tr><th>人核对过</th><td class="num"><%= reco.reviewed %></td>
             <td class="muted small">还有 <%= reco.filled - reco.reviewed %> 格没人看过 —— 这是工作量，不是质量</td></tr>
         <tr><th><strong>核对过的里面机器是对的</strong></th>
@@ -247,17 +244,17 @@
     </table>
   </div>
 
-  <%# 三路各自多准（2026-10-16 加第三路时补的）。合并后的数字看不出"是哪一路在干活"，
-      而三路错的格子不一样 —— 调阈值 / 换模型 / 决定砍哪一路，都看这张表。
+  <%# 两路各自多准。合并后的数字看不出"是哪一路在干活" —— 调阈值 / 换模型都看这张表。
+      （2026-10-17 起远端视觉模型已移除，只剩 NCC 和 OCR。）
       分母口径与人核对过的那一栏一致：只算**人给出了明确名字**的格子。 %>
   <% const pn = reco.paths || {}; %>
   <p class="muted small" style="margin-top:0.8rem">
-    <strong>三路各自多准</strong>（分母 = 人核对过且给出明确名字的格子；「有输出」即这一路给过头名）：
+    <strong>两路各自多准</strong>（分母 = 人核对过且给出明确名字的格子；「有输出」即这一路给过头名）：
   </p>
   <div class="table-wrap">
     <table>
       <tbody>
-        <% [['本地 NCC', 'ncc'], ['视觉模型', 'vlm'], ['本地 OCR', 'ocr']].forEach(([label, key]) => {
+        <% [['本地 OCR', 'ocr'], ['本地 NCC', 'ncc']].forEach(([label, key]) => {
              const p = pn[key] || { answered: 0, right: 0 }; %>
           <tr><th><%= label %></th>
               <td class="num"><%= p.right %> / <%= p.answered %></td>

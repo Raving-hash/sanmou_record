@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 给**历史阵容图**补跑第三路（本地 OCR 认自带战法）。
+// 给**历史阵容图**补跑 OCR 这一路（本地 OCR 认自带战法）。
 //
 //   node --env-file=.env scripts/reco-backfill-ocr.js              # 全量补
 //   node --env-file=.env scripts/reco-backfill-ocr.js --dry        # 只看要补哪些、不写库
@@ -7,15 +7,15 @@
 //
 // ── 为什么这不是 worker 的启动任务 ──
 //
-// `recognize-worker` 的 runJob 是**三路一起跑**的。要是照 `filenamesMissingVlm()` 的样子
-// 把"还没跑过 OCR 的"也塞进 sweep，进程每重启一次就会把几百张历史图全部重推 ——
-// 连带**重跑视觉模型**，那是要花 API token 的。所以补跑做成显式的一次性脚本。
+// `recognize-worker` 的 runJob 会重新取图、重跑 NCC（2.5 秒/张）。要是照
+// `filenamesMissingGuesses()` 的样子把"还没跑过 OCR 的"也塞进 sweep，进程每重启一次
+// 就会把几百张历史图全部重推 —— 白跑一遍 NCC。所以补跑做成显式的一次性脚本。
 //
 // ── 它做的事 ──
 //
-// 1. 找出 `hero_guesses.ocr IS NULL` 的图（= 加第三路之前识别过的那些）；
+// 1. 找出 `hero_guesses.ocr IS NULL` 的图（= 加这一路之前识别过的那些）；
 // 2. 从 R2 取图 → 跑 `recognize-ocr.identify()`；
-// 3. 用**库里存着的** NCC / 视觉模型快照 + 新算出来的 OCR 重新走一遍 `merge()`，
+// 3. 用**库里存着的** NCC 快照 + 新算出来的 OCR 重新走一遍 `merge()`，
 //    更新 `ocr` / `auto_key` / `confidence`。
 //
 // ★ 人工核对过的格子不会被覆盖 —— `db.saveGuesses` 里的 `CASE ... decided_at IS NULL`
@@ -66,7 +66,7 @@ const perSlot = (rows, col) => {
 
 (async () => {
   if (!ocrPath.available()) {
-    console.error('✗ 第三路没启用：检查 OCR_URL 和 herodata/index.json 里的 skill');
+    console.error('✗ OCR 这一路没启用：检查 OCR_URL 和 herodata/index.json 里的 skill');
     process.exit(1);
   }
   if (!fs.existsSync(INDEX)) {
@@ -109,7 +109,7 @@ const perSlot = (rows, col) => {
     if (DRY) { console.log(`${tag} 认出 ${got}/9 格（演练，没写库）`); continue; }
 
     const rows = db.getGuesses(row.filename);
-    const merged = recognize.merge(perSlot(rows, 'candidates'), perSlot(rows, 'vlm'), ocr);
+    const merged = recognize.merge(perSlot(rows, 'candidates'), ocr);
     db.saveGuesses(row.entry_id, row.filename, merged);
     console.log(`${tag} 认出 ${got}/9 格，已写库（高置信 ${merged.filter((m) => m.confidence === 'high').length}/9）`);
   }
