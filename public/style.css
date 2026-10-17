@@ -2343,6 +2343,15 @@ details.report[open] > summary {
 .pair-form select { margin: 0; padding: 0.28rem 0.45rem; font-size: var(--yw-fs-sm); }
 .pair-check { display: flex; align-items: center; gap: 0.3rem; }
 .pair-check input { margin: 0; }
+
+/* 武将页搜索表单靠锚点落回原地（form action 里的 #hero-search / #pair，见 heroes.ejs）。
+   顶栏 .topnav 是 sticky 的，不把这块留白加出来，锚点目标会被顶栏盖住 ——
+   这里手工量的是「顶栏高度 + 一点呼吸」；顶栏在 ≤700px 会换行变高，
+   所以下面窄屏那一支给得更大。改导航项数/字号时这两处要跟着看。 */
+#hero-search,
+#pair {
+  scroll-margin-top: 4.5rem;
+}
 .auto-q {
   display: inline-block;
   min-width: 1.25em;
@@ -2469,6 +2478,9 @@ a.hero-chip:hover { border-color: var(--yw-gold-dk); }
 .form-chip.is-absent { color: var(--yw-text-mute); border-style: dashed; }
 
 @media (max-width: 700px) {
+  /* 顶栏在窄屏会折成两三行（导航项多），锚点留白跟着放大 */
+  #hero-search,
+  #pair { scroll-margin-top: 7.5rem; }
   .wall-filter-row { flex-direction: column; align-items: stretch; }
   .wall-filter label { width: 100%; }
   .wall-filter select,

@@ -10,12 +10,16 @@
   </p>
 </hgroup>
 
-<form method="get" action="/heroes" class="hero-search">
+<%# 表单 action 带 #hero-search / #pair 那截锚点，是 2026-10-17 用户报的体验问题：
+    提交后浏览器会按 fragment 滚回这块表单，而不是回到页面顶部（纯 GET 表单 + 锚点，
+    不依赖 JS；浏览器规则是 action 里的 fragment 原样保留，只替换 query）。
+    锚点对应的 scroll-margin-top 在 public/style.css 第 19 节，用来让开 sticky 顶栏。 %>
+<form method="get" action="/heroes#hero-search" id="hero-search" class="hero-search">
   <label>搜索武将
     <input name="q" value="<%= q %>" maxlength="20" placeholder="名字 / 变体前缀">
   </label>
   <button type="submit">搜索</button>
-  <% if (q) { %><a role="button" class="secondary outline btn-sm" href="/heroes">清除</a><% } %>
+  <% if (q) { %><a role="button" class="secondary outline btn-sm" href="/heroes#hero-search">清除</a><% } %>
 </form>
 
 <h3>武将总表（<%= index.length %>）</h3>
@@ -74,12 +78,12 @@
   </div>
 <% } %>
 
-<h3>双将组合检索</h3>
+<h3 id="pair">双将组合检索</h3>
 <p class="muted small">
   选两个（或三个）武将，找同时带这几个人的阵容；勾上「同一支部队」只看他们在同一队里的。
   这里用的是卡上第一张图，和上面总表同一个口径。
 </p>
-<form method="get" action="/heroes" class="pair-form">
+<form method="get" action="/heroes#pair" class="pair-form">
   <%
     const slots = [
       { name: 'a', label: '武将 A', value: form.a },
@@ -102,7 +106,7 @@
     同一支部队
   </label>
   <button type="submit">查阵容</button>
-  <a role="button" class="secondary outline btn-sm" href="/heroes">重置</a>
+  <a role="button" class="secondary outline btn-sm" href="/heroes#pair">重置</a>
 </form>
 
 <% if (pair) { %>
