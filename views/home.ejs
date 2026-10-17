@@ -41,8 +41,9 @@
 
   <%# canRate / quota / rateLockAt 都是 routes/main.js 查好的：能打分 = 进行中且还没过截止点
       （每期开期后第一个周四 12:00）；quota 是**我自己**还剩的名额（封盘后是空的）；
-      rateLockAt 给墙上显示截止时间 %>
-  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt }) %>
+      rateLockAt 给墙上显示截止时间。byScore 也在路由里查（db.isWallByScore）：
+      封盘后墙改成按积分排，墙上那句顺序说明跟着换。 %>
+  <%- include('partials/lineup-gallery', { rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt, byScore }) %>
 
   <h3>还没交积分（<%= notSubmitted.length %>）</h3>
   <% if (!notSubmitted.length) { %>
@@ -140,8 +141,9 @@
 
     <%# 这一期已经结算了，打分也一起封盘：只显示均分/最高/最低，不出按钮。
         quota / rateLockAt 故意不传 —— 只出均分的那一版没有名额行，也没有截止时间可报，
-        模板里用 locals.xxx 兜底（引一个没传进来的名字是 ReferenceError，整页会 500）。 %>
-    <%- include('partials/lineup-gallery', { rows: lineups, heading: `${last.name} 阵容`, canRate: false }) %>
+        模板里用 locals.xxx 兜底（引一个没传进来的名字是 ReferenceError，整页会 500）。
+        byScore 照传：已结算的期墙按积分排（db.isWallByScore），说明那句话也要跟着换。 %>
+    <%- include('partials/lineup-gallery', { rows: lineups, heading: `${last.name} 阵容`, canRate: false, byScore }) %>
 
     <%- include('partials/eye-board', { rows: eye, heading: `${last.name} 慧眼等级变动` }) %>
 

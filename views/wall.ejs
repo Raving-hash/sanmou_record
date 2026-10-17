@@ -5,7 +5,9 @@
   数据由 routes/public.js 查好传来：
     season   进行中的期（有就是本期）
     last     没有进行中的期时，最近一个**已结算**的期（镜像 home.ejs 的回退分支）
-    lineups  上面那一期的阵容墙（db.getLineupWall 的结果，已按互评均分排好）
+    lineups  上面那一期的阵容墙（db.getLineupWall 的结果，按 db.isWallByScore 排好：
+             打分截止前按互评均分、截止后/已结算按积分）
+    byScore  上面那份顺序的口径（墙上那句顺序说明用它决定怎么写）
   season / last 都可能是 null（一期都没办过）。
 
   阵容墙那段和首页共用 partials/lineup-gallery.ejs，所以卡片本身的样子、称号章、
@@ -34,6 +36,7 @@
         canRate: false,
         showScore: false,
         backTo: '/wall',
+        byScore,
       }) %>
 
   <%# 阵容墙自己在 rows 为空时整段不渲染（连标题也不出），所以空态在这儿说 %>

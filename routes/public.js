@@ -95,6 +95,8 @@ router.get('/wall', (req, res) => {
     // viewerId 传 null：这套视图里没有"我打过多少分"这回事，
     // summarizeRatings 里 `r.rater_id === null` 恒假，mine 自然是 null。
     lineups: shown ? db.getLineupWall(shown.id, null) : [],
+    // 墙的顺序说明：截止前按均分、截止后/已结算按积分（和 db.getLineupWall 同一个判断）。
+    byScore: db.isWallByScore(shown),
   });
 });
 

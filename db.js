@@ -646,10 +646,14 @@ db.getPrevAces = (seasonId) => {
 // 本期阵容墙：所有传了阵容的人，**不限于交了积分的**。
 // 只看 ranking 是不够的 —— 新开一期时常常是「有人传了阵容但还没人交积分」，
 // 那样墙会是空的。
-// 展示顺序按**互评均分**从高到低（没人打分的垫底），不是按积分 ——
-// 积分排名是上面那张表的活儿，墙这边大家想看的是「哪套阵容公认最好」。
-// 但 rank 仍然按积分序算出来（见下），所以卡上的 #N 是**积分名次**，和排名表对得上，
-// 只是不再等于「墙上的第几张」。
+// 展示顺序分两段（2026-10-17 用户定的规矩，真源是下面的 db.isWallByScore）：
+//   · 打分截止（每期开期后第一个周四 12:00 北京）**之前**：互评均分从高到低，
+//     「哪套阵容公认最好」—— 这也是打分窗口里大家投票时想看的东西；
+//   · 截止**之后**（以及已结算的期）：积分从高到低。到点了名次基本明朗，
+//     打分也封盘了，墙跟着排名走。
+// 上面那条 SQL 本来就是积分序（分数降序 → 同分先提交 → id），所以后半段直接照它排；
+// 前半段才在 JS 里按均分重排。
+// rank 无论哪一段都按积分序算（见下），所以卡上的 #N 始终是**积分名次**，和排名表对得上。
 // lineup_note 也一起带出来：墙上除了第一张图还要展示阵容说明（模板里按行截断，
 // 卡片只有 200px 宽，1000 字的说明全摊开会把整行卡片顶得老高）。
 // viewerId 用来认出「我给他打了多少」，卡上要把这一档标出来（别人打的不用管）。
@@ -659,10 +663,14 @@ db.getPrevAces = (seasonId) => {
 // 只有一处会传它 —— 首页那条 GET / 在"刚从打分 POST 跳回来"的那一次（见 routes/main.js）。
 // 用户 2026-10-14 的口径是「打分以后不动，刷新网页再重排」：投一票会改均分、均分决定顺序，
 // 整页重刷回来的那份顺序要是变了，人正在看的卡片当场跳走、还得重新找。所以那一跳照原样排，
-// 用户自己刷新时（session 里的标记已经用掉）自然就按最新的均分重排了。
-// ⚠️ 默认排序（下面那条）**一个字都不能改**：`/wall`（routes/public.js）和结算战报
-// （routes/main.js 的 buildReport）都读这条默认顺序，冻结只是首页那一次的特例。
+// 用户自己刷新时（session 里的标记已经用掉）自然就按最新的顺序重排了。
+// ⚠️ 默认顺序（下面那段）被三处共享：`/wall`（routes/public.js）、结算战报
+// （routes/main.js 的 buildReport）和首页 —— 冻结只是首页那一次的特例。
+// （冻结只可能发生在打分窗口里 —— 封盘后投不出票，所以 byScore 那段永远轮不到 freezeIds。）
 db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
+  const season = db.getSeason(seasonId);
+  const byScore = db.isWallByScore(season);
+
   const rows = db.prepare(`
     SELECT e.id, e.user_id, e.score, e.score_submitted_at, e.lineup_note, u.user_id AS uid, u.nickname
     FROM entries e JOIN users u ON u.id = e.user_id
@@ -708,11 +716,14 @@ db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
     guesses: heroData.guesses.get(r.id) || [],
   }));
 
-  // 互评均分高的在前。没人打分的 avg 是 null，一律沉底。
-  // 均分相同的保持前面的积分序（sort 稳定），等于回落到「积分高者在前」，
-  // 不再另立一套同分规则。
+  // 默认顺序（见函数头）：
+  //   · 打分截止前 → 互评均分高的在前。没人打分的 avg 是 null，一律沉底。
+  //     均分相同的保持前面的积分序（sort 稳定），等于回落到「积分高者在前」，
+  //     不再另立一套同分规则。
+  //   · 打分截止后 / 已结算 → 保持上面那条 SQL 的顺序（积分降序 → 同分先提交 → id）。
+  //     不用再排一遍；没交积分的本来就被 SQL 的 `score IS NULL` 垫底。
   const avgOf = (r) => (r.rating.avg === null ? -1 : r.rating.avg);
-  const sorted = wall.sort((a, b) => avgOf(b) - avgOf(a));
+  const sorted = byScore ? wall : wall.sort((a, b) => avgOf(b) - avgOf(a));
 
   // 上面那套是默认顺序。freezeIds 只被"刚投完票跳回来的那一次"用到（见函数头的注释）。
   // isAdmin 只影响"阵容识别的候选要不要一起查回来"（见上面 editable 那行）。
@@ -812,6 +823,15 @@ db.isRateLocked = (season) => {
   const at = db.getRateLockAt(season);
   return at !== null && Date.now() >= at;
 };
+
+// 阵容墙此刻按什么排（2026-10-17 用户定的规矩）。
+// true = 按积分降序；false = 按互评均分降序。
+//   · 打分截止（上面的周四 12:00）之后 → 按积分。到点了名次基本明朗，墙跟着排名走；
+//   · 还没截止 → 按均分。这正是大家还在投票的窗口，墙想看的是「公认最好」；
+//   · 已结算的期 → 一律按积分，不看时间：结算必然在封盘之后，而且名次已经定死。
+// getLineupWall 用它决定数据顺序，路由用它决定墙上那句说明怎么写 —— 同一个真源，
+// 两边才不会一个按积分排、一个写着"按均分"。
+db.isWallByScore = (season) => !!season && (season.status === 'settled' || db.isRateLocked(season));
 
 // ---------- 阵容上传的窗口（2026-10-16 用户加的设定）----------
 //

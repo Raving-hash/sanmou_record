@@ -59,7 +59,8 @@ const withImages = (rows) => rows.map((r) => ({ ...r, images: db.getLineupImages
 // 为什么不用 Markdown：QQ / 微信都不渲染，星号和井号只会变成噪声 —— 纯文本 + 两个 emoji 就够。
 //
 // rows 是 getFinalRanking 的结果（已结算，**只有交了积分的人** —— 没分就没名次）；
-// wall 是 getLineupWall 的结果（已按互评均分降序）；eye 是 getEyeAdjustments 的结果；
+// wall 是 getLineupWall 的结果（已结算的期按积分降序，见 db.isWallByScore）；eye 是
+// getEyeAdjustments 的结果；
 // players 是这一期的**参赛人数**（db.countPlayers：上传了阵容就算参与）。
 // 首行两个数都得有：参赛的人里往往只有一部分交了积分（2026-10-15 起这两件事彻底分开了），
 // 只报"参赛 N 人"、底下却只列得出一小半人，看着像漏了谁。
@@ -95,18 +96,19 @@ const buildReport = (season, rows, wall, eye, players) => {
 };
 
 // ---------- 阵容墙的顺序（首页专用） ----------
-// 平常就是 db.getLineupWall 的默认顺序（互评均分降序）。只有一种例外：**刚从打分 POST
-// 跳回来的那一次**，按上一次渲染的顺序原样排一遍 —— 用户 2026-10-14 的口径是
-// 「打分以后不动，刷新网页再重排」。投一票会改均分，而均分决定顺序，不冻一下的话
-// 整页重刷回来顺序就变了：正在看的卡片当场跳走，还得重新找它在哪。
+// 平常就是 db.getLineupWall 的默认顺序（打分截止前按互评均分降序，截止后按积分降序，
+// 见 db.isWallByScore）。只有一种例外：**刚从打分 POST 跳回来的那一次**，按上一次渲染的
+// 顺序原样排一遍 —— 用户 2026-10-14 的口径是「打分以后不动，刷新网页再重排」。
+// 投一票会改均分，而截止之前顺序就是均分定的，不冻一下的话整页重刷回来顺序就变了：
+// 正在看的卡片当场跳走，还得重新找它在哪。
 //
 // 那个"上一次的顺序"记在 session 里（一张逗号分隔的 entry id），不是另建表 ——
 // 它只活到下一次页面渲染，没有留档的价值。**只生效一次**：读到的同时就把标记删掉，
-// 于是用户自己刷新（或者从导航点进来）时按最新的均分重排。
+// 于是用户自己刷新（或者从导航点进来）时按最新的顺序重排。
 // ⚠️ 顺序对不上期号时一律当没冻过（跨期之后那些 id 也不该再提位置）。
 //
 // 标记存的是**投出去的时刻**，不是 true：只认"刚投完"的那一跳（5 分钟以内）。投完直接
-// 关掉标签页、隔半天才回来的人也走得通 —— 那时旧顺序早没意义了，按最新的均分排才对。
+// 关掉标签页、隔半天才回来的人也走得通 —— 那时旧顺序早没意义了，按最新的顺序排才对。
 const WALL_HOLD_MS = 5 * 60 * 1000;
 
 const lineupWall = (req, season, viewerId) => {
@@ -154,6 +156,9 @@ router.get('/', (req, res) => {
       // 没传进来的名字是 ReferenceError（整页 500），而这条分支是开发站天天在走的那条，
       // 一改就能撞出来。
       lineups: lineupWall(req, season, req.user.id),
+      // 墙上那句顺序说明要跟数据一致：截止前按均分、截止后按积分（见 db.isWallByScore）。
+      // 和 db.getLineupWall 里用的是同一个判断，所以不会出现"页面上写着按积分、卡片却按均分排"。
+      byScore: db.isWallByScore(season),
       // 本期我的打分名额（只含有限额的档位）。阵容墙用它把投满的档位按钮灰掉、
       // 在标题下面列一行"还剩几个"。没在打分的人也会看到，但那是他自己的数，无妨。
       // 封盘后不查了：那时一个按钮都不出，名额行也就没地方显示。
@@ -180,6 +185,8 @@ router.get('/', (req, res) => {
     last,
     ranking: last ? withImages(db.getRanking(last.id)) : [],
     lineups: last ? db.getLineupWall(last.id, req.user.id, null, !!req.user.is_admin) : [],
+    // 已结算的期一律按积分排（见 db.isWallByScore），墙上那句说明跟着一起换。
+    byScore: db.isWallByScore(last),
     // 结算时的慧眼等级变动（没有 settled 的期就是空的）。这个回退分支显示的
     // 一定是已结算的期，所以榜直接摆出来，不用再判一次状态。
     eye: last ? db.getEyeAdjustments(last.id) : [],
