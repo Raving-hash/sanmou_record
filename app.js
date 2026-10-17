@@ -170,6 +170,11 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 // 详见 routes/uploads.js 的头注释。
 app.use(require('./routes/uploads'));
 
+// 积分录入接口（2026-10-17 加，给 Windows 端的 OCR 程序调用）。
+// **必须挂在 requireLogin 前面**：它用 SCORE_API_TOKEN 认证，不是浏览器会话；
+// 挂到后面会被 requireLogin 重定向去登录页，桌面端只会收到一坨 HTML。
+app.use('/api', require('./routes/api'));
+
 app.use(require('./routes/auth'));
 // 游客可见的那一页 + 评论。**必须挂在 main 前面**：GET / 要先落到它手里，
 // 未登录的改道去 /wall、登录了的 next() 落回 main（见 routes/public.js 的头注释）。

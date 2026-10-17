@@ -46,6 +46,9 @@ router.get('/', (req, res) => {
     // 配了地址但武将库里没有 skill 时它照样干不了活，页面要按"关"来报。
     // （2026-10-17 起远端视觉模型已移除，只剩它和 NCC 两路。）
     ocrEnabled: require('../recognize-ocr').available(),
+    // Windows 端的积分录入接口有没有开（只看 .env 里配没配令牌，见 routes/api.js）。
+    // 页面上只摆路径和"开没开"，**绝不把令牌本身印出来** —— 那是能直接改积分的凭据。
+    apiEnabled: !!process.env.SCORE_API_TOKEN,
   });
 });
 
@@ -214,6 +217,20 @@ router.post('/users/:id/toggle', (req, res) => {
 
   db.prepare('UPDATE users SET is_disabled=? WHERE id=?').run(u.is_disabled ? 0 : 1, u.id);
   ok(req, u.is_disabled ? `已启用 ${u.nickname}` : `已禁用 ${u.nickname}（他会被强制退出，历史战绩保留）`);
+  res.redirect('/admin');
+});
+
+// 管理员给成员设游戏名（2026-10-17 加）。和 /password/game-name 共用 db.setGameName
+// 那一份校验：玩家可以自己填，但总有人不会填、或者填错了需要管理员改。
+router.post('/users/:id/game-name', (req, res) => {
+  const u = db.getUserById(Number(req.params.id));
+  if (!u) { err(req, '没有这个成员'); return res.redirect('/admin'); }
+
+  const r = db.setGameName(u.id, req.body.game_name);
+  if (!r.ok) err(req, r.error);
+  else ok(req, r.name
+    ? `已把 ${u.nickname} 的游戏名设为「${r.name}」`
+    : `已清除 ${u.nickname} 的游戏名`);
   res.redirect('/admin');
 });
 

@@ -963,6 +963,27 @@ a:hover > .thumb {
   margin: 0;
 }
 
+/* 成员表里的「游戏名」小表单（2026-10-17 加）。
+   Pico 默认给 input 100% 宽度，直接塞进表格会把这一列撑得很宽，
+   所以这里限宽 + 和按钮排成一行；margin 归零和 .row-actions 同一个理由 ——
+   Pico 给 form / input 的默认下边距会把行高顶乱。 */
+.game-name-form {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.game-name-form input {
+  margin: 0;
+  min-width: 7rem;
+  max-width: 11rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+.game-name-form button {
+  margin: 0;
+  white-space: nowrap;
+}
+
 /* --------------------------------------------------------------------------
    8. 名单
    -------------------------------------------------------------------------- */

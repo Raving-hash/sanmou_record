@@ -47,7 +47,8 @@
       <% if (me.is_admin) { %>
         <li><a href="/admin" class="<%= path.startsWith('/admin') ? 'active' : '' %>">管理</a></li>
       <% } %>
-      <li><a href="/password" class="<%= path === '/password' ? 'active' : '' %>">改密码</a></li>
+      <%# 2026-10-17 起这一页多了「游戏名」，不再只是改密码，导航跟着改叫「设置」 %>
+      <li><a href="/password" class="<%= path === '/password' ? 'active' : '' %>">设置</a></li>
       <li>
         <form method="post" action="/logout" class="nav-out">
           <button type="submit" class="outline secondary btn-sm">退出</button>

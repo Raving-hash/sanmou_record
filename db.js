@@ -22,6 +22,22 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   }
 }
 
+// 游戏名（2026-10-17 加）：给 Windows 端的积分录入接口做「游戏名 → 本站用户」的匹配键。
+// 列本身写在 schema.sql 里（新库直接建出来），这里只补老库。
+// ★ 唯一索引必须排在**补完列之后**，而且只对非空值生效：
+//   · 没填的人可以有一大堆 NULL（NULL 在 SQLite 的唯一索引里互不冲突）；
+//   · 填了就必须唯一 —— 否则接口收到「张三 1200 分」时不知道该记给谁。
+//   · NOCASE 只对纯英文名有意义（中文本来就没有大小写），但"Tom / tom 算同一个人"
+//     正是我们想要的匹配口径。
+// ★ 故意**不**把这条索引写进 schema.sql：老库执行 schema.sql 时这一列还不存在，
+//   CREATE UNIQUE INDEX 会先于下面的 ALTER 抛错，整个进程起不来。
+{
+  const cols = db.prepare(`PRAGMA table_info(users)`).all().map((c) => c.name);
+  if (!cols.includes('game_name')) db.exec(`ALTER TABLE users ADD COLUMN game_name TEXT`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_users_game_name
+           ON users(game_name COLLATE NOCASE) WHERE game_name IS NOT NULL`);
+}
+
 // 识别改版（2026-10-16）：从"给候选让玩家点"改成"机器直接填、玩家事后纠正"，
 // hero_guesses 要留住"机器原本说什么"，否则纠正数据无从分析。
 {
@@ -126,6 +142,34 @@ db.listUsers = () => db.prepare(`SELECT * FROM users ORDER BY id`).all();
 db.createUser = ({ userId, nickname, passwordHash, isAdmin = 0 }) =>
   db.prepare(`INSERT INTO users (user_id, nickname, password_hash, is_admin) VALUES (?, ?, ?, ?)`)
     .run(userId, nickname, passwordHash, isAdmin ? 1 : 0);
+
+// 按**游戏名**找本站用户。积分录入接口（POST /api/scores）唯一的反查入口。
+// 大小写不敏感（和 uniq_users_game_name 那条唯一索引同一个口径），前后空白在写入时
+// 已经 trim 过，这里再 trim 一次是防接口调用方手滑多打空格。
+db.getUserByGameName = (name) => {
+  const n = String(name ?? '').trim();
+  if (!n) return undefined;
+  return db.prepare(`SELECT * FROM users WHERE game_name COLLATE NOCASE = ?`).get(n);
+};
+
+// 设置游戏名。本人（/password）和管理员（/admin）两条路共用这一份校验 ——
+// 校验散成两份的话，总有一边会忘了查重名。
+// 空串 = 清掉（还没填的人可以有很多个，见 uniq_users_game_name 的 WHERE）。
+// 返回 { ok, name } 或 { ok: false, error }，由调用方决定 flash 文案。
+db.setGameName = (userId, raw) => {
+  const name = String(raw ?? '').trim();
+  if (!name) {
+    db.prepare(`UPDATE users SET game_name=NULL WHERE id=?`).run(userId);
+    return { ok: true, name: null };
+  }
+  if ([...name].length > 32) return { ok: false, error: '游戏名最多 32 个字' };
+  const taken = db.getUserByGameName(name);
+  if (taken && taken.id !== userId) {
+    return { ok: false, error: `「${name}」已经被 ${taken.nickname} 用了，换一个` };
+  }
+  db.prepare(`UPDATE users SET game_name=? WHERE id=?`).run(name, userId);
+  return { ok: true, name };
+};
 
 // uid（小写）→ 慧眼等级。**展示专用**：昵称出现的地方都要带那个小圆框，
 // 而各个列表查出来的字段五花八门（多数只有一个 uid，没有 users.id），

@@ -285,6 +285,26 @@
     <p class="small"><%= [...new Set(reco.unresolved)].join('、') %></p>
   <% } %>
 
+  <%# 积分录入接口（2026-10-17 加）。只说路径和开关状态，**令牌一个字都不印** ——
+      它就在线上 .env 的 SCORE_API_TOKEN 里，能改所有人的积分。 %>
+  <%# 不另起 <section class="card">：这一块本来就在「成员」那张卡里，
+      嵌套卡片会多出一层 padding 和边框，看着像套娃。 %>
+  <h3>积分录入接口</h3>
+  <% if (apiEnabled) { %>
+    <p class="muted small">
+      <span class="badge badge-ok">已启用</span>
+      <code>POST /api/scores</code> —— Windows 端 OCR 认出「游戏名 + 积分」后直接发过来，
+      按下面成员表里的<strong>游戏名</strong>找人，<strong>覆盖</strong>本期积分。
+      令牌在线上 <code>.env</code> 的 <code>SCORE_API_TOKEN</code>，别写进任何文档或截图。
+    </p>
+  <% } else { %>
+    <p class="muted small">
+      <span class="badge badge-wait">未启用</span>
+      线上 <code>.env</code> 里没有 <code>SCORE_API_TOKEN</code>，接口不会收任何请求。
+      配好令牌并重启 <code>yanwu</code> 之后就能用 <code>POST /api/scores</code>。
+    </p>
+  <% } %>
+
   <h3>成员（<%= users.length %>）</h3>
   <div class="table-wrap">
     <table>
@@ -292,6 +312,7 @@
         <tr>
           <th>昵称</th>
           <th>ID</th>
+          <th>游戏名</th>
           <th class="w-status">状态</th>
           <th>操作</th>
         </tr>
@@ -304,6 +325,15 @@
               <% if (u.is_admin) { %><span class="badge badge-admin">管理员</span><% } %>
             </td>
             <td><code><%= u.user_id %></code></td>
+            <td>
+              <%# 游戏名：玩家能在 /password 自己填，这里给管理员补填/纠正的口子。
+                  空提交 = 清除；重名会被 db.setGameName 挡回来（flash 里点名是谁占了）。 %>
+              <form method="post" action="/admin/users/<%= u.id %>/game-name" class="game-name-form">
+                <input type="text" name="game_name" maxlength="32" autocomplete="off"
+                       value="<%= u.game_name || '' %>" placeholder="未设置">
+                <button type="submit" class="outline secondary btn-sm">保存</button>
+              </form>
+            </td>
             <td>
               <% if (u.is_disabled) { %>
                 <span class="badge badge-wait">已禁用</span>

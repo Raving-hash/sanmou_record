@@ -81,9 +81,21 @@ router.post('/logout', (req, res) => {
   res.redirect('/login');
 });
 
-// ---------- 改密码 ----------
+// ---------- 账号设置（游戏名 + 改密码）----------
 router.get('/password', requireLogin, (req, res) => {
   res.render('password', { error: null, ok: false });
+});
+
+// 设置游戏名（2026-10-17 加）。游戏里显示的名字和本站昵称不是一回事，
+// 而 Windows 端的积分录入接口是按游戏名找人的（见 routes/api.js）。
+// 校验（长度 / 重名）在 db.setGameName 里，管理员那条路共用同一份。
+// 空提交 = 清掉：还没填的人可以有很多个，但填了就必须唯一。
+router.post('/password/game-name', requireLogin, (req, res) => {
+  const r = db.setGameName(req.user.id, req.body.game_name);
+  req.session.flash = r.ok
+    ? { type: 'ok', msg: r.name ? `游戏名已设为「${r.name}」` : '已清除游戏名' }
+    : { type: 'err', msg: r.error };
+  res.redirect('/password');
 });
 
 router.post('/password', requireLogin, (req, res) => {

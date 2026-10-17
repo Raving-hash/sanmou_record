@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS users (
   -- 规则见 db.js 的 EYE_GAIN / eyeDelta。做成一列累计值（而不是每次结算重算）
   -- 是为了能"退回"，见下面 eye_adjustments 的注释。
   eye_level     INTEGER NOT NULL DEFAULT 10,
+  -- 游戏里显示的名字（2026-10-17 加）。积分录入接口（POST /api/scores）拿它反查用户：
+  -- Windows 端 OCR 出来的是**游戏里的名字**，不是本站的昵称、更不是登录 ID。
+  -- 可空（还没填的人匹配不上，接口会把这条回报成 unknown）；**非空时必须唯一** ——
+  -- 否则一条「张三 1200 分」不知道该记给谁。唯一索引建在 db.js 的迁移块里，不放这儿：
+  -- 老库执行 schema.sql 时这一列还不存在，在这里建索引会直接抛。
+  game_name     TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

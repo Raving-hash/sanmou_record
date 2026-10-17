@@ -58,6 +58,10 @@ OCR_URL=http://127.0.0.1:8089/ocr
                     # 阵容识别的主路（本地 OCR 认自带战法）。2026-10-16 晚加。
                     # 不填 = 这一路关闭，退回只用 NCC。服务见 deploy/ocr.service
                     # （2026-10-17 起视觉模型已删除，DS_API_KEY 不再需要）
+SCORE_API_TOKEN=<随机串>
+                    # 积分录入接口（POST /api/scores）的令牌，2026-10-17 加。
+                    # 不填 = 接口整体 503。Windows 端 OCR 用它把「游戏名 + 积分」传过来，
+                    # 详见下面「积分录入接口」一节。改完要重启进程。
 
 # ---- Cloudflare R2（图片存储，2026-10-15 起）----
 R2_ACCOUNT_ID=<账号 ID>
@@ -1786,6 +1790,98 @@ YANWU_DIR=/home/raving/work/sanmouyanwu node .devlocal/resettle.js   # 对着线
 服务端 `test-rank.js` 一套 41 项钉着上面全部三条（含"空 entry 两边都不算"、
 "少于 2 人交分不能结算"这两个边角）；`test-report.js` 钉战报两个数 + 两行 👑；
 `test-title.js` 钉称号与"加入时间"那条判据；浏览器那套 `report` 多一条"第二名那行也是 👑"。
+
+---
+
+## 积分录入接口（Windows 端，2026-10-17 加）
+
+Windows 端的 OCR 认出一屏积分之后，不用再一个个手填，直接调这个接口落账。
+
+### 游戏名：`users.game_name`
+
+本站的登录 ID 和昵称都不是游戏里显示的名字，所以 `users` 多了一列 `game_name`：
+
+- **可空**：还没填的人匹配不上，接口会把那条回报成 `unknown`；
+- **非空时必须唯一**（`uniq_users_game_name`，`COLLATE NOCASE` 且只建在非空值上）——
+  否则一条「张三 1200 分」不知道该记给谁；
+- 两处可以填：**玩家自己**在 `/password`（导航里叫「设置」），**管理员**在 `/admin` 的成员表。
+  两边共用 `db.setGameName` 那一份校验（长度 ≤ 32 字、重名挡回、空提交 = 清除）。
+
+⚠️ 唯一索引建在 `db.js` 的迁移块里、**不在 `schema.sql`**：老库执行 `schema.sql` 时这一列还不存在，
+把 `CREATE UNIQUE INDEX` 放那儿会先于 `ALTER TABLE ADD COLUMN` 抛错，进程直接起不来。
+
+### 开关：`.env` 的 `SCORE_API_TOKEN`
+
+没配这个键 → 接口整体 503（和 `OCR_URL` 同一个路数：不配就没有这个功能）。
+线上配好之后**重启 `yanwu`** 才生效。`/admin` 顶部会如实显示「已启用 / 未启用」，
+但**绝不把令牌印在页面上** —— 它等于改所有人积分的凭据。
+
+### 接口
+
+```
+POST /api/scores
+Authorization: Bearer <SCORE_API_TOKEN>      （也认 X-Api-Token）
+Content-Type: application/json
+```
+
+请求体两种形状都收：
+
+```json
+{"game_name": "张三", "score": 1234}
+```
+
+```json
+[
+  {"game_name": "张三", "score": 1234},
+  {"game_name": "李四", "score": 987}
+]
+```
+
+（也认驼峰 `gameName`；表单形状 `game_name=…&score=…` 同样能用，方便 curl 手测。）
+
+回包：
+
+```json
+{
+  "ok": true, "season": "第32期", "updated": 2,
+  "results": [
+    {"game_name": "张三", "score": 1234, "status": "ok",
+     "user_id": "zhangsan", "nickname": "张三", "previous": 1200, "changed": true},
+    {"game_name": "王五", "score": 800, "status": "unknown",
+     "error": "没有这个游戏名对应的用户"}
+  ]
+}
+```
+
+`status` 四档：`ok` / `unknown`（游戏名没人认领）/ `disabled`（账号被禁用）/
+`invalid`（这条报文不合法）。**坏的那条就地报错，好的照写** —— 批量里一条脏数据不连坐整批。
+
+### 语义：覆盖，只写当前进行中的那一期
+
+- **覆盖**，不是累加：同一个游戏名再发一次就改成本期新分；
+- 分**变了**才刷新 `score_submitted_at`，分没变保持原时间 —— 和 `/score` 完全同一口径
+  （同分时名次按提交时间排，见 `db.getRanking`）；
+- 只认 `db.getOpenSeason()`：没有进行中的期就整批 409，**绝不静默成功**；
+- 老库里可能还留着的积分截图（`score_image`）**不动**。接口只负责"分"，
+  要清图走本人页的「撤回积分」。
+
+### 认证
+
+两种放行方式：
+
+| 调用方 | 凭据 |
+|---|---|
+| Windows 端 | `SCORE_API_TOKEN`（Bearer 或 `X-Api-Token`） |
+| 管理员在浏览器 / curl 手测 | 已登录的管理员 cookie（普通玩家**不行** —— 他们走 `/score`） |
+
+令牌比较用 `crypto.timingSafeEqual`。`routes/api.js` 挂在 `app.js` 的 `requireLogin` **之前**，
+否则未登录的桌面端会被重定向到登录页，只能收到一坨 HTML。
+
+### 自测
+
+`bash .devlocal/test/run.sh score-api`（约 2 秒，40 项）。它覆盖：游戏名本人/管理员两处录入、
+重名拦截、401/503/409、单条/批量、驼峰与空格、覆盖语义、提交时间刷新规则、禁用账号、
+管理员会话放行、普通玩家会话不放行、101 条上限。
 
 ---
 
