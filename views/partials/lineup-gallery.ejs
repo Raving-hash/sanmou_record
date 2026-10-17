@@ -120,10 +120,33 @@
          // 上一期的积分第一/第二：描边区分（亮蓝 / 亮银）。ace 由 db.getPrevAces 跨期查出来，
          // 和本期的 r.rank（积分名次，#N 那个）完全是两回事。
          const aceClass = r.ace === 1 ? ' is-prev-first' : r.ace === 2 ? ' is-prev-second' : '';
-         const aceTip = r.ace ? `上期积分第${r.ace === 1 ? '一' : '二'}` : ''; %>
+         const aceTip = r.ace ? `上期积分第${r.ace === 1 ? '一' : '二'}` : '';
+         // 搭配评级（T0~T3）。2026-10-17 用户要求：**放到卡框最左上角、独占一行、字号放大**，
+         // 所以从 partials/reco.ejs 的那一行里挪到了这里（那边只留 T0 金胶囊）。
+         // 口径不变：九格全算（db.lineupTier）；有任何一格是机器填的就虚框 + 问号。
+         // 没认出人 = 没有级可给，tier 为 null，但**空行照样占位**（见下面的 .shot-tier）。
+         const allHeroes = r.heroes || [];
+         const tier = allHeroes.length ? lineupTier(allHeroes) : null;
+         const tierShaky = allHeroes.some((h) => h.auto);
+         const tierTip = tier ? [
+           `这套阵容的搭配评级：${tier.tier}`,
+           tier.pairs.length ? `命中 ${tier.pairs.join('、')}` : '一组 T0/T1/T2 搭配都没命中',
+           '两人在同一支部队里才算一组（见 db.js 的 LINEUP_PAIRS）',
+           tierShaky ? '★ 有机器填的格子还没人核对过，这个级可能不准' : '',
+         ].filter(Boolean).join('；') : ''; %>
       <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
       <figure class="shot-card<%= aceClass %>" id="e<%= r.id %>"<% if (aceTip) { %> title="<%= aceTip %>"<% } %>>
         <figcaption class="shot-head">
+          <%# 评级独占顶栏第一行（2026-10-17 用户要求：字号放大、贴卡框最左上角）。
+              ⚠️ 这一格**无条件渲染**，哪怕没认出人（tier 为 null）也要留空行：
+              public/wall.js 只把 .shot-head 整块撑齐，缺了这行的那张卡会矮一行，
+              同一排的图框就错开了（见 style.css 的 .shot-tier）。 %>
+          <div class="shot-tier">
+            <% if (tier) { %>
+              <span class="reco-tier is-<%= tier.tier.toLowerCase() %><%= tierShaky ? ' is-auto' : '' %>"
+                    title="<%= tierTip %>"><%= tier.tier %><% if (tierShaky) { %><i class="reco-q" aria-hidden="true">?</i><% } %></span>
+            <% } %>
+          </div>
           <% if (r.rank) { %><span class="shot-rank">#<%= r.rank %></span><% } %>
           <%# 称号章（演武王 / 慧眼王）紧贴昵称**前面**，和 eye.ejs 一样是"跟着卡走"的：
               这人这一期没传阵容、墙上就没他的卡，称号也就不出现。

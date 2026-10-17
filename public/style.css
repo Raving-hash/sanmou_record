@@ -1165,6 +1165,27 @@ nav ul li,
   border-bottom: 1px solid var(--yw-line-soft);
   background: linear-gradient(180deg, var(--yw-surface-3), var(--yw-surface-2));
 }
+/* 阵容搭配评级牌（T0/T1/T2/T3）—— 卡框**最左上角、独占顶栏第一行**（2026-10-17 用户要求）。
+   字号从 .reco-line 那一档（0.68rem）提上来，配色的四档仍然沿用 .reco-tier（第 16 节），
+   这里只接管"位置和大小"。
+
+   ⚠️ 两件事别动：
+   ① 这一行**无条件存在**（模板里没评级时也渲染空盒子）：public/wall.js 只把整块
+      .shot-head 撑齐，少了这一行的卡会矮一行，同一排的图框就错开；
+   ② flex-basis 100% 是"独占一行"的实现：顶栏是 flex-wrap，它把自己挤到第一行，
+      #N / 昵称 / 积分自然落到第二行。 */
+.shot-tier {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  min-height: 1.6rem;
+}
+.shot-tier .reco-tier {
+  font-size: 1.1rem;
+  line-height: 1.3;
+  padding: 0.08rem 0.55rem;
+  border-radius: 5px;
+}
 .shot-rank {
   font-family: var(--yw-serif);
   font-weight: 700;
