@@ -26,9 +26,13 @@
      别人的 key 是公开信息。它防的是"甲拿乙的 key 提交进自己的阵容、再删掉那一行，
      把乙的图删掉" —— 详见 upload.js 里那段注释。
 
-   第二节、拖拽（仅桌面）
-     做法：把拖进来的文件灌进那个**原生** <input type="file">。
+   第二节、拖拽（仅桌面）/ 粘贴（两样设备都行）
+     做法：把拖进来的文件、或剪贴板里的图片，灌进那个**原生** <input type="file">。
      （灌得进去是因为 input.files 允许赋一个 DataTransfer 的 FileList。）
+
+     粘贴是 2026-10-19 加的：截图之后直接 Ctrl+V / ⌘V，不用先存成文件再点选。
+     **只接管"剪贴板里真的有文件"的粘贴** —— 贴文字（阵容说明那个文本框）
+     一点都不能碰，所以判据是先取文件、取不到就原样放行。
 
      给模板留的钩子：
        form[data-upload-kind]        lineup / score，决定要令牌时的用途
@@ -302,7 +306,9 @@
   wireUpload();
 
   /* ==========================================================================
-     二、拖拽（仅桌面，下面沿用原来的写法）
+     二、拖拽 / 粘贴（下面沿用原来的写法）
+     拖拽只有桌面开；**粘贴两边都留** —— 手机上从相册选仍是主路，
+     但外接键盘、部分输入法也贴得出图，为拖拽那条判断把粘贴一起关掉没道理。
      ========================================================================== */
 
   if (!canAssignFiles()) return;
@@ -312,9 +318,11 @@
 
   // 以触摸为主（手机、平板）的设备上没有拖拽这回事，摆一个拖不动的虚线框
   // 外加一句「可以把图片拖进来」纯粹是添乱 —— 那边本来就是点一下从相册选。
-  // 于是整段不启用，页面上不会多出任何东西，点选照旧。
+  // 所以**只跳过拖拽那一套**（虚线框、提示、drag 监听），页面上不多出任何东西；
+  // 这里**不能 return**，下面的粘贴是另一回事，手机上照样可用。
   // （注意：上传那一半在上面，手机照样有，别把 return 提到它前面去。）
-  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
+  var touchOnly = !!(window.matchMedia
+    && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
 
   // 判据必须和上面 COMPRESSIBLE 一致：这里放行、上面会拒，用户白拖一次。
   // （从前它对应的是服务端 multer 的 EXT 表，那张表随直传一起没了。）
@@ -347,8 +355,9 @@
     z.msg.classList.toggle('is-warn', !!warn);
   }
 
-  // 拖进来的文件 → 原生 input。这是整个功能的核心一步。
-  function accept(z, list) {
+  // 拖进来 / 粘贴进来的文件 → 原生 input。这是整个功能的核心一步。
+  // how 只是提示语里的出处（「拖进来的」「粘贴的」），不影响任何判断。
+  function accept(z, list, how) {
     var all = Array.prototype.slice.call(list || []);
     if (!all.length) return;
 
@@ -359,7 +368,7 @@
       : 1;
 
     if (!cap) {
-      say(z, '已经传满了，先删掉几张再拖。', true);
+      say(z, '已经传满了，先删掉几张再传。', true);
       return;
     }
 
@@ -370,7 +379,7 @@
     ok = ok.slice(0, cap);
 
     if (!ok.length) {
-      say(z, '拖进来的 ' + all.length + ' 个都不是图片（只认 jpg / png / webp）：' + names(bad, 2), true);
+      say(z, how + '的 ' + all.length + ' 个都不是图片（只认 jpg / png / webp）：' + names(bad, 2), true);
       return;
     }
 
@@ -394,16 +403,26 @@
     var box = input.closest('label') || input.parentNode;   // 没包在 label 里就退回父节点
     if (!box || !box.classList) return;
 
-    var hint = document.createElement('small');
-    hint.className = 'muted drop-hint';
-    hint.textContent = input.multiple ? '也可以把图片拖进来，一次拖多张' : '也可以把图片拖进来';
-
+    // 结果行两边都要有：拖进来的结果和粘贴的结果都写在这一行上
+    // （默认 display:none，没触发过的时候页面上看不出多了个元素）。
     var msg = document.createElement('span');
     msg.className = 'drop-msg';
     msg.setAttribute('aria-live', 'polite');   // 拖完让读屏软件念一句结果
 
     var z = { input: input, box: box, msg: msg, depth: 0 };
     zones.push(z);
+
+    // 触摸设备到此为止：不摆虚线框、不提拖拽，只要下面粘贴能把结果说出来。
+    if (touchOnly) {
+      box.appendChild(msg);
+      return;
+    }
+
+    var hint = document.createElement('small');
+    hint.className = 'muted drop-hint';
+    hint.textContent = input.multiple
+      ? '也可以把图片拖进来，或直接粘贴（Ctrl+V），一次多张'
+      : '也可以把图片拖进来，或直接粘贴（Ctrl+V）';
 
     // 先把过渡关掉再加类。.drop-field 上有 border-color / background-color 的过渡
     // （拖进来时描边转金要用它），而加类的这一刻浏览器会从「没有框」过渡到「有框」——
@@ -447,8 +466,42 @@
       e.stopPropagation();          // 别让下面那个文档级兜底再处理一遍
       z.depth = 0;
       box.classList.remove('is-dragover');
-      accept(z, e.dataTransfer.files);
+      accept(z, e.dataTransfer.files, '拖进来');
     });
+  });
+
+  /* ---- 粘贴（2026-10-19 加） --------------------------------------------
+     截图之后直接 Ctrl+V / ⌘V —— 不必先存成文件再点选，手机上也能省一趟相册。
+     接管的前提是**剪贴板里真有文件**：贴文字时返回空数组，浏览器自己的粘贴
+     行为原样发生（阵容说明那个 textarea 就靠这一条）。
+
+     files 和 items 两条路都要看：从网页上右键复制图片，Chrome 把 File 放在
+     `items`（kind='file'）里、Safari 只给 items；从文件管理器复制文件时
+     才落在 `files` 上。漏掉任一条都会出现"明明复制了却贴不上"的设备差异。 */
+  function clipboardFiles(e) {
+    var cd = e.clipboardData;
+    if (!cd) return [];
+    if (cd.files && cd.files.length) return Array.prototype.slice.call(cd.files);
+    var out = [];
+    var items = cd.items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        var f = items[i].getAsFile && items[i].getAsFile();
+        if (f) out.push(f);
+      }
+    }
+    return out;
+  }
+
+  // 挂在 document 上：贴图之前用户不需要先点一下那个文件框（快捷键就是全部）。
+  // 页面上只有一个文件框（阵容图，见 views/lineup.ejs），所以固定落到 zones[0]，
+  // 和上面"拖到框外"那条兜底的取法一致。
+  document.addEventListener('paste', function (e) {
+    var files = clipboardFiles(e);
+    if (!files.length) return;
+    if (!zones.length) return;      // 没有文件框（已传满 / 不是上传页）：别拦默认行为
+    e.preventDefault();
+    accept(zones[0], files, '粘贴');
   });
 
   // 拖偏了（没落在虚线框里）也得拦：不拦的话浏览器会直接打开那个文件、整页跳走，
