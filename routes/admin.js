@@ -10,6 +10,14 @@ const SCORE_RE = /^\d{1,9}$/;
 const ok = (req, msg) => { req.session.flash = { type: 'ok', msg }; };
 const err = (req, msg) => { req.session.flash = { type: 'err', msg }; };
 
+// ---------- 站点统计（2026-10-19 加，只有管理员看得到） ----------
+// 路径挂在 /admin 下面，所以 requireLogin + requireAdmin 两道已经在 app.js 的挂载点
+// 上兜住了（`app.use('/admin', requireLogin, requireAdmin, ...)`），这里不用再判。
+// 数据全部来自 db.getSiteStats（三张按天聚合的访问表 + 现算的内容统计）。
+router.get('/stats', (req, res) => {
+  res.render('admin-stats', { title: '站点统计', stats: db.getSiteStats() });
+});
+
 // ---------- 管理页 ----------
 router.get('/', (req, res) => {
   const openSeason = db.getOpenSeason();

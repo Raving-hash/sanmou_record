@@ -1440,6 +1440,52 @@ nav ul li,
   letter-spacing: 0.1em;
   margin-top: 0.2rem;
 }
+/* 站点统计页（2026-10-19）：
+   趋势表和页面热度里的条形图是纯 CSS —— 宽度由模板按"当列最大值"算出百分比写进
+   style，没有脚本。两栏在窄屏塌成一列（900px 是这两张表并排还看得清的下限）。 */
+.mini-bar-wrap {
+  display: inline-block;
+  width: 96px;
+  height: 0.5rem;
+  background: var(--yw-surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.mini-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;                 /* 0 也留一丝，标出"这一天有人" */
+  background: linear-gradient(90deg, var(--yw-gold), var(--yw-gold-lt));
+  border-radius: 3px;
+}
+.mini-bar.is-guest {
+  background: linear-gradient(90deg, var(--yw-jade), var(--yw-jade-lt));
+}
+.mini-bar-wrap.is-page {
+  width: 110px;
+  margin-right: 0.4rem;
+}
+.trend-cell {
+  white-space: nowrap;
+}
+.trend-cell b {
+  margin-left: 0.4rem;
+  font-weight: 600;
+}
+.stats-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1.6rem;
+}
+.stats-two-col > .card {
+  margin-bottom: 0;
+}
+@media (max-width: 900px) {
+  .stats-two-col { grid-template-columns: 1fr; }
+}
 
 /* --------------------------------------------------------------------------
    12. 管理页

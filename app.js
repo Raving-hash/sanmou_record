@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cookieSession = require('cookie-session');
 const db = require('./db');
@@ -153,6 +154,60 @@ app.use((req, res, next) => {
   // 一次性提示（重定向后显示）
   res.locals.flash = req.session ? req.session.flash || null : null;
   if (req.session) delete req.session.flash;
+  next();
+});
+
+/* ---------- 站点统计：匿名游客 id + 页面访问（2026-10-19 加） ----------
+   两条中间件都排在**所有路由之前**（包括静态资源和图片那两条），
+   但它们自己只挑"页面打开"来记 —— 见下面 finish 那一层的三个条件。
+
+   为什么游客也要一个 id：DAU 只数登录成员，可站长还想知道"游客来了几个浏览器"。
+   vid 是随机 UUID，只放在 cookie-session 里，**不存 IP、不存 UA**；
+   30 天不访问就自然过期（和 session 同寿）。成员不写 vid（用不上，也少让 cookie 变大）。 */
+app.use((req, res, next) => {
+  if (!req.user && req.session && !req.session.vid) {
+    req.session.vid = crypto.randomUUID();
+  }
+  next();
+});
+
+// 页面种类归并：/u/张三、/u/李四 是同一个"页面"，/hero/xxx 同理。
+// 不归并的话 page_daily 会长成一张"每个用户一个 URL"的原始日志。
+// 只处理**已知会返回 200 HTML** 的动态路径；其余固定路径原样记。
+const pageKeyOf = (p) => {
+  if (/^\/seasons\/\d+$/.test(p)) return '/seasons/:id';
+  if (/^\/seasons\/\d+\/wall$/.test(p)) return '/seasons/:id/wall';
+  if (p.startsWith('/u/')) return '/u/:uid';
+  if (p.startsWith('/hero/')) return '/hero/:key';
+  return p;
+};
+
+// 记在 `finish` 之后，而不是请求进来时：
+//   · 只有 **GET + 200 + text/html** 才算一次页面打开 —— 静态资源、接口 JSON、
+//     302 跳转（未登录访问 / 会被弹到 /wall，不能算两次）、404 全排除；
+//   · 这时路由已经跑完，req.user 是最终身份（会话过期的不会记成成员）。
+// 写库是同步的（better-sqlite3），但已经在响应发完之后，用户感觉不到；
+// 真出异常也绝不能影响页面（响应都发出去了），所以 catch 住只记日志。
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  // ⚠️ **必须在进路由之前把 path 抄下来**：`/admin` 是挂在子路由上的，
+  //    Express 进子路由时会把 req.url 剥掉前缀，等 finish 触发时再读 req.path
+  //    拿到的是 `/stats` 而不是 `/admin/stats`（实测踩过 —— 统计页自己那一条
+  //    会记成一个不存在的 `/stats`）。
+  const page = pageKeyOf(req.path);
+  res.on('finish', () => {
+    try {
+      if (res.statusCode !== 200) return;
+      if (!String(res.getHeader('content-type') || '').includes('text/html')) return;
+      db.recordPageView({
+        userId: req.user ? req.user.id : null,
+        vid: req.session ? req.session.vid : null,
+        page,
+      });
+    } catch (e) {
+      console.error('[统计] 记一次访问失败：', e.message);
+    }
+  });
   next();
 });
 

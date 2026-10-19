@@ -1741,6 +1741,183 @@ db.getSeasonHighlights = (seasonId) => {
   return { season, topScore, topRating, hottestHeroes, eyeGain };
 };
 
+// ---------- 站点统计（2026-10-19 加） ----------
+//
+// 为什么要有这一段：站里原来只有"结果性"数据（积分、打分、上场次数），
+// 没人知道**每天到底有多少人来**。这里补的是访问侧的最小数据：成员一人一天一行、
+// 游客一浏览器一天一行、页面种类一天一行 —— 全是聚合，不存原始日志。
+//
+// ★ 日界按北京时间。`BJ_OFFSET_MS` 是上面打分截止那一节定义的（北京 = UTC+8，无夏令时），
+//   这里复用，别另写一份。
+// ★ 只记"页面打开"：GET + 200 + text/html。静态资源、JSON 接口、302 跳转、
+//   404 全都不算（见 app.js 的中间件）—— 否则一次页面刷新会被 CSS/JS 灌成十几条。
+// ★ 游客的 vid 是 cookie 里的随机 UUID（app.js 发的），**不存 IP / UA**。
+//   不装 cookie 的浏览器每次都是新 vid，会被多算 —— 这是有意接受的误差，
+//   比为了"准确"去存 IP 强。
+const bjDayOf = (ms) => new Date(ms + BJ_OFFSET_MS).toISOString().slice(0, 10);
+// 往回数 n 天的日期字符串（n=0 就是当天）。用 UTC 日期做纯日历运算，
+// 不经过本地时区 —— 否则服务器跑在美国时区时会差一天。
+const dayBack = (day, n) =>
+  new Date(Date.parse(`${day}T00:00:00.000Z`) - n * 86400000).toISOString().slice(0, 10);
+db.bjDayOf = bjDayOf;
+
+const addActivity = db.prepare(`
+  INSERT INTO activity_daily (day, user_id, hits, last_at) VALUES (?, ?, 1, ?)
+  ON CONFLICT(day, user_id) DO UPDATE SET hits = hits + 1, last_at = excluded.last_at`);
+const addVisitor = db.prepare(`
+  INSERT INTO visitor_daily (day, vid, hits, last_at) VALUES (?, ?, 1, ?)
+  ON CONFLICT(day, vid) DO UPDATE SET hits = hits + 1, last_at = excluded.last_at`);
+const addPage = db.prepare(`
+  INSERT INTO page_daily (day, page, hits) VALUES (?, ?, 1)
+  ON CONFLICT(day, page) DO UPDATE SET hits = hits + 1`);
+
+// 记一次页面打开。app.js 在响应 `finish` 之后调用，所以这里**不能再抛**到请求上 ——
+// 调用方已经 try/catch 兜底，但写库本身也保持"三条 upsert 一个事务"，
+// 要么都记上，要么一条都不记，不会出现"页面数加了、活跃没加"的半截数据。
+const recordPageViewTx = db.transaction((day, userId, vid, page, at) => {
+  if (userId) addActivity.run(day, userId, at);
+  else if (vid) addVisitor.run(day, String(vid), at);
+  addPage.run(day, page);
+});
+db.recordPageView = ({ userId = null, vid = null, page = '/' } = {}) => {
+  const now = Date.now();
+  recordPageViewTx(bjDayOf(now), userId, vid, String(page).slice(0, 80), new Date(now).toISOString());
+};
+
+// 统计页要的一整份数据。全部现算、不落库（除了上面三张访问表本身）。
+// `days` 只影响趋势表的长度，卡片的 7 天 / 30 天窗口是固定的产品口径。
+db.getSiteStats = ({ days = 14 } = {}) => {
+  const today = bjDayOf(Date.now());
+  const weekStart = dayBack(today, 6);
+  const monthStart = dayBack(today, 29);
+  const trendStart = dayBack(today, days - 1);
+
+  const byDay = (rows, key = 'day') =>
+    new Map(rows.map((r) => [r[key], r]));
+
+  // 趋势表只要 days 天，按天的新增也只要这一段 —— 都带上 WHERE，别让表越攒越大之后
+  // 每开一次统计页就全表扫一遍。
+  const memRows = byDay(db.prepare(`
+    SELECT day, COUNT(*) AS dau, SUM(hits) AS pv FROM activity_daily
+    WHERE day >= ? GROUP BY day`).all(trendStart));
+  const guestRows = byDay(db.prepare(`
+    SELECT day, COUNT(*) AS uv, SUM(hits) AS pv FROM visitor_daily
+    WHERE day >= ? GROUP BY day`).all(trendStart));
+  const pvRows = byDay(db.prepare(`
+    SELECT day, SUM(hits) AS pv FROM page_daily
+    WHERE day >= ? GROUP BY day`).all(trendStart));
+  const signupRows = byDay(db.prepare(`
+    SELECT date(created_at, '+8 hours') AS day, COUNT(*) AS n
+    FROM users WHERE date(created_at, '+8 hours') >= ? GROUP BY day`).all(trendStart));
+  const uploadRows = byDay(db.prepare(`
+    SELECT date(created_at, '+8 hours') AS day, COUNT(*) AS n,
+           SUM(is_preliminary) AS prelim
+    FROM lineup_images WHERE date(created_at, '+8 hours') >= ? GROUP BY day`).all(trendStart));
+  const scoreRows = byDay(db.prepare(`
+    SELECT date(score_submitted_at, '+8 hours') AS day, COUNT(*) AS n
+    FROM entries WHERE score_submitted_at IS NOT NULL
+      AND date(score_submitted_at, '+8 hours') >= ? GROUP BY day`).all(trendStart));
+  const ratingRows = byDay(db.prepare(`
+    SELECT date(created_at, '+8 hours') AS day, COUNT(*) AS n
+    FROM ratings WHERE date(created_at, '+8 hours') >= ? GROUP BY day`).all(trendStart));
+
+  const trend = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = dayBack(today, i);
+    trend.push({
+      day,
+      dau: memRows.get(day)?.dau || 0,
+      guests: guestRows.get(day)?.uv || 0,
+      pv: pvRows.get(day)?.pv || 0,
+      signups: signupRows.get(day)?.n || 0,
+      uploads: uploadRows.get(day)?.n || 0,
+      prelims: uploadRows.get(day)?.prelim || 0,
+      scores: scoreRows.get(day)?.n || 0,
+      ratings: ratingRows.get(day)?.n || 0,
+    });
+  }
+
+  const distinctSince = (since) => db.prepare(
+    `SELECT COUNT(DISTINCT user_id) AS n FROM activity_daily WHERE day >= ?`).get(since).n;
+
+  // 5 分钟内看过页面的成员 = 在线。last_at 是 ISO 字符串，字典序就是时间序。
+  const onlineSince = new Date(Date.now() - 5 * 60e3).toISOString();
+  const online = db.prepare(
+    `SELECT COUNT(*) AS n FROM activity_daily WHERE day = ? AND last_at >= ?`).get(today, onlineSince).n;
+
+  const topPages = db.prepare(`
+    SELECT page, SUM(hits) AS hits FROM page_daily WHERE day >= ?
+    GROUP BY page ORDER BY hits DESC, page ASC LIMIT 12`).all(weekStart);
+
+  const topUsers = db.prepare(`
+    SELECT a.user_id AS id, u.nickname, u.user_id AS uid,
+           COUNT(*) AS days, SUM(a.hits) AS hits, MAX(a.last_at) AS last_at
+    FROM activity_daily a JOIN users u ON u.id = a.user_id
+    WHERE a.day >= ?
+    GROUP BY a.user_id ORDER BY days DESC, hits DESC, a.user_id ASC LIMIT 10`).all(weekStart);
+
+  // 数据从哪一天开始有：三张表取最早的。没访问过（刚发布还没人打开）就是 null。
+  const coverage = db.prepare(`
+    SELECT MIN(day) AS d FROM (
+      SELECT day FROM activity_daily UNION ALL
+      SELECT day FROM visitor_daily UNION ALL
+      SELECT day FROM page_daily)`).get().d || null;
+
+  const total = {
+    users: db.prepare(`SELECT COUNT(*) AS n FROM users`).get().n,
+    disabled: db.prepare(`SELECT COUNT(*) AS n FROM users WHERE is_disabled = 1`).get().n,
+    seasons: db.prepare(`SELECT COUNT(*) AS n FROM seasons`).get().n,
+    lineups: db.prepare(`SELECT COUNT(*) AS n FROM lineup_images WHERE is_preliminary = 0`).get().n,
+    prelims: db.prepare(`SELECT COUNT(*) AS n FROM lineup_images WHERE is_preliminary = 1`).get().n,
+    ratings: db.prepare(`SELECT COUNT(*) AS n FROM ratings`).get().n,
+    comments: db.prepare(`SELECT COUNT(*) AS n FROM comments`).get().n,
+    scores: db.prepare(`SELECT COUNT(*) AS n FROM entries WHERE score IS NOT NULL`).get().n,
+  };
+
+  // 本期概况（没有进行中的期就是 null）。
+  const open = db.getOpenSeason();
+  let current = null;
+  if (open) {
+    current = {
+      season: open,
+      // 打分截止（统计页上标一下，省得管理员再去翻管理页）
+      rateLockAt: db.getRateLockAt(open),
+      lineups: db.prepare(`SELECT COUNT(*) AS n FROM lineup_images li
+                           JOIN entries e ON e.id = li.entry_id
+                           WHERE e.season_id = ? AND li.is_preliminary = 0`).get(open.id).n,
+      prelims: db.prepare(`SELECT COUNT(*) AS n FROM lineup_images li
+                           JOIN entries e ON e.id = li.entry_id
+                           WHERE e.season_id = ? AND li.is_preliminary = 1`).get(open.id).n,
+      players: db.prepare(`SELECT COUNT(*) AS n FROM entries e WHERE e.season_id = ?
+                           AND (e.score IS NOT NULL
+                                OR EXISTS (SELECT 1 FROM lineup_images li
+                                           WHERE li.entry_id = e.id AND li.is_preliminary = 0))`).get(open.id).n,
+      scores: db.prepare(`SELECT COUNT(*) AS n FROM entries WHERE season_id = ? AND score IS NOT NULL`).get(open.id).n,
+      ratings: db.prepare(`SELECT COUNT(*) AS n FROM ratings r
+                           JOIN entries e ON e.id = r.entry_id WHERE e.season_id = ?`).get(open.id).n,
+    };
+  }
+
+  return {
+    today,
+    coverage,
+    cards: {
+      dau: memRows.get(today)?.dau || 0,
+      guests: guestRows.get(today)?.uv || 0,
+      pv: pvRows.get(today)?.pv || 0,
+      signups: signupRows.get(today)?.n || 0,
+      wau: distinctSince(weekStart),
+      mau: distinctSince(monthStart),
+      online,
+    },
+    total,
+    current,
+    trend,
+    topPages,
+    topUsers,
+  };
+};
+
 // 规则页要展示的「单一真源」常量。EYE_GAIN / EYE_BASE / 周几本来只在模块内部用，
 // 这里补挂到 db 上（只读），免得 /rules 的文案和代码悄悄分家。
 db.EYE_BASE = EYE_BASE;

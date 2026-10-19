@@ -1,0 +1,197 @@
+<%- include('partials/header') %>
+
+<%#
+  站点统计（2026-10-19 加）。**只有管理员能打开**：路由挂在 /admin 下面，
+  app.js 的 `app.use('/admin', requireLogin, requireAdmin, …)` 已经把两道门守住了。
+
+  数据来源分两类：
+    · 访问侧（DAU / 游客 / 浏览 / 页面热度）—— 来自 2026-10-19 新加的三张按天聚合表，
+      **只有从那天起的数据**，之前的补不回来（见页面顶部那句说明）；
+    · 内容侧（新成员、上传、打分、交分）—— 从既有表的时间戳现算，历史都在。
+
+  模板里不查库、不自己算日期：stats 是 db.getSiteStats() 一次给全的。
+  条形图是纯 CSS（宽度按当列最大值的百分比），没有脚本。
+%>
+<% const c = stats.cards; const t = stats.total;
+   const PAGE_LABELS = {
+     '/': '首页', '/wall': '阵容墙（游客）', '/lineup': '上传阵容', '/score': '录入积分',
+     '/rank': '排行', '/history': '历史赛期', '/records': '纪录墙', '/heroes': '武将索引',
+     '/hero/:key': '武将详情', '/u/:uid': '个人页', '/seasons/:id': '赛期详情',
+     '/seasons/:id/wall': '历史阵容墙', '/ratings': '我的打分', '/rules': '赛制说明',
+     '/login': '登录', '/register': '注册', '/password': '账号设置',
+     '/admin': '管理', '/admin/stats': '站点统计',
+   };
+   // 条形图的满格参照：各列自己的最大值（0 时用 1，避免除零）。
+   const maxDau = Math.max(1, ...stats.trend.map((r) => r.dau));
+   const maxGuests = Math.max(1, ...stats.trend.map((r) => r.guests));
+   const maxPage = Math.max(1, ...stats.topPages.map((p) => p.hits));
+   const pct = (n, max) => Math.round((n / max) * 100); %>
+
+<hgroup class="page-head">
+  <h2>站点统计</h2>
+  <p class="muted">
+    日界按北京时间。成员活跃 = 当天登录并打开过页面的人数；游客 = 当天来过的匿名浏览器数
+    （随机 cookie，不记 IP）；浏览 = 页面打开次数（成员 + 游客，不含图片/脚本等静态资源）。
+  </p>
+</hgroup>
+
+<p class="muted small">
+  <% if (stats.coverage) { %>
+    访问数据从 <strong><%= stats.coverage %></strong> 起记录 —— 在那之前的 DAU / 游客 / 浏览
+    补不回来（当时没有落库）。新成员、上传、打分这些内容数据是从各表的时间戳现算的，历史完整。
+  <% } else { %>
+    访问数据还没有开始（今天第一次打开页面之后就会记上）。新成员、上传、打分等历史内容数据已就绪。
+  <% } %>
+  · <a href="/admin">回管理页</a>
+</p>
+
+<section class="card">
+  <h3>今天 · <%= stats.today %></h3>
+  <div class="stat-grid">
+    <p class="stat"><span class="stat-num"><%= c.dau %></span><span class="stat-label">成员活跃</span></p>
+    <p class="stat"><span class="stat-num"><%= c.guests %></span><span class="stat-label">游客独立访客</span></p>
+    <p class="stat"><span class="stat-num"><%= c.pv %></span><span class="stat-label">页面浏览</span></p>
+    <p class="stat"><span class="stat-num"><%= c.online %></span><span class="stat-label">5 分钟内活跃</span></p>
+    <p class="stat"><span class="stat-num"><%= c.signups %></span><span class="stat-label">今日新成员</span></p>
+  </div>
+  <div class="stat-grid">
+    <p class="stat"><span class="stat-num"><%= c.wau %></span><span class="stat-label">近 7 天活跃成员</span></p>
+    <p class="stat"><span class="stat-num"><%= c.mau %></span><span class="stat-label">近 30 天活跃成员</span></p>
+    <p class="stat"><span class="stat-num"><%= t.users %></span><span class="stat-label">成员总数</span></p>
+    <p class="stat"><span class="stat-num"><%= t.users - t.disabled %></span><span class="stat-label">其中正常</span></p>
+    <p class="stat"><span class="stat-num"><%= t.seasons %></span><span class="stat-label">办过的赛期</span></p>
+  </div>
+  <p class="muted small">
+    「成员活跃 / 游客 / 页面浏览」只统计本页刷新前的数据（这次打开统计页本身要等刷新后才算进去）。
+    同一个人当天多次访问只算 1 个活跃成员，但页面浏览按次数累加。
+  </p>
+</section>
+
+<section class="card">
+  <h3>近 <%= stats.trend.length %> 天</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th class="num">成员活跃</th>
+          <th class="num">游客</th>
+          <th class="num">浏览</th>
+          <th class="num">新成员</th>
+          <th class="num">完整阵容图</th>
+          <th class="num">初步图</th>
+          <th class="num">打分</th>
+          <th class="num">交分</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% stats.trend.slice().reverse().forEach((r) => { %>
+          <tr>
+            <td class="num"><%= r.day.slice(5) %></td>
+            <td class="trend-cell">
+              <span class="mini-bar-wrap"><span class="mini-bar" style="width: <%= pct(r.dau, maxDau) %>%"></span></span>
+              <b class="num"><%= r.dau %></b>
+            </td>
+            <td class="trend-cell">
+              <span class="mini-bar-wrap"><span class="mini-bar is-guest" style="width: <%= pct(r.guests, maxGuests) %>%"></span></span>
+              <b class="num"><%= r.guests %></b>
+            </td>
+            <td class="num"><%= r.pv %></td>
+            <td class="num"><%= r.signups %></td>
+            <td class="num"><%= r.uploads - r.prelims %></td>
+            <td class="num"><%= r.prelims %></td>
+            <td class="num"><%= r.ratings %></td>
+            <td class="num"><%= r.scores %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small">
+    最新的一天在最上面。完整阵容图 / 初步图、打分、交分按各自的时间戳归到北京日期，
+    所以历史（访问数据开始之前）也有数。
+  </p>
+</section>
+
+<div class="stats-two-col">
+  <section class="card">
+    <h3>页面热度 · 近 7 天</h3>
+    <% if (!stats.topPages.length) { %>
+      <p class="muted">还没有访问记录。</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>页面</th><th class="num">打开次数</th></tr></thead>
+          <tbody>
+            <% stats.topPages.forEach((p) => { %>
+              <tr>
+                <td>
+                  <span class="mini-bar-wrap is-page"><span class="mini-bar" style="width: <%= pct(p.hits, maxPage) %>%"></span></span>
+                  <%= PAGE_LABELS[p.page] || p.page %>
+                  <small class="muted"><%= p.page %></small>
+                </td>
+                <td class="num"><%= p.hits %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted small">/u/xxx、/hero/xxx、/seasons/数字 已归并成一类，不按单个人/武将拆开。</p>
+    <% } %>
+  </section>
+
+  <section class="card">
+    <h3>最活跃成员 · 近 7 天</h3>
+    <% if (!stats.topUsers.length) { %>
+      <p class="muted">还没有成员在记录期内访问过。</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>成员</th><th class="num">活跃天数</th><th class="num">打开次数</th><th>最近一次</th></tr></thead>
+          <tbody>
+            <% stats.topUsers.forEach((u) => { %>
+              <tr>
+                <td>
+                  <a href="/u/<%= u.uid %>"><%= u.nickname %></a>
+                  <%- include('partials/eye', { uid: u.uid }) %>
+                </td>
+                <td class="num"><%= u.days %></td>
+                <td class="num"><%= u.hits %></td>
+                <td><small class="muted"><%= fmt(u.last_at) %></small></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </section>
+</div>
+
+<section class="card">
+  <h3>内容总量<% if (stats.current) { %> · 本期 <%= stats.current.season.name %><% } %></h3>
+  <% if (stats.current) { const cur = stats.current; %>
+    <div class="stat-grid">
+      <p class="stat"><span class="stat-num"><%= cur.lineups %></span><span class="stat-label">完整阵容图</span></p>
+      <p class="stat"><span class="stat-num"><%= cur.prelims %></span><span class="stat-label">初步图</span></p>
+      <p class="stat"><span class="stat-num"><%= cur.players %></span><span class="stat-label">本期参赛成员</span></p>
+      <p class="stat"><span class="stat-num"><%= cur.scores %></span><span class="stat-label">已交积分</span></p>
+      <p class="stat"><span class="stat-num"><%= cur.ratings %></span><span class="stat-label">本期投票</span></p>
+    </div>
+    <p class="muted small">
+      参赛 = 交了积分或有<strong>完整</strong>阵容图（初步图只作展示，不算参赛）。
+      打分截止：
+      <% if (stats.current.rateLockAt) { %><strong><%= fmt(stats.current.rateLockAt) %></strong>
+      <% } else { %>—<% } %>
+    </p>
+  <% } %>
+  <div class="stat-grid">
+    <p class="stat"><span class="stat-num"><%= t.lineups %></span><span class="stat-label">完整阵容图（全站）</span></p>
+    <p class="stat"><span class="stat-num"><%= t.prelims %></span><span class="stat-label">初步图（全站）</span></p>
+    <p class="stat"><span class="stat-num"><%= t.ratings %></span><span class="stat-label">评分票（全站）</span></p>
+    <p class="stat"><span class="stat-num"><%= t.scores %></span><span class="stat-label">交分记录（全站）</span></p>
+    <p class="stat"><span class="stat-num"><%= t.comments %></span><span class="stat-label">评论（全站）</span></p>
+  </div>
+  <p class="muted small">评论功能目前处于关闭状态（见 db.js 的 COMMENTS_ENABLED），这一格是历史存量。</p>
+</section>
+
+<%- include('partials/footer') %>

@@ -194,6 +194,43 @@ CREATE TABLE IF NOT EXISTS hero_guesses (
   UNIQUE (filename, slot)
 );
 
+-- ---------- 站点统计（2026-10-19 加）----------
+-- 只存**按天聚合**，不存原始访问日志：这个站一年也就几万次访问，真按条落库反而
+-- 让备份和查询都变重。三张表各管一件事，日界一律按北京时间（写入时算好 YYYY-MM-DD）。
+--
+-- `day` 不是 DATE 类型：SQLite 没有真正的日期类型，统一存 'YYYY-MM-DD' 字符串，
+-- 比较和 GROUP BY 都按字典序，正好也是时间序。跨日/跨时区的换算只在 db.js 一处做。
+
+-- 成员活跃：一人一天一行。DAU = 当天 COUNT(*)；WAU/MAU = 区间内 COUNT(DISTINCT user_id)。
+-- 这也是「5 分钟内在线」的来源（last_at）。
+CREATE TABLE IF NOT EXISTS activity_daily (
+  day     TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  hits    INTEGER NOT NULL DEFAULT 1,
+  last_at TEXT NOT NULL,
+  PRIMARY KEY (day, user_id)
+);
+
+-- 游客：一个匿名浏览器一天一行。vid 是 cookie 里的随机 UUID（见 app.js），
+-- **不存 IP、不存 UA** —— 只需要"来过几个浏览器"，不需要知道是谁。
+-- 成员不重复记这里：他们的唯一性由 activity_daily 管。
+CREATE TABLE IF NOT EXISTS visitor_daily (
+  day     TEXT NOT NULL,
+  vid     TEXT NOT NULL,
+  hits    INTEGER NOT NULL DEFAULT 1,
+  last_at TEXT NOT NULL,
+  PRIMARY KEY (day, vid)
+);
+
+-- 页面热度：按"页面种类"聚合（/u/:uid、/hero/:key、/seasons/:id 都归成一类，
+-- 否则一个用户一个 URL 会把这张表撑成原始日志）。成员和游客一起计。
+CREATE TABLE IF NOT EXISTS page_daily (
+  day  TEXT NOT NULL,
+  page TEXT NOT NULL,
+  hits INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (day, page)
+);
+
 -- 常用索引
 CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
 CREATE INDEX IF NOT EXISTS idx_guesses_filename ON hero_guesses(filename);
@@ -206,3 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_entry ON comments(entry_id);
 -- 游客取 /uploads 下的图时**逐文件查库**（app.js 的 canSeeUpload）：一期阵容墙一页
 -- 要问几十次，所以给这个平时只按 entry_id 用的列补一条索引。
 CREATE INDEX IF NOT EXISTS idx_lineup_filename ON lineup_images(filename);
+-- 统计页永远按区间查（近 7 天 / 近 30 天），day 上的索引是主力；
+-- activity_daily 的主键已经以 day 开头，(day, user_id) 的索引就是它，不用再建。
+CREATE INDEX IF NOT EXISTS idx_visitor_day ON visitor_daily(day);
+CREATE INDEX IF NOT EXISTS idx_page_day    ON page_daily(day);
