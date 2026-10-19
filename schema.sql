@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS lineup_images (
   id         INTEGER PRIMARY KEY,
   entry_id   INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
   filename   TEXT NOT NULL,
+  -- 初步阵容图（2026-10-18 加的赛制）：周二 12:00–周三 12:00 传的那张**只作展示**，
+  -- 不做识别、不计入武将数据、不算参赛；周三 12:00 后传完整阵容图会覆盖它。
+  -- 0 = 完整阵容图（老数据默认 0，行为不变），1 = 初步图。
+  is_preliminary INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

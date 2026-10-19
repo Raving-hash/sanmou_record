@@ -65,6 +65,17 @@ db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   if (!cols.includes('skill')) db.exec(`ALTER TABLE heroes ADD COLUMN skill TEXT`);
 }
 
+// 初步阵容图（2026-10-18 加的赛制改动）：周二 12:00–周三 12:00 传的那张**只作展示**，
+// 不做识别、不计入武将数据、不算参赛；周三 12:00 之后的完整阵容图会把它覆盖掉。
+// 判别就靠这一列：0 = 完整阵容图（老数据默认也是 0，行为不变），1 = 初步图。
+// 查询"第一张图"的地方必须带 `AND is_preliminary = 0`（见下面的 FIRST_IMG）。
+{
+  const cols = db.prepare(`PRAGMA table_info(lineup_images)`).all().map((c) => c.name);
+  if (!cols.includes('is_preliminary')) {
+    db.exec(`ALTER TABLE lineup_images ADD COLUMN is_preliminary INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 // R4 改口径（2026-10-17 用户：「上传积分不需要再上传截图了，直接填写积分就可以」）：
 // **积分截图从必填变成可选**，而分数和提交时间仍然同生共死。
 // SQLite **改不了 CHECK**（不像加列那样 ALTER 一句就行），只能整表重建 ——
@@ -224,8 +235,11 @@ db.getOrCreateEntry = (seasonId, userId) => {
   return db.findEntry(seasonId, userId);
 };
 
+// 完整图永远排在初步图前面：模板（阵容墙、纠错面板）默认拿 images[0] 当"卡上那张"，
+// 万一库里同时留着两种（理论上不会 —— 传完整图时会把初步图删掉），也该展示完整那张。
 db.getLineupImages = (entryId) =>
-  db.prepare(`SELECT * FROM lineup_images WHERE entry_id=? ORDER BY id`).all(entryId);
+  db.prepare(`SELECT * FROM lineup_images WHERE entry_id=?
+              ORDER BY is_preliminary ASC, id`).all(entryId);
 
 db.getLineupImage = (id) => db.prepare(`SELECT * FROM lineup_images WHERE id=?`).get(id);
 
@@ -344,9 +358,13 @@ db.decideGuess = (filename, slot, { key = null, source, otherName = null }) =>
 
 // 还没识别过的阵容图（启动时补跑那些进程重启前没轮到、或当时失败的）。
 // 判据是"这张图在 hero_guesses 里一行都没有"。
+// ★ **只补完整阵容图**：初步图（周二到周三那一段）明确"不做识图"，进程重启不能把
+//   这条规矩绕过去 —— 排除在这里，而不是让 recognize-worker 自己去判阶段
+//   （阶段性是上传那一刻定下的，之后时间再走也不该补跑）。
 db.filenamesMissingGuesses = () => db.prepare(`
   SELECT DISTINCT li.filename, li.entry_id FROM lineup_images li
-  WHERE NOT EXISTS (SELECT 1 FROM hero_guesses g WHERE g.filename = li.filename)`).all();
+  WHERE li.is_preliminary = 0
+    AND NOT EXISTS (SELECT 1 FROM hero_guesses g WHERE g.filename = li.filename)`).all();
 
 // 还没跑过本地 OCR 的阵容图。
 //
@@ -569,7 +587,8 @@ db.getSeasonHeroData = (seasonId, editableEntryIds) => {
     JOIN entries e ON e.id = g.entry_id
     WHERE e.season_id = ?
       AND g.filename = (SELECT li.filename FROM lineup_images li
-                        WHERE li.entry_id = g.entry_id ORDER BY li.id LIMIT 1)
+                        WHERE li.entry_id = g.entry_id AND li.is_preliminary = 0
+                        ORDER BY li.id LIMIT 1)
     ORDER BY h.sort`).all(seasonId);
   for (const r of rows) {
     if (!confirmed.has(r.entry_id)) confirmed.set(r.entry_id, []);
@@ -739,10 +758,14 @@ db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
   return sorted.sort((a, b) => rankOf(a) - rankOf(b));
 };
 
-// 还没交积分的启用成员（R12：被禁用的不列出）
+// 还没交积分的启用成员（R12：被禁用的不列出）。
+// `lineup_uploaded` 只认**完整**阵容图；`lineup_any` 是"有任何图"（含初步图）。
+// 两个分开报，页面上才能把"已传阵容"和"只传了初步图"说清楚。
 db.getNotSubmitted = (seasonId) => db.prepare(`
   SELECT u.user_id AS uid, u.nickname, e.id AS entry_id, e.lineup_note,
-         EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id) AS lineup_uploaded
+         EXISTS (SELECT 1 FROM lineup_images li
+                 WHERE li.entry_id = e.id AND li.is_preliminary = 0) AS lineup_uploaded,
+         EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id) AS lineup_any
   FROM users u
   LEFT JOIN entries e ON e.user_id = u.id AND e.season_id = ?
   WHERE u.is_disabled = 0 AND (e.id IS NULL OR e.score IS NULL)
@@ -833,20 +856,33 @@ db.isRateLocked = (season) => {
 // 两边才不会一个按积分排、一个写着"按均分"。
 db.isWallByScore = (season) => !!season && (season.status === 'settled' || db.isRateLocked(season));
 
-// ---------- 阵容上传的窗口（2026-10-16 用户加的设定）----------
+// ---------- 阵容上传的窗口（2026-10-16 加，2026-10-18 改口径）----------
 //
-// 规矩：**每期开期后的第一个周三 12:00 才开放上传，开了以后一直到结算都能传。**
-// 用户的原话是"每周三 12 点以前不允许上传阵容"。开放时刻和打分截止是同一套算法，
-// 只差一个 weekday —— 所以共用上面的 nextNoonBJ，别抄第二份。
+// 现行规矩（用户 2026-10-18 定的）分两段：
+//   ① **周二 12:00 起**可以上传「初步阵容图」—— 只作展示：**不做识别、不计入任何武将数据**，
+//      也**不算参赛**（参赛仍然要有完整阵容图或积分，见下面的 STATS_SQL）；
+//      从此时刻起也就可以打分了（打分本来就没有单独的开放时刻：有图可看就能投）。
+//   ② **周三 12:00 起**是「完整阵容图」窗口 —— 这时再传一张，会**覆盖**之前那张初步图
+//      （连同 R2 上的对象一起删掉，见 routes/main.js 的 POST /lineup）。
+//      完整图才进识别队列、才进武将统计。
+//
+// 三段共用 nextNoonBJ，只差一个 weekday —— 别抄第二份算法。
 //
 // ⚠️ 这里有个和打分一模一样的坑，`/admin` 必须把算出来的时刻摆给管理员看：
-//    **周三 12:00 之后开期的话，开放时刻会顺延到下周三 12:00** ——
-//    等于整整一周谁都不能传阵容。开期前就能看见，比开完才发现强。
-const OPEN_WEEKDAY = 3;                   // 3 = 周三
+//    **周三 12:00 之后开期的话，两个时刻都会顺延到下周** —— 等于整整一周谁都不能
+//    传阵容。开期前就能看见，比开完才发现强。
+const OPEN_WEEKDAY = 2;                   // 2 = 周二：初步阵容窗口打开（同时可以打分）
+const FULL_WEEKDAY = 3;                   // 3 = 周三：完整阵容窗口打开
 
 db.getUploadOpenAt = (season) => {
   const created = parseCreated(season);
   return created === null ? null : nextNoonBJ(created, OPEN_WEEKDAY);
+};
+
+// 完整阵容图从这一刻起可以传（同时意味着"初步图已经可以覆盖了"）。
+db.getFullUploadAt = (season) => {
+  const created = parseCreated(season);
+  return created === null ? null : nextNoonBJ(created, FULL_WEEKDAY);
 };
 
 // 上传窗口还没开。**只按时间判**，不看 status —— 和 isRateLocked 同一个道理：
@@ -854,6 +890,21 @@ db.getUploadOpenAt = (season) => {
 db.isLineupClosed = (season) => {
   const at = db.getUploadOpenAt(season);
   return at !== null && Date.now() < at;
+};
+
+// 现在这一期处在哪个上传阶段。路由 / 模板 / 签发令牌**都读这一个函数**，
+// 免得一处按周二判、另一处还写着周三。
+//   · 'closed'      —— 还没到周二 12:00，谁都不能传；
+//   · 'preliminary' —— 周二 12:00 到周三 12:00：只能传初步图（只展示、不识别、不进数据）；
+//   · 'full'        —— 周三 12:00 之后：传的是完整图，会覆盖掉那张初步图。
+// created_at 无效（null）时按 'closed' 处理：宁可不让人传，也不要造出没有时间依据的图。
+db.getUploadPhase = (season) => {
+  const open = db.getUploadOpenAt(season);
+  if (open === null) return 'closed';
+  const now = Date.now();
+  if (now < open) return 'closed';
+  const full = db.getFullUploadAt(season);
+  return full !== null && now < full ? 'preliminary' : 'full';
 };
 
 // 没人打过分时的形状。模板直接读，不用到处判空；冻结只是提醒别改它。
@@ -1063,6 +1114,8 @@ db.isImageInUse = (filename) => !!db.prepare(
 // （胜场 0、胜率 0%），胜率的分母也从"交过分的期数"变成"到过场的期数"。
 // 分数那三列照旧只认交过分的行：AVG / MAX 天然跳过 NULL，MIN(final_rank) 也是。
 // 只传阵容、一场没交分的人这三列全是 NULL，模板印成「—」。
+// ★ 2026-10-18 起 **初步阵容图不算参赛**（`li.is_preliminary = 0`）：那张图只作展示，
+//   用户的原话是"不纳入数据"。没换完整图就等于没真正到场，不该进胜率分母。
 const STATS_SQL = `
   SELECT u.user_id AS uid, u.nickname,
          u.created_at                                   AS joined_at,
@@ -1076,7 +1129,8 @@ const STATS_SQL = `
   JOIN seasons s ON s.id = e.season_id AND s.status = 'settled'
   JOIN users   u ON u.id = e.user_id
   WHERE (e.score IS NOT NULL
-         OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))`;
+         OR EXISTS (SELECT 1 FROM lineup_images li
+                    WHERE li.entry_id = e.id AND li.is_preliminary = 0))`;
 // ⚠️ 上面那个 WHERE 的括号不能省：getUserStats 会往后面接 `AND u.id = ?`，
 // 少了括号就是 `A OR (B AND u.id=?)`，一查个人页会把**全站**交过分的人一起捞出来。
 
@@ -1166,11 +1220,13 @@ db.getUserHistory = (userPk) => db.prepare(`
   SELECT s.id, s.name, s.created_at, e.score, e.final_rank, e.is_winner,
          (SELECT COUNT(*) FROM entries x WHERE x.season_id = s.id
             AND (x.score IS NOT NULL
-                 OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = x.id))) AS players
+                 OR EXISTS (SELECT 1 FROM lineup_images li
+                            WHERE li.entry_id = x.id AND li.is_preliminary = 0))) AS players
   FROM entries e JOIN seasons s ON s.id = e.season_id
   WHERE e.user_id = ? AND s.status = 'settled'
     AND (e.score IS NOT NULL
-         OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))
+         OR EXISTS (SELECT 1 FROM lineup_images li
+                    WHERE li.entry_id = e.id AND li.is_preliminary = 0))
   ORDER BY s.id DESC`).all(userPk);
 
 // 历史赛期列表（/history 和 /admin 都用它）。
@@ -1194,7 +1250,8 @@ db.getHistory = () => {
   const countP = db.prepare(`
     SELECT COUNT(*) AS n FROM entries x WHERE x.season_id = ?
       AND (x.score IS NOT NULL
-           OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = x.id))`);
+           OR EXISTS (SELECT 1 FROM lineup_images li
+                      WHERE li.entry_id = x.id AND li.is_preliminary = 0))`);
   return seasons.map((s) => ({ ...s, winners: bySeason.get(s.id) || [], players: countP.get(s.id).n }));
 };
 
@@ -1277,8 +1334,12 @@ db.HERO_MIN_SAMPLE = HERO_MIN_SAMPLE;
 db.RECORD_MIN_PLAYS = RECORD_MIN_PLAYS;
 db.RECORD_MIN_RATERS = RECORD_MIN_RATERS;
 
+// 「卡上第一张**完整**阵容图」。初步图（is_preliminary=1）不算 —— 它不做识别，
+// 拿它当 FIRST_IMG 只会把整套武将查询变成空（而且哪天 preliminary 上意外有了
+// hero_guesses 行，还会把只展示的图算进统计里，正是用户明确不要的）。
 const FIRST_IMG = `(SELECT li.filename FROM lineup_images li
-                    WHERE li.entry_id = g.entry_id ORDER BY li.id LIMIT 1)`;
+                    WHERE li.entry_id = g.entry_id AND li.is_preliminary = 0
+                    ORDER BY li.id LIMIT 1)`;
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const displayHeroName = (h) => `${h.variant || ''}${h.name}`;
@@ -1380,7 +1441,8 @@ const enrichEntryCards = (entryIds, viewerId) => {
 
   const images = new Map();
   for (const img of db.prepare(
-    `SELECT * FROM lineup_images WHERE entry_id IN (${ph}) ORDER BY id`).all(...entryIds)) {
+    `SELECT * FROM lineup_images WHERE entry_id IN (${ph})
+     ORDER BY is_preliminary ASC, id`).all(...entryIds)) {
     if (!images.has(img.entry_id)) images.set(img.entry_id, []);
     images.get(img.entry_id).push(img);
   }
@@ -1466,6 +1528,7 @@ db.getHeroPairLineups = (keys, { sameUnit = false, viewerId = null } = {}) => {
 };
 
 // 个人页的阵容档案：该用户所有**至少有一张阵容图**的 entry（含进行中）。
+// 初步图也列（它本来就在阵容墙上展示），卡上由模板标「初步」—— 只是不进数据统计。
 db.getUserLineupArchive = (userPk) => {
   const ids = db.prepare(`
     SELECT e.id FROM entries e
@@ -1481,7 +1544,8 @@ db.getUserRecentForm = (userPk, limit = 5) => db.prepare(`
   SELECT s.id, s.name, s.created_at, e.score, e.final_rank, e.is_winner,
          CASE WHEN e.id IS NULL THEN 0
               WHEN e.score IS NOT NULL THEN 1
-              WHEN EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id) THEN 1
+              WHEN EXISTS (SELECT 1 FROM lineup_images li
+                           WHERE li.entry_id = e.id AND li.is_preliminary = 0) THEN 1
               ELSE 0 END AS participated
   FROM seasons s
   LEFT JOIN entries e ON e.season_id = s.id AND e.user_id = ?
@@ -1565,7 +1629,8 @@ db.getRecords = () => {
     JOIN users   u ON u.id = e.user_id
     WHERE s.status = 'settled'
       AND (e.score IS NOT NULL
-           OR EXISTS (SELECT 1 FROM lineup_images li WHERE li.entry_id = e.id))
+           OR EXISTS (SELECT 1 FROM lineup_images li
+                      WHERE li.entry_id = e.id AND li.is_preliminary = 0))
     ORDER BY e.user_id, s.id ASC
   `).all();
   const byUser = new Map();
@@ -1681,6 +1746,7 @@ db.getSeasonHighlights = (seasonId) => {
 db.EYE_BASE = EYE_BASE;
 db.EYE_GAIN = EYE_GAIN;
 db.OPEN_WEEKDAY = OPEN_WEEKDAY;
+db.FULL_WEEKDAY = FULL_WEEKDAY;
 db.LOCK_WEEKDAY = LOCK_WEEKDAY;
 db.LOCK_HOUR_BJ = LOCK_HOUR_BJ;
 

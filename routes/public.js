@@ -123,10 +123,15 @@ router.get('/rules', (req, res) => {
     eyeRows: db.RATE_VALUES.slice().sort((a, b) => b - a)
       .map((value) => ({ value, delta: db.eyeDelta(value) })),
     openWeekdayName: WEEKDAYS[db.OPEN_WEEKDAY],
+    // 初步阵容窗口（周二）→ 完整阵容窗口（周三）→ 打分截止（周四），
+    // 三个周几都从 db 的常数取，别在文案里写死。
+    fullWeekdayName: WEEKDAYS[db.FULL_WEEKDAY],
     lockWeekdayName: WEEKDAYS[db.LOCK_WEEKDAY],
     lockHour: db.LOCK_HOUR_BJ,
     season,
     uploadOpenAt: season ? db.getUploadOpenAt(season) : null,
+    fullUploadAt: season ? db.getFullUploadAt(season) : null,
+    uploadPhase: season ? db.getUploadPhase(season) : 'closed',
     rateLockAt: season ? db.getRateLockAt(season) : null,
   });
 });

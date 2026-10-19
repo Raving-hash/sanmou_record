@@ -270,7 +270,11 @@ router.get('/', (req, res) => {
       canRate,
       rateLockAt,
       // 本周待办要用的几个状态（views/home.ejs 的 todo 卡）。
+      // uploadPhase：closed / preliminary / full —— 三段的判定只在 db.getUploadPhase 一处，
+      // 模板不自己比时间（周二初步窗口 → 周三完整窗口）。
       uploadOpenAt: db.getUploadOpenAt(season),
+      fullUploadAt: db.getFullUploadAt(season),
+      uploadPhase: db.getUploadPhase(season),
       uploadClosed: db.isLineupClosed(season),
       myRatingCount: db.countMyRatings(season.id, req.user.id),
       notSubmitted: db.getNotSubmitted(season.id),
@@ -316,11 +320,16 @@ router.get('/lineup', (req, res) => {
     entry,
     images: entry ? db.getLineupImages(entry.id) : [],
     max: MAX_LINEUP,
-    // 上传窗口（2026-10-16 加的设定）：每期开期后的第一个周三 12:00 才开放。
+    // 上传窗口（2026-10-18 改口径）：周二 12:00 起可传「初步图」（只作展示），
+    // 周三 12:00 起传的「完整图」会覆盖它。三段判定只在 db.getUploadPhase 一处。
     // 关着的时候页面不出上传组件。但**真正拦人的是下面 POST 那一道** ——
     // 这里只是别让玩家挑完图才被弹回来。
+    uploadPhase: db.getUploadPhase(season),
     uploadClosed: db.isLineupClosed(season),
     uploadOpenAt: db.getUploadOpenAt(season),
+    fullUploadAt: db.getFullUploadAt(season),
+    // 现在这幅图是初步图还是完整图（决定页面上那句说明和「覆盖」提示怎么写）。
+    hasFullImage: entry ? db.getLineupImages(entry.id).some((i) => !i.is_preliminary) : false,
   });
 });
 
@@ -342,9 +351,15 @@ router.post('/lineup', async (req, res) => {
   }
 
   // ★ 上传窗口。**拦人的那一道在这儿，不在界面上** —— 藏掉表单挡不住直接 POST。
-  //   判据只看时间（见 db.isLineupClosed）。打回时**必须把对象删掉**：
+  //   判据只看时间（见 db.getUploadPhase）。打回时**必须把对象删掉**：
   //   浏览器已经把字节传到 R2 了，不删就是一堆没入库的孤儿（r2-gc 才收得掉）。
-  if (db.isLineupClosed(season)) {
+  //
+  //   2026-10-18 起窗口分两段：周二 12:00–周三 12:00 传的是「初步图」（只展示、
+  //   不识别、不进数据）；周三 12:00 之后传的是「完整图」，会覆盖掉那张初步图。
+  //   阶段**由服务端按时刻判定**，不收客户端传来的任何标记 —— 否则手搓一个 POST
+  //   就能把初步图洗成完整图。
+  const phase = db.getUploadPhase(season);
+  if (phase === 'closed') {
     await removeFiles(keys);
     req.session.flash = {
       type: 'err',
@@ -352,9 +367,12 @@ router.post('/lineup', async (req, res) => {
     };
     return res.redirect('/lineup');
   }
+  const preliminary = phase === 'preliminary';
 
   const entry = db.getOrCreateEntry(season.id, req.user.id);
   const existing = db.getLineupImages(entry.id);
+  const prelims = existing.filter((i) => i.is_preliminary);
+  const fulls = existing.filter((i) => !i.is_preliminary);
 
   // 令牌没过（过期、被改过、或者根本不是这台服务器发的）→ 整批打回。
   // 已经验过的那几个也一并删掉：它们进不了库，留着就是孤儿（r2-gc 也会清，
@@ -384,25 +402,68 @@ router.post('/lineup', async (req, res) => {
   const fresh = ok.filter((k) => !db.isImageInUse(k));
   const dup = ok.length - fresh.length;
 
-  if (existing.length + fresh.length > MAX_LINEUP) {
+  // 完整图窗口里，如果提交的正是**之前那张初步图的 key**（回退按钮重发表单就会这样），
+  // 不新增一行，而是把旧行原地升成完整图 —— 否则 fresh 为空、下面又会把初步图删掉，
+  // 结果是一张图都不剩。
+  const promote = preliminary ? [] : prelims.filter((p) => ok.includes(p.filename));
+  // 真正要被覆盖掉的旧初步图：只有在**这次确实传上了完整图**时才删。
+  // 只改阵容说明（没选文件）也把初步图删掉，等于替玩家把图撤了，不是覆盖的意思。
+  const replaced = preliminary || (!fresh.length && !promote.length)
+    ? []
+    : prelims.filter((p) => !promote.includes(p));
+
+  if (preliminary) {
+    // 初步窗口里和从前一样：每期一张，换图先删旧的（初步图本身没有数据，删了不可惜）。
+    if (existing.length + fresh.length > MAX_LINEUP) {
+      await removeFiles(keys);
+      req.session.flash = { type: 'err', msg: '每期只能传一张阵容图，要换请先删掉现在这张' };
+      return res.redirect('/lineup');
+    }
+  } else if (fulls.length + fresh.length + promote.length > MAX_LINEUP) {
+    // 完整图窗口：手上有完整图就传不进第二张 —— 和从前一样先删再传。
+    // 只有初步图时例外，那是**覆盖**（见下面的事务）。
     await removeFiles(keys);
-    req.session.flash = { type: 'err', msg: '每期只能传一张阵容图，要换请先删掉现在这张' };
+    req.session.flash = {
+      type: 'err',
+      msg: fulls.length
+        ? '每期只能传一张完整阵容图，要换请先删掉现在这张'
+        : '每期只能传一张阵容图，要换请先删掉现在这张',
+    };
     return res.redirect('/lineup');
   }
 
-  const ins = db.prepare('INSERT INTO lineup_images (entry_id, filename) VALUES (?, ?)');
+  const ins = db.prepare(
+    'INSERT INTO lineup_images (entry_id, filename, is_preliminary) VALUES (?, ?, ?)');
+  const del = db.prepare('DELETE FROM lineup_images WHERE id=?');
+  const setFull = db.prepare('UPDATE lineup_images SET is_preliminary=0 WHERE id=?');
   db.transaction(() => {
-    for (const n of fresh) ins.run(entry.id, n);
+    for (const p of promote) setFull.run(p.id);
+    for (const p of replaced) del.run(p.id);
+    for (const n of fresh) ins.run(entry.id, n, preliminary ? 1 : 0);
     db.prepare('UPDATE entries SET lineup_note=? WHERE id=?').run(note || null, entry.id);
   })();   // 只改阵容不动 score_submitted_at，提交时间不变
+
+  // 覆盖掉的旧图要连 R2 上的对象一起删 —— 不删就是一张没人引用的孤儿图。
+  // 和别处的删除一样不 await（删远端不该拖着用户等）。
+  if (replaced.length) removeFiles(replaced.map((p) => p.filename));
 
   // 排队做阵容识别。**只推文件名，不在这儿算** —— 一张图约 2.5 秒，
   // 同步跑会把请求卡住（详见 recognize-worker.js 的头注释）。
   // 结果写进 hero_guesses，玩家在阵容卡上确认（见 views/partials/reco.ejs）。
-  fresh.forEach((n) => reco.enqueue(n, entry.id));
+  // ★ **初步图不入队**（用户 2026-10-18 的原话："这个不做识图"）。
+  //   升成完整图的那张则要补进队（它当初传的时候是初步图，没认过）。
+  if (!preliminary) {
+    [...fresh, ...promote.map((p) => p.filename)].forEach((n) => reco.enqueue(n, entry.id));
+  }
 
   const parts = [];
-  if (fresh.length) parts.push(`已上传 ${fresh.length} 张阵容截图`);
+  if (fresh.length) {
+    parts.push(preliminary
+      ? '已上传初步阵容图（只作展示；周三 12:00 后传完整阵容会覆盖它）'
+      : `已上传 ${fresh.length} 张完整阵容截图`);
+  }
+  if (promote.length) parts.push('已把初步阵容图换成完整阵容图');
+  if (replaced.length) parts.push('之前的初步阵容图已覆盖');
   if (dup) parts.push(`${dup} 张已经在用，跳过`);
   req.session.flash = {
     type: 'ok',

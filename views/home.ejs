@@ -28,12 +28,24 @@
           <% } else { %>还没填游戏名 —— Windows 端 OCR 录分认不出你，<a href="/password#game-name">去设置</a><% } %>
         </span>
       </li>
-      <li class="todo-item <%= me_images.length ? 'is-done' : (uploadClosed ? 'is-off' : 'is-todo') %>">
-        <span class="todo-state"><%= me_images.length ? '已传' : (uploadClosed ? '未开放' : '待办') %></span>
+      <%# 阵容那一条（2026-10-18 改赛制）：周二 12:00 起传的是**初步图**（只展示、
+          不识别、不算参赛），周三 12:00 后传**完整图**才进数据、才算参赛。
+          所以"有图"不等于"这周的活干完了"：只传了初步图仍然算待办。 %>
+      <% const myFullImage = me_images.some((i) => !i.is_preliminary);
+         const myPrelimOnly = !myFullImage && me_images.length > 0; %>
+      <li class="todo-item <%= myFullImage ? 'is-done' : (uploadClosed ? 'is-off' : 'is-todo') %>">
+        <span class="todo-state"><%= myFullImage ? '已传' : (myPrelimOnly ? '初步' : (uploadClosed ? '未开放' : '待办')) %></span>
         <span class="todo-main">
-          <% if (me_images.length) { %>本期阵容已上传（<a href="/lineup">查看/更换</a>）
+          <% if (myFullImage) { %>本期完整阵容已上传（<a href="/lineup">查看/更换</a>）
+          <% } else if (myPrelimOnly && uploadPhase === 'preliminary') { %>已传初步阵容（只作展示、不算参赛）；
+            <strong><%= fullUploadAt ? fmt(fullUploadAt) : '周三 12:00' %></strong> 后可传完整阵容
+          <% } else if (myPrelimOnly) { %>只传了初步阵容 —— <a href="/lineup">去传完整阵容</a>（会覆盖它、这才算参赛）
           <% } else if (uploadClosed) { %>阵容要到 <strong><%= uploadOpenAt ? fmt(uploadOpenAt) : '—' %></strong> 才开放
-          <% } else { %>还没传阵容，<a href="/lineup">去上传</a><% } %>
+          <% } else { %>还没传阵容，<a href="/lineup">去上传</a>
+            <% if (uploadPhase === 'preliminary' && fullUploadAt) { %>
+              —— 现在传的是<strong>初步图</strong>（只作展示），<%= fmt(fullUploadAt) %> 后换完整图
+            <% } %>
+          <% } %>
         </span>
       </li>
       <li class="todo-item <%= !canRate ? 'is-off' : (myRatingCount ? 'is-done' : 'is-todo') %>">
@@ -152,14 +164,16 @@
           <%- include('partials/eye', { uid: p.uid }) %>
           <% if (p.lineup_uploaded) { %>
             <span class="badge badge-ok">已传阵容</span>
+          <% } else if (p.lineup_any) { %>
+            <span class="badge badge-wait" title="初步阵容只作展示，不算参赛；周三 12:00 后传完整阵容才算">只传了初步图</span>
           <% } else { %>
             <span class="badge badge-wait">还没传阵容</span>
           <% } %>
         </li>
       <% }) %>
     </ul>
-    <p><small class="muted">没交积分就拿不到名次（胜者是积分前两名），但传了阵容的<strong>仍算参赛</strong>、
-      计入参赛次数和胜率。</small></p>
+    <p><small class="muted">没交积分就拿不到名次（胜者是积分前两名），但传了<strong>完整阵容</strong>的
+      仍算参赛、计入参赛次数和胜率。初步阵容图只作展示，不算参赛。</small></p>
   <% } %>
 
 <% } else { %>

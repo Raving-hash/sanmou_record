@@ -1192,6 +1192,18 @@ nav ul li,
   font-size: var(--yw-fs-lg);
   color: var(--yw-gold);
 }
+/* 「初步」小章（2026-10-18）：周二 12:00–周三 12:00 的阵容图只作展示，
+   不识别、不进数据、不算参赛。语义是"还没定下来"，所以用虚框而不是实心红章。
+   顶栏只有 228px（手机上 150px），字号/内边距都收紧，别把昵称挤到下一行。 */
+.shot-prelim {
+  font-size: var(--yw-fs-2xs);
+  line-height: 1.2;
+  padding: 0.04rem 0.34rem;
+  border-radius: 4px;
+  border: 1px dashed rgba(200, 170, 110, 0.55);
+  color: var(--yw-gold-lt);
+  white-space: nowrap;
+}
 .shot-who {
   font-weight: 600;
   text-decoration: none;

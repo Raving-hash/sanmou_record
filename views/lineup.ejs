@@ -5,12 +5,29 @@
   <p class="muted">每期一张，支持 jpg / png / webp，在浏览器里压缩后上传</p>
 </hgroup>
 
+<%# 上传窗口（2026-10-18 改口径，见 db.getUploadPhase）：
+     · 周二 12:00 之前 —— 关着；
+     · 周二 12:00–周三 12:00 —— 初步阵容窗口：传的图**只作展示**，不识别、不进数据；
+     · 周三 12:00 之后 —— 完整阵容窗口：传的完整图会**覆盖**掉那张初步图。
+     页面不出组件不等于没人能传，**拦人的是服务端那一道**（POST /lineup）。
+     已传的图仍然列在下面、仍然能删：窗口一关连传错的都撤不掉，那才叫坑。 %>
 <% if (uploadClosed) { %>
-  <%# 上传窗口没开（每期开期后第一个周三 12:00 才开，见 db.getUploadOpenAt）。
-       页面不出上传组件，但**拦人的是服务端那一道** —— 这里只是别让玩家白挑图。
-       已传的图仍然列在下面、仍然能删：窗口一关就连传错的都撤不掉，那才叫坑。 %>
   <p class="flash flash-err">阵容要到 <strong><%= fmt(uploadOpenAt) %></strong> 才开放上传。
     现在还不能传新的。</p>
+<% } else if (uploadPhase === 'preliminary') { %>
+  <p class="flash flash-ok">
+    现在是<strong>初步阵容</strong>窗口（到 <strong><%= fmt(fullUploadAt) %></strong> 为止）：
+    这张图只作展示，<strong>不做识别、不计入武将数据</strong>，也不算参赛。
+    这期间大家已经可以打分了；<strong><%= fmt(fullUploadAt) %></strong> 之后传完整阵容图
+    会自动覆盖它。
+  </p>
+<% } else { %>
+  <p class="flash flash-ok">
+    <strong>完整阵容</strong>窗口已开放：现在传的图会进识别、计入武将统计。
+    <% if (images.some((i) => i.is_preliminary)) { %>
+      这次上传会<strong>覆盖</strong>下面那张初步阵容图。
+    <% } %>
+  </p>
 <% } %>
 
 <h3>已上传（<%= images.length %> / <%= max %>）</h3>
@@ -23,6 +40,12 @@
         <a href="<%= imgUrl(img.filename) %>" target="_blank" rel="noopener">
           <img src="<%= thumbUrl(img.filename) %>" alt="阵容截图" loading="lazy">
         </a>
+        <% if (img.is_preliminary) { %>
+          <p><span class="badge badge-wait"
+                   title="初步阵容：只作展示，不做识别、不计入武将数据，也不算参赛；周三 12:00 后会被完整阵容图覆盖">初步阵容</span></p>
+        <% } else { %>
+          <p><span class="badge badge-ok">完整阵容</span></p>
+        <% } %>
         <form method="post" action="/lineup/<%= img.id %>/delete">
           <button type="submit" class="outline secondary btn-sm">删除</button>
         </form>
@@ -38,16 +61,28 @@
      ⚠ 文件 input **不能有 name**：没有名字它才不参与提交。这是"字节不再经手服务端"的
      结构性保证，不是靠 input.value='' 之类的技巧。同一条也见 views/score.ejs。 %>
 <% if (!uploadClosed) { %>
+<%# 文件框什么时候出：
+     · 初步窗口 —— 和从前一样，没图才出（换图先删）；
+     · 完整窗口 —— **没有完整图**就出。只有初步图时正是"覆盖"的入口，不能藏掉。 %>
+<% const canUpload = uploadPhase === 'preliminary' ? images.length < max : !hasFullImage; %>
 <form method="post" action="/lineup"
       data-upload-kind="lineup" data-key-field="images"
       data-upload-max-bytes="<%= maxOutBytes %>">
   <%# 每期只允许一张，所以传满了就不再出文件框（只剩"说明"还能改）。
        `multiple` 去掉、`data-max` 也就没意义了 —— 留着会让人以为还能多选。 %>
-  <% if (images.length < max) { %>
-    <label>上传阵容图
+  <% if (canUpload) { %>
+    <label><%= uploadPhase === 'preliminary' ? '上传初步阵容图' : '上传完整阵容图' %>
       <input type="file" accept="image/jpeg,image/png,image/webp"
-             data-max="<%= max - images.length %>">
-      <small class="muted">每期只能用一张，想换的话先把上面那张删掉</small>
+             data-max="<%= max - (uploadPhase === 'preliminary' ? images.length : 0) %>">
+      <small class="muted">
+        <% if (uploadPhase === 'preliminary') { %>
+          每期只能用一张，想换的话先把上面那张删掉
+        <% } else if (images.some((i) => i.is_preliminary)) { %>
+          这次上传会覆盖上面那张初步阵容图
+        <% } else { %>
+          每期只能用一张，想换的话先把上面那张删掉
+        <% } %>
+      </small>
     </label>
   <% } %>
   <label>阵容说明

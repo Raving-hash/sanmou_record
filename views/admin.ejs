@@ -41,11 +41,19 @@
       <%# 打分截止是按开期时间算出来的（每期开期后第一个周四 12:00），管理员要靠它决定何时结算 %>
       · 打分<% if (canRate) { %>截止 <strong><%= fmt(rateLockAt) %></strong>（<%= fmtLeft(rateLockAt - Date.now()) %>）<% } else { %>已于 <strong><%= fmt(rateLockAt) %></strong> 截止，可以结算了<% } %>
     </p>
-    <%# 开着期却传不了图，管理员得一眼看到原因，而不是收到"为什么传不上"的反馈再去查代码 %>
+    <%# 开着期却传不了图 / 只能传初步图，管理员得一眼看到原因，
+        而不是收到"为什么传不上"的反馈再去查代码。
+        2026-10-18 起分两段：周二 12:00 初步图、周三 12:00 完整图。 %>
     <% if (uploadClosed) { %>
       <p class="muted small">
-        ⏳ 阵容上传<strong>还没开放</strong> —— 要到 <strong><%= fmt(uploadOpenAt) %></strong>（<%= fmtLeft(uploadOpenAt - Date.now()) %>）才开。
-        在那之前玩家传不了阵容（打分不受影响）。
+        ⏳ 阵容上传<strong>还没开放</strong> —— 要到 <strong><%= fmt(uploadOpenAt) %></strong>（<%= fmtLeft(uploadOpenAt - Date.now()) %>）才开初步阵容图。
+        在那之前玩家传不了阵容（打分本来也要有图才能投）。
+      </p>
+    <% } else if (uploadPhase === 'preliminary') { %>
+      <p class="muted small">
+        📝 现在是<strong>初步阵容</strong>窗口：只作展示、不识别、不进数据、不算参赛。
+        到 <strong><%= fmt(fullUploadAt) %></strong>（<%= fmtLeft(fullUploadAt - Date.now()) %>）后玩家可以传完整阵容图，
+        并覆盖掉初步图。
       </p>
     <% } %>
   <% } %>
@@ -62,19 +70,21 @@
       注意：打分的截止点是按<strong>开期时间</strong>算的 —— 每期开期后遇到的第一个周四 12:00（北京）就封盘。
       现在开一期的话，打分截止在 <strong><%= fmt(nextLockAt) %></strong>（<%= fmtLeft(nextLockAt - Date.now()) %>）。
     </p>
-    <%# ⚠️ 这条比上面那条更要紧：上传开放时刻是"开期后遇到的第一个**周三** 12:00"，
-        所以**周三中午之后开期就会顺延到下周三** —— 等于整整一周所有人传不了阵容。
-        开期前就摆出来，比开完收到一堆"传不上"的反馈再回头查代码强得多。
-        是否要报警只看"离现在还有多远"：正常情形（周三中午前开期）顶多几小时，
-        超过一天就说明已经绕过去了。 %>
+    <%# ⚠️ 这条比上面那条更要紧：初步阵容的开放时刻是"开期后遇到的第一个**周二** 12:00"，
+        完整阵容是"第一个**周三** 12:00"。周二中午之后开期的话，两个时刻都会顺延到下周 ——
+        等于整整一周所有人传不了阵容。开期前就摆出来，比开完收到一堆"传不上"的反馈
+        再回头查代码强得多。是否要报警只看"离现在还有多远"：正常情形（周二中午前开期）
+        顶多几小时，超过一天就说明已经绕过去了。 %>
     <% const openGap = nextOpenAt - Date.now(); %>
     <p class="muted small">
-      阵容上传的开放时刻同理，按<strong>开期时间</strong>算：每期开期后遇到的第一个<strong>周三</strong> 12:00（北京）才开放，
-      之后一直到结算都能传。
-      现在开一期的话，要到 <strong><%= fmt(nextOpenAt) %></strong>（<%= fmtLeft(openGap) %>）才能传阵容。
+      阵容上传的开放时刻同理，按<strong>开期时间</strong>算：
+      每期开期后遇到的第一个<strong>周二</strong> 12:00（北京）开放<strong>初步阵容图</strong>（只作展示），
+      第一个<strong>周三</strong> 12:00 起传<strong>完整阵容图</strong>（覆盖初步图、才进数据）。
+      现在开一期的话，初步图要到 <strong><%= fmt(nextOpenAt) %></strong>（<%= fmtLeft(openGap) %>）才能传，
+      完整图要到 <strong><%= fmt(nextFullUploadAt) %></strong>。
       <% if (openGap > 86400000) { %>
         <br>⚠️ <strong>这个开放时刻已经是下周了</strong> —— 现在开期的话，中间这段时间谁都传不了阵容。
-        想避开就把开期时间挪到周三中午之前。
+        想避开就把开期时间挪到周二中午之前。
       <% } %>
     </p>
   <% } %>

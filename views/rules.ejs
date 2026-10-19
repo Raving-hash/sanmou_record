@@ -12,16 +12,22 @@
   <h3>一周怎么走</h3>
   <ol>
     <li>管理员开启一期（同一时间只有一期在进行）。</li>
-    <li>开期后第一个<strong><%= openWeekdayName %> <%= lockHour %>:00</strong>（北京时间）开放阵容上传，之后一直到结算都能传、能删。</li>
+    <li>开期后第一个<strong><%= openWeekdayName %> <%= lockHour %>:00</strong>（北京时间）开放<strong>初步阵容图</strong>上传，
+      同时就可以开始打分了。初步图只作展示：不做识别、不计入武将数据、也不算参赛。</li>
+    <li>开期后第一个<strong><%= fullWeekdayName %> <%= lockHour %>:00</strong>（北京时间）起可以上传<strong>完整阵容图</strong>；
+      传了完整图会<strong>覆盖</strong>之前那张初步图，完整图才进识别、计入统计、算参赛。</li>
     <li>开期后第一个<strong><%= lockWeekdayName %> <%= lockHour %>:00</strong>（北京时间）打分截止，之后不能再投、也不能改。</li>
     <li>管理员【结束本期】后名次和胜者定下来，写入历史战绩；结算后可以撤销，修正后再结算。</li>
   </ol>
   <% if (season) { %>
     <p class="muted small">
-      当前这期：阵容开放 <strong><%= uploadOpenAt ? fmt(uploadOpenAt) : '—' %></strong> ·
+      当前这期：初步阵容开放 <strong><%= uploadOpenAt ? fmt(uploadOpenAt) : '—' %></strong> ·
+      完整阵容开放 <strong><%= fullUploadAt ? fmt(fullUploadAt) : '—' %></strong> ·
       打分截止 <strong><%= rateLockAt ? fmt(rateLockAt) : '—' %></strong>。
-      <% if (uploadOpenAt && Date.now() < uploadOpenAt) { %>
+      <% if (uploadPhase === 'closed') { %>
         现在还没到上传时间，别急着挑图。
+      <% } else if (uploadPhase === 'preliminary') { %>
+        现在传的是初步图（只作展示），<strong><%= fullUploadAt ? fmt(fullUploadAt) : '—' %></strong> 之后换成完整图才进数据。
       <% } %>
     </p>
   <% } %>
@@ -30,8 +36,13 @@
 <article>
   <h3>阵容上传</h3>
   <ul>
-    <li>每期只允许<strong>一张</strong>阵容截图；传了之后想换，先把旧图删掉。</li>
-    <li>截图公开：登录的成员和游客的阵容墙都能看到；图存在图床，链接随机、猜不到。</li>
+    <li>每期只允许<strong>一张</strong>阵容截图。周二 12:00–周三 12:00 之间传的是<strong>初步阵容图</strong>：
+      只作展示，<strong>不做识别、不计入武将数据、也不算参赛</strong>。</li>
+    <li>周三 12:00 之后可以上传<strong>完整阵容图</strong>，它会<strong>覆盖</strong>之前那张初步图；
+      只有完整图才进识别、计入武将统计，也才让这一期算作参赛。</li>
+    <li>已经传了完整图还想换，先把旧图删掉再传。</li>
+    <li>截图公开：登录的成员和游客的阵容墙都能看到；图存在图床，链接随机、猜不到。
+      初步图在墙上会挂一枚「初步」小章。</li>
     <li>图片上传在浏览器里压缩后直传，需要开启 JavaScript；其余功能没有 JS 也能用。</li>
   </ul>
 </article>
@@ -46,8 +57,8 @@
     <li>结算后不能再改分；录错了找管理员先【撤销结算】。</li>
   </ul>
   <p class="muted small">
-    <strong>参赛 ≠ 交分</strong>：上传了阵容就算参赛，会计入参赛次数和胜率的分母；
-    但没有积分就没有名次。平均分 / 最高分只算交过积分的期。
+    <strong>参赛 ≠ 交分</strong>：上传了<strong>完整阵容图</strong>就算参赛，会计入参赛次数和胜率的分母；
+    只传初步图不算。没有积分就没有名次。平均分 / 最高分只算交过积分的期。
   </p>
 </article>
 
@@ -55,6 +66,8 @@
   <h3>成员互评</h3>
   <ul>
     <li>五档固定：<strong><%= rateValues.join(' / ') %></strong>。互评<strong>不进名次</strong>，只用于阵容墙排序和慧眼等级。</li>
+    <li>从<strong><%= openWeekdayName %> <%= lockHour %>:00</strong>（初步阵容开放）起就能打分 ——
+      初步图也可以被打分；到<strong><%= lockWeekdayName %> <%= lockHour %>:00</strong> 截止。</li>
     <li>一期内同一套阵容只能投一票，截止前随时可以改；可以给自己打分。</li>
     <li>400 / 300 / 250 有名额：<% Object.entries(rateQuota).sort((a, b) => b[0] - a[0]).forEach(([value, quota]) => { %>每期每人最多投 <strong><%= quota %></strong> 张 <%= value %>；<% }) %>50 / 200 不限。</li>
     <li>打分截止前，阵容墙按互评均分排；截止后和已结算的期改按积分排。</li>

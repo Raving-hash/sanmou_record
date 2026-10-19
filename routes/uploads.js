@@ -42,10 +42,13 @@ router.post('/uploads/sign', async (req, res) => {
   if (!season) return res.status(409).json({ error: '当前没有进行中的赛期' });
 
   if (kind === 'lineup') {
-    // 上传窗口（2026-10-16 加的设定）。**和 POST /lineup 那一道是同一件事**，
+    // 上传窗口（2026-10-18 改口径）。**和 POST /lineup 那一道是同一件事**，
     // 只是提前到签名这一步 —— 不提前拦的话，玩家会白压白传一批注定被拒的图
     // （那批字节走的是他自己的流量和 R2 的带宽）。
-    if (db.isLineupClosed(season)) {
+    // 周二 12:00 起先传初步图；周三 12:00 起完整图可以覆盖初步图，所以那种时候
+    // 手里有初步图**不算占名额**（真正拦人的 POST 那一道会删旧图再入库）。
+    const phase = db.getUploadPhase(season);
+    if (phase === 'closed') {
       return res.status(409).json({
         error: `阵容要到 ${res.locals.fmt(db.getUploadOpenAt(season))} 才开放上传`,
       });
@@ -53,9 +56,16 @@ router.post('/uploads/sign', async (req, res) => {
     // 用 findEntry 而不是 getOrCreateEntry：这里只是在**预检**，不该因为人家点了
     // 一次"选择文件"就先在库里给他建一条空记录（提交时才建，和从前的时机一致）。
     const entry = db.findEntry(season.id, req.user.id);
-    const existing = entry ? db.getLineupImages(entry.id).length : 0;
-    if (existing + count > MAX_LINEUP) {
-      return res.status(409).json({ error: '每期只能传一张阵容图，要换请先删掉现在这张' });
+    const imgs = entry ? db.getLineupImages(entry.id) : [];
+    const occupied = phase === 'preliminary'
+      ? imgs.length
+      : imgs.filter((i) => !i.is_preliminary).length;
+    if (occupied + count > MAX_LINEUP) {
+      return res.status(409).json({
+        error: phase === 'preliminary'
+          ? '每期只能传一张阵容图，要换请先删掉现在这张'
+          : '每期只能传一张完整阵容图，要换请先删掉现在这张',
+      });
     }
   }
 

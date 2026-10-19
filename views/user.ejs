@@ -101,6 +101,9 @@
         <div class="archive-body">
           <p class="archive-head">
             <a class="muted" href="/seasons/<%= r.season_id %>/wall#e<%= r.id %>"><%= r.season_name %><% if (r.season_status === 'open') { %> · 进行中<% } %></a>
+            <% if (r.images[0] && r.images[0].is_preliminary) { %>
+              <span class="badge badge-wait" title="初步阵容图：只作展示，不识别、不计入数据、不算参赛">初步</span>
+            <% } %>
             <span class="score-pill"><% if (r.score === null) { %>未交分<% } else { %><%= r.score %> 分<% } %></span>
             <% if (r.season_status === 'settled') { %>
               <% if (r.is_winner) { %><span class="badge badge-first">👑 胜者</span>

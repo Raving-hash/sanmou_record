@@ -100,7 +100,8 @@
                 <img src="<%= thumbUrl(img.filename) %>" alt="<%= r.nickname %> 的阵容截图" loading="lazy">
               </a>
               <figcaption>
-                阵容截图
+                <%# 初步图只作展示（2026-10-18 赛制），标出来免得被当成最终阵容 %>
+                <% if (img.is_preliminary) { %>初步阵容图<% } else { %>阵容截图<% } %>
                 <% if (!settled && (me.is_admin || r.user_id === me.id)) { %>
                   <form method="post" action="/lineup/<%= img.id %>/delete" class="inline-form">
                     <input type="hidden" name="back" value="season">
@@ -140,6 +141,8 @@
         <%- include('partials/eye', { uid: p.uid }) %>
         <% if (p.lineup_uploaded) { %>
           <span class="badge badge-ok">已传阵容</span>
+        <% } else if (p.lineup_any) { %>
+          <span class="badge badge-wait" title="初步阵容只作展示，不算参赛；周三 12:00 后传完整阵容才算">只传了初步图</span>
         <% } else { %>
           <span class="badge badge-wait">还没传阵容</span>
         <% } %>
