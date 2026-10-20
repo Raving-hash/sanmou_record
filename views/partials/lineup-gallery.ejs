@@ -241,6 +241,18 @@
               <b class="rate-v is-lo"><%= r.rating.min %></b>
               <span class="rate-who"><%- include('./name-list', { list: r.rating.minBy }) %></span>
             </p>
+            <%# 慧眼王给这套阵容打的分（2026-10-19 用户要的「额外增加一行」）。
+                只在这套阵容被**现在戴着慧眼王称号的人**打过时才出；多个王都投过票时
+                db.summarizeRatings 已经只留**最先打分的那个人**（卡片 200px 宽，
+                一行放不下第二个名字 —— 和上面「最高/最低」只印一个人同一个理由）。
+                称号是"现在"的（和卡顶昵称前那枚亮蓝章同一个真源），不是打分那会儿的。 %>
+            <% if (r.rating.huiyan) { %>
+              <p class="rate-line">
+                <span class="rate-k">慧眼王</span>
+                <b class="rate-v"><%= r.rating.huiyan.value %></b>
+                <span class="rate-who"><%- include('./name-list', { list: [r.rating.huiyan] }) %></span>
+              </p>
+            <% } %>
           <% } %>
 
           <%# 打分区下半截（.rate-tail）：贴住卡片底部；上面那三行数字留在顶部。

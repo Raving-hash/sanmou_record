@@ -701,7 +701,10 @@ db.getLineupWall = (seasonId, viewerId, freezeIds, isAdmin) => {
 
   // 一期的打分一次全查回来，在 JS 里按 entry_id 归并（见 summarizeRatings）。
   // 打分是「人数 × 阵容数」，量级很小，不值得为它写一堆 GROUP BY、再逐个回查打分人。
-  const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId);
+  // 第三个参数是「现在戴着慧眼王的那些人」：卡片打分区要多印一行他们给的分
+  // （2026-10-19）。一次查询给整面墙用，别按卡去查。
+  const ratings = db.summarizeRatings(
+    db.getSeasonRatings(seasonId), viewerId, db.getHuiyanHolders().uids);
   // 评论同理，一次查回来挂到卡上。挂在这一层（而不是让 / 和 /wall 各自去查）
   // 是为了两侧永远一致：首页的墙和游客的墙引的是同一份 rows。
   const comments = db.getWallComments(seasonId);
@@ -908,8 +911,9 @@ db.getUploadPhase = (season) => {
 };
 
 // 没人打过分时的形状。模板直接读，不用到处判空；冻结只是提醒别改它。
+// huiyan 是 2026-10-19 加的「慧眼王给这套阵容打的分」（见 summarizeRatings）。
 db.EMPTY_RATING = Object.freeze({
-  n: 0, avg: null, max: null, min: null, maxBy: [], minBy: [], mine: null,
+  n: 0, avg: null, max: null, min: null, maxBy: [], minBy: [], mine: null, huiyan: null,
 });
 
 // 我给他打过没有。一期内一个阵容只有一票（UNIQUE(entry_id, rater_id) 兜底），
@@ -928,8 +932,10 @@ db.getRating = (id) => db.prepare(`
 
 // 一期里的全部打分 + 打分人昵称。高位在前、同分先投的在前 —— 下面归并时
 // 最高分和最低分的第一个名字，就是「第一个给出这个分的人」。
+// r.id 只给「慧眼王评分」那一行做同一毫秒的兜底排序用（见 summarizeRatings）：
+// created_at 精度是毫秒，测试夹具和并发投票都可能撞在同一毫秒上。
 db.getSeasonRatings = (seasonId) => db.prepare(`
-  SELECT r.entry_id, r.rater_id, r.value, r.created_at,
+  SELECT r.id, r.entry_id, r.rater_id, r.value, r.created_at,
          u.user_id AS uid, u.nickname
   FROM ratings r
   JOIN entries e ON e.id = r.entry_id
@@ -989,17 +995,25 @@ db.getMyQuota = (seasonId, raterId) => {
 };
 
 // rows（getSeasonRatings 的结果）→ Map<entry_id, summary>
-// summary = { n, avg, max, min, maxBy, minBy, mine }
+// summary = { n, avg, max, min, maxBy, minBy, mine, huiyan }
 // maxBy / minBy 把**并列的人全给**、一个都不截（顺序 = 先给出这个分的人在前）：
 // 只有五档，并列太常见，而"这一分是谁先给的"只有这份数组说得清。
 // 印到卡上是另一回事 —— **只印第一个**，见 views/partials/name-list.ejs。
-db.summarizeRatings = (rows, viewerId) => {
+//
+// huiyan（2026-10-19 加的）是「慧眼王给这套阵容打的分」，卡片打分区多印的那一行。
+// huiyanUids 是**当前**戴着慧眼王称号的那批人（小写 uid 的 Set，来自 getHuiyanHolders，
+// 和卡顶那枚王冠同一个真源 —— 称号不落库，这里也不给它另立一套判定）。
+// **多个慧眼王都给这套阵容投过票时只留最先打分的那一个**（created_at 最早、同毫秒按
+// rating id）：用户定的展示口径和「最高/最低」只印并列第一人一样 —— 卡片只有 200px 宽，
+// 一行放不下第二个名字。不传 huiyanUids 时 huiyan 一律为 null（称号是"全站第一"，
+// 不知道谁戴着就没什么可挑的）。
+db.summarizeRatings = (rows, viewerId, huiyanUids = null) => {
   const byEntry = new Map();
 
   for (const r of rows) {
     let s = byEntry.get(r.entry_id);
     if (!s) {
-      s = { n: 0, sum: 0, max: -Infinity, min: Infinity, maxBy: [], minBy: [], mine: null };
+      s = { n: 0, sum: 0, max: -Infinity, min: Infinity, maxBy: [], minBy: [], mine: null, huiyan: null };
       byEntry.set(r.entry_id, s);
     }
     s.n++;
@@ -1011,12 +1025,27 @@ db.summarizeRatings = (rows, viewerId) => {
     if (r.value < s.min) { s.min = r.value; s.minBy = [who]; }
     else if (r.value === s.min) s.minBy.push(who);
 
+    // 慧眼王那一行：只留最早的那一票。行是按「分数降序、时间升序」来的，不能靠先后判断。
+    if (huiyanUids && huiyanUids.has(String(r.uid).toLowerCase())) {
+      const prev = s.huiyan;
+      if (!prev || r.created_at < prev.created_at
+          || (r.created_at === prev.created_at && r.id < prev.id)) {
+        s.huiyan = { uid: r.uid, nickname: r.nickname, value: r.value,
+                     created_at: r.created_at, id: r.id };
+      }
+    }
+
     if (r.rater_id === viewerId) s.mine = r.value;   // UNIQUE 保证最多一条
   }
 
   for (const s of byEntry.values()) {
     s.avg = Math.round((s.sum / s.n) * 10) / 10;   // 保留 1 位；整数时 JS 直接打印成 250
     delete s.sum;
+    // 排序用的两个字段不往模板送：卡片上只要 uid / 昵称 / 分数。
+    if (s.huiyan) {
+      delete s.huiyan.created_at;
+      delete s.huiyan.id;
+    }
   }
   return byEntry;
 };
@@ -1173,6 +1202,23 @@ db.getUserStats = (userPk) => db.prepare(`${STATS_SQL} AND u.id = ? GROUP BY u.i
 // 返回 Map<uid（小写）, [{ key, label, tip }]>，key 只有 yanwu / huiyan 两种、顺序固定。
 // uid 转小写是为了和 app.js 的 eyeLevel 一个口径，调用处不用记大小写。
 const EYE_BASE = 10;                     // 初始等级，必须和 schema.sql 里 eye_level 的 DEFAULT 一致
+
+// 现在戴着「慧眼王」的那批人：{ level: 最高等级, uids: Set<小写 uid> }。
+// **判定只写这一处**，两个读它的人必须同一个口径：
+//   · getTitles() —— 卡顶昵称前那枚亮蓝的章；
+//   · summarizeRatings() —— 打分区新增的「慧眼王」那一行（2026-10-19）。
+// 等级还全停在初始 10 级时 uids 是空集合（= 没王），和称号章的规矩一致：
+// 所有人都 10 级时严格按"同级都封"就是全员戴冠，等于没称号。
+db.getHuiyanHolders = () => {
+  const level = db.prepare(`SELECT MAX(eye_level) AS lv FROM users`).get().lv;
+  if (!(level > EYE_BASE)) return { level, uids: new Set() };
+  return {
+    level,
+    uids: new Set(db.prepare(`SELECT user_id FROM users WHERE eye_level = ?`).all(level)
+      .map((u) => String(u.user_id).toLowerCase())),
+  };
+};
+
 db.getTitles = () => {
   const map = new Map();
   const add = (uid, title) => {
@@ -1197,16 +1243,14 @@ db.getTitles = () => {
     }
   }
 
-  // 慧眼王。只挑最高的那一档，并列的全给。
-  const top = db.prepare(`SELECT MAX(eye_level) AS lv FROM users`).get().lv;
-  if (top > EYE_BASE) {
-    for (const u of db.prepare(`SELECT user_id FROM users WHERE eye_level = ?`).all(top)) {
-      add(u.user_id, {
-        key: 'huiyan',
-        label: '慧眼王',
-        tip: `慧眼王：慧眼等级最高的（${top} 级）`,
-      });
-    }
+  // 慧眼王。只挑最高的那一档，并列的全给（判定在 getHuiyanHolders，打分区那一行也读它）。
+  const huiyan = db.getHuiyanHolders();
+  for (const uid of huiyan.uids) {
+    add(uid, {
+      key: 'huiyan',
+      label: '慧眼王',
+      tip: `慧眼王：慧眼等级最高的（${huiyan.level} 级）`,
+    });
   }
   return map;
 };
@@ -1470,10 +1514,12 @@ const enrichEntryCards = (entryIds, viewerId) => {
   ).all(...entryIds)) comments.set(c.entry_id, c.n);
 
   // 一期一次查打分/名次，期内缓存；不按 entry 逐条回查。
+  // 慧眼王的集合整个调用只查一次 —— 它只跟"现在谁是第一"有关，和赛季无关。
+  const huiyanUids = db.getHuiyanHolders().uids;
   const seasonCache = new Map();
   const seasonData = (seasonId) => {
     if (!seasonCache.has(seasonId)) {
-      const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId);
+      const ratings = db.summarizeRatings(db.getSeasonRatings(seasonId), viewerId, huiyanUids);
       const ranks = new Map();
       db.getRanking(seasonId).forEach((r, i) => ranks.set(r.id, i + 1));
       seasonCache.set(seasonId, { ratings, ranks });
