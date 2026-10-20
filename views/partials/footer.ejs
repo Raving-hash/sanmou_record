@@ -12,6 +12,10 @@
     把某张卡的评论区展开 —— 先展开再量的话，那张卡的高度会被算进"这一排该多高"，
     用户把评论收起来之后整排还是被撑着（见 wall.js 的头注）。 %>
 <script src="/public/wall.js?v=<%= assetVer.wall %>"></script>
+<%# 首页「换武将不刷新页面」（public/home-filter.js，2026-10-19）：只有首页有 .wall-filter，
+    别的页面第一行就退出。**必须排在 wall.js 后面** —— 它收放完卡片要调 wall.js 挂出来的
+    window.ywWallRefresh() 重新分列。 %>
+<script src="/public/home-filter.js?v=<%= assetVer.homeFilter %>"></script>
 <%# 评论区的自动展开（public/comments.js）：发完评论会跳回 /#e<id>，那张卡的评论区得自己打开，
     否则看着就像"评论没发出去"。和 lightbox 一样挂页脚 —— 它直接找元素、不等 DOMContentLoaded，
     所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。

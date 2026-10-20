@@ -80,7 +80,10 @@
 
   <%# 阵容墙筛选（2026-10-17）。纯 GET 表单，没有 JS 也能用；提交后整页重排，
       顺序仍由 db.getLineupWall 决定，筛选只在它的结果上做（#N 不重编号）。
-      筛选项只从路由的白名单里取，非法值在路由里就被忽略。 %>
+      筛选项只从路由的白名单里取，非法值在路由里就被忽略。
+      2026-10-19：**换武将不再刷新页面** —— public/home-filter.js 直接收放卡片
+      （卡片现在全量渲染，不匹配的挂 .is-hidden），地址栏用 replaceState 跟着改。
+      其它筛选项仍然是 GET 提交（用户只点名了武将这一项）。 %>
   <form method="get" action="/" class="wall-filter">
     <div class="wall-filter-row">
       <label>武将
@@ -135,7 +138,10 @@
         <input name="q" value="<%= filters.q || '' %>" maxlength="20" placeholder="搜昵称">
       </label>
       <button type="submit">筛选</button>
-      <% if (filterActive) { %><a role="button" class="secondary outline btn-sm" href="/">清除筛选</a><% } %>
+      <%# 清除链接**总是渲染**：换武将之后要不要显示由 home-filter.js 现算
+          （不刷新页面，服务端渲染那一刻的 filterActive 已经过期了）。 %>
+      <a role="button" class="secondary outline btn-sm" href="/"
+         data-filter-reset<% if (!filterActive) { %> hidden<% } %>>清除筛选</a>
     </div>
   </form>
 
@@ -143,15 +149,24 @@
       （每期开期后第一个周四 12:00）；quota 是**我自己**还剩的名额（封盘后是空的）；
       rateLockAt 给墙上显示截止时间。byScore 也在路由里查（db.isWallByScore）：
       封盘后墙改成按积分排，墙上那句顺序说明跟着换。
-      backTo 带着筛选 query，打分/评论/纠错 POST 后跳回来时筛选不丢。 %>
+      backTo 带着筛选 query，打分/评论/纠错 POST 后跳回来时筛选不丢。
+      visibleIds / restVisibleIds 是 2026-10-19 加的：全部卡片都渲染，由它们决定
+      首屏藏哪些（.is-hidden），以及客户端换武将时以哪一批卡为底（见 public/home-filter.js）。 %>
   <%- include('partials/lineup-gallery', {
         rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt, byScore,
-        backTo: wallReturn, filterNote,
+        backTo: wallReturn, filterNote, visibleIds, restVisibleIds,
       }) %>
-  <% if (!lineups.length) { %>
-    <p class="muted"><%= filterActive ? '没有符合筛选的阵容。' : '本期还没有人传阵容。' %>
-      <% if (filterActive) { %><a href="/">清除筛选</a><% } %></p>
-  <% } %>
+  <%# 空态两条都无条件渲染、靠 hidden 收放：换武将是不刷新页面的，
+      必须让 home-filter.js 有东西可以现场切换。判断口径：
+        · 一张阵容都没有 → 「本期还没有人传阵容」
+        · 有阵容但有筛选且一套都没留下 → 「没有符合筛选的阵容」+ 清除
+        · 其余 → 两条都藏起来 %>
+  <p class="muted" data-wall-empty="filter"<% if (!filterActive || matchCount) { %> hidden<% } %>>
+    没有符合筛选的阵容。 <a href="/" data-filter-reset>清除筛选</a>
+  </p>
+  <p class="muted" data-wall-empty="none"<% if (allLineupCount) { %> hidden<% } %>>
+    本期还没有人传阵容。
+  </p>
 
   <h3>还没交积分（<%= notSubmitted.length %>）</h3>
   <% if (!notSubmitted.length) { %>

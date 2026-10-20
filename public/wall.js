@@ -19,6 +19,10 @@
  * 布局，而 comments.js 会按 #e<id> 把某张卡的评论区展开。反过来先展开再量的话，那张卡的
  * 高度会被算进"这一排该多高"，用户把评论收起来之后整排还是被撑着。
  * （resize 那条路径上躲不开，所以在 align() 里量之前会先把展开的合上、量完再还原。）
+ *
+ * 2026-10-19 加了一条"外部可以喊我重排"的路：首页换武将（public/home-filter.js）
+ * 会收放卡片（.is-hidden），然后调 window.ywWallRefresh() —— 这里就重新现取可见卡、
+ * 重新分列、重新对齐。分列会打乱 DOM 顺序，所以"原顺序"靠卡片上的 data-seq 记着。
  */
 (function () {
   'use strict';
@@ -37,18 +41,52 @@
 
   var box = function (el) { return el ? el.getBoundingClientRect().height : 0; };
 
-  // 给一面墙建一个控制器；卡片不够两张就返回 null（版面本来就没什么可分的）
+  // 给一面墙建一个控制器。**总是**返回一个（哪怕现在只剩 0/1 张可见卡）：
+  // 首页换武将（public/home-filter.js）会随时收放卡片，控制器得一直在。
   function columns(grid) {
-    var cards = [].slice.call(grid.children).filter(function (el) {
-      return el.nodeType === 1 && el.classList && el.classList.contains('shot-card');
-    });
-    if (cards.length < 2) return null;
-
     var cols = 1;        // 当前列数（align 分组要用）
     var key = '';        // 上一次重建时的判据，见 build()
+    var cards = [];      // **当前可见**的卡（.is-hidden 的不算），按原顺序
+
+    // 现取所有卡（含藏起来的），按**最初**的顺序排好。
+    // 为什么不能直接用 DOM 顺序：分列之后卡片被搬进了 .shot-col，DOM 顺序变成
+    // "一列一列"的（第 1 列整列、再第 2 列整列…），跟排名顺序对不上。
+    // 第一次见面时把序号写进 data-seq，以后都按它排。
+    function collect() {
+      var all = [].slice.call(grid.querySelectorAll('.shot-card'));
+      all.forEach(function (c, i) {
+        if (!c.hasAttribute('data-seq')) c.setAttribute('data-seq', String(i));
+      });
+      all.sort(function (a, b) {
+        return Number(a.getAttribute('data-seq')) - Number(b.getAttribute('data-seq'));
+      });
+      return all;
+    }
+    function visible(c) { return !c.classList.contains('is-hidden'); }
+
+    // 把**所有**卡平铺回 grid（隐藏的也要留在 DOM 里 —— 换个筛选还得放出来），
+    // 顺手拆掉上一轮的 .shot-col 外壳。
+    function flatten(all) {
+      all.forEach(function (c) { grid.appendChild(c); });   // appendChild 会把卡从旧列里搬走
+      [].slice.call(grid.children).forEach(function (el) {
+        if (!el.classList || !el.classList.contains('shot-card')) grid.removeChild(el);
+      });
+    }
 
     // 分列。列数变了、或者卡宽变了才真的重建。
     function build() {
+      var all = collect();
+      cards = all.filter(visible);
+
+      if (!cards.length) {
+        // 一张可见的都没有：清掉旧列（否则空列还会占着列间距），别的什么都不用做。
+        flatten(all);
+        grid.classList.add('is-cols');
+        cols = 0;
+        key = '';
+        return;
+      }
+
       var cardW = cards[0].getBoundingClientRect().width;
       var cs = getComputedStyle(grid);
       var gap = parseFloat(cs.columnGap);            // 桌面 .75rem，窄屏同一档
@@ -71,11 +109,12 @@
         return b && b.open;
       }).map(function (c) { return c.id; });
 
+      // 先平铺（含隐藏卡），再只把可见卡轮流放进新列：
+      // 第 i 张进第 i % cols 列 —— 视觉上仍是"从左往右、满行换行"。
+      flatten(all);
       var col = [];
       for (var i = 0; i < cols; i++) col.push(document.createElement('div'));
-      // 轮流放：第 i 张进第 i % cols 列 —— 视觉上仍是"从左往右、满行换行"
       cards.forEach(function (c, i) { col[i % cols].appendChild(c); });
-      while (grid.firstChild) grid.removeChild(grid.firstChild);
       col.forEach(function (d) {
         d.className = 'shot-col';
         grid.appendChild(d);
@@ -141,18 +180,30 @@
       opened.forEach(function (b) { b.open = true; });
     }
 
-    return { build: build, align: align };
+    // 筛选收放了卡片之后喊这个：可见集合可能变了，判据得作废、必须重建。
+    // 和 resize 那条路的区别就在这儿 —— 那边卡宽没变就可以原地不动。
+    function refresh() {
+      key = '';
+      build();
+      align();
+    }
+
+    return { build: build, align: align, refresh: refresh };
   }
 
   var walls = [];
   [].slice.call(document.querySelectorAll('.shot-grid')).forEach(function (grid) {
     var api = columns(grid);
-    if (!api) return;
     api.build();
     api.align();
     walls.push(api);
   });
-  if (!walls.length) return;
+
+  // 首页换武将（public/home-filter.js）收放完卡片会喊一声。
+  // **无条件挂着**：别的页面没人喊它，多一个函数不会花任何代价。
+  window.ywWallRefresh = function () {
+    walls.forEach(function (w) { w.refresh(); });
+  };
 
   // 窗口变了就重来一遍：列数、卡宽都可能跟着断点变。build() 自己判断要不要重建 DOM，
   // align() 每次都跑（便宜，而且量的是当下的真实布局）。

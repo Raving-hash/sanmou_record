@@ -2368,6 +2368,11 @@ details.report[open] > summary {
 .todo-main strong { color: var(--yw-text); }
 
 /* 阵容墙筛选。纯 GET 表单，样式只负责别把整面墙顶得太高。 */
+/* 首页筛掉的卡（2026-10-19）：服务端仍然把**全部**卡片渲染出来，不匹配当前筛选的
+   只挂这个 class 收起来 —— 没有 JS 时它等效于"服务端只渲染匹配的卡"（GET 表单照旧）；
+   有 JS 时 public/home-filter.js 换武将只改这个 class，不刷新页面。
+   public/wall.js 分列时也会跳过它们（见那边的 collect()）。 */
+.shot-card.is-hidden { display: none; }
 .wall-filter {
   display: grid;
   gap: var(--yw-sp-3);

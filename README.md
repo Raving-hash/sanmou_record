@@ -1300,6 +1300,10 @@ Pico 在 1280 视口下只给 `1200px`（≥1536 才 1450），而阵容墙要"�
   不生效、列宽算不出来），但**量版面的断言在那边换了另一支**：改量"一行一张"这件事本身
   （只有 1 列、列宽 = 网格内容宽、图在左信息在右、顶栏面板和图框等高、打分区通栏、
   卡不横向溢出）。这一支在 `.devlocal/preview/lb/wall-harness.js` 里，`mobile` 那个分支。
+- **首页换武将（2026-10-19）会收放卡片再喊一声**：`public/home-filter.js` 改完
+  `.is-hidden` 调 `window.ywWallRefresh()`，`wall.js` 重新现取**可见**的卡、重新分列。
+  分列会打乱 DOM 顺序，所以"原顺序"现在记在卡片的 `data-seq` 上（第一次分列前写一次），
+  不再依赖 `querySelectorAll` 的当前顺序。改那段时别把 `data-seq` 丢了。
 
 两条已知代价，改的时候别当成 bug：
 
@@ -2154,14 +2158,36 @@ OCR 出来的游戏名常有一两个字读错。接口先精确匹配（含竖�
 **墙上筛选**（首页，成员）：`?hero=`、`?faction=`、`?arm=`、`?tier=T0..T3`、
 `?scored=1/0`、`?mine=rated/unrated`、`?q=昵称`。参数在 `routes/main.js` 的
 `parseWallFilters` 里逐个白名单校验，非法值直接忽略。**过滤放在 `getLineupWall`
-之后**：`rank`（卡上的 `#N`）是全期积分名次，先筛再数会把它重编。空结果由首页给
-「没有符合筛选的阵容」+ 清除链接；`lineup-gallery.ejs` 在 `rows` 为空时本来就不渲染。
+之后**：`rank`（卡上的 `#N`）是全期积分名次，先筛再数会把它重编。
+
+**换武将不刷新页面**（2026-10-19 用户要求）。服务端不再"只渲染匹配的卡"，而是把
+**全部卡片**都交给模板，不匹配当前筛选的挂 `.is-hidden`（`routes/main.js` 的
+`visibleIds`）；`public/home-filter.js` 在下拉框 `change` 时只改这个 class，然后调
+`window.ywWallRefresh()` 让 `public/wall.js` 重新分列。细节：
+
+- **没有 JS 照样能用**：`.is-hidden` 就是 `display:none`，GET 表单提交后看到的仍是
+  筛过的那几张（和从前一模一样）。有 JS 时才多出"当场收放"这一层。
+- **`restVisibleIds`** 是"去掉武将那条、其它条件仍然生效"的结果，模板把它写成卡上的
+  `data-rest-hidden`。换武将时只在这批卡里挑 —— 否则会把被势力/积分/昵称筛掉的卡
+  一起放出来。
+- **地址栏**用 `history.replaceState` 跟着改成 `/?hero=…`（可收藏、刷新也还在）；
+  **打分/评论/纠错的 hidden `returnTo` 也会被改写成当前地址** —— 不刷新页面时它们
+  还是服务端渲染那一刻的值，不改就会投完票跳回旧筛选。
+- **「清除筛选」** 由脚本接管：清空表单、当场放回全部卡片、地址栏回 `/`（不刷新）。
+- **其它筛选项仍然走 GET 提交**（用户只点名了武将这一项）；提交后走服务端过滤，
+  结果和从前一致。
+- 空态两条（`[data-wall-empty]`）和筛选说明的空壳（`[data-filter-note]`）都
+  **无条件渲染**、靠 `hidden` 收放，否则脚本没有东西可现场切换。
 
 **回跳**：墙带筛选时，打分/评论/纠错表单里的 `returnTo` 会带上 `/?hero=…`，
-投完票跳回同一版墙（见 `views/partials/lineup-gallery.ejs` 和 `returnto.js`）。
+投完票跳回同一版墙（见 `views/partials/lineup-gallery.ejs` 和 `returnto.js`）；
+页面内换过武将之后由 `home-filter.js` 把 `returnTo` 改写成当前筛选。
 
 **自测**：`bash .devlocal/test/run.sh features`（本套里造一个 settled 的第 900 期，
-覆盖第一图口径、auto 计数、样本门槛、组合/同队、筛选集合、`#N` 不重编号、回跳）。
+覆盖第一图口径、auto 计数、样本门槛、组合/同队、筛选集合、`#N` 不重编号、回跳，
+以及"筛选时卡片全部渲染、不匹配的挂 is-hidden、卡片带 `data-heroes`"）；
+浏览器 `bash .devlocal/preview/run-browser.sh wall` 的第六节量"换武将 → 当场收放、
+地址栏 / returnTo 跟着变、换回全部复原、wall.js 重新分列"。
 
 ## 历史赛期阵容墙（2026-10-17 加）
 
@@ -2718,6 +2744,8 @@ wall 那套多出一整支手机断言，comment / title 两套改了档位判�
 - [ ] `/hero/:key` 列出跨期阵容；「找搭档」回组合检索；同部队勾选会收窄结果
 - [ ] `/?hero=…`、`?faction=…`、`?tier=…`、`?scored=…`、`?mine=…`、`?q=…` 都能筛；
       卡上的 `#N` 仍是全期名次；清除筛选能回到全量
+- [ ] 首页换「武将」**不刷新页面**：卡片当场收放、列重新排好，地址栏变成 `/?hero=…`；
+      换回「全部」/ 点「清除筛选」立刻复原（2026-10-19）
 - [ ] 带筛选投一票 → 跳回来还在同一版筛选墙（`returnTo`）
 - [ ] `/seasons/:id` 有「看这一期阵容墙」；历史墙没有打分按钮；评论发完回到那张卡
 - [ ] `/u/:id` 有近期状态（含「缺」）、常用武将、阵容档案；多图老数据能翻第二张
@@ -3089,9 +3117,10 @@ views/            EJS 模板（服务端渲染，全部表单提交；wall.ejs �
                   heroes/hero/records/rules/season-wall.ejs 是 2026-10-17 新增的）
 public/           pico.min.css（v2.1.1，本地）+ style.css（令牌层 + 20 个小节）
                   + icon.svg / favicon.ico / apple-touch-icon.png（站点图标三份，生成物）
-                  + upload.js（**浏览器里压缩 + 直传 R2** + 拖拽）
+                  + upload.js（**浏览器里压缩 + 直传 R2** + 拖拽 / 粘贴）
                   + lightbox.js（点图弹层）+ comments.js（回跳时展开评论区）
                   + wall.js（阵容墙分列 + 逐排对齐）+ report.js（赛期详情页的「全选战报」）
+                  + home-filter.js（首页换武将不刷新页面：收放卡片 + 同步地址栏/returnTo）
                   + reco.js（阵容纠正面板：「手输武将」那个弹窗 —— 卡片里那格只有 70px，
                             输入框塞不下，所以改成一整行宽的 <dialog>）
 scripts/          create-admin.js、backup.js

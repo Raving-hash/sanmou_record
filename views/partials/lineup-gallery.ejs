@@ -69,7 +69,16 @@
   // 但仍然用 locals 兜底 —— 模板里引一个没传进来的名字是 ReferenceError。
   const byScore = locals.byScore === true;
   // 可选：筛选后的说明（首页带 ?hero=… 时由 home.ejs 传进来）。没传就不出这一行。
+  // 传了 null 也要**渲染一个空壳**（data-filter-note + hidden）：首页换武将不刷新页面，
+  // public/home-filter.js 要拿它现场写说明 / 收起来。别的调用方干脆不传 → 这行不渲染。
   const filterNote = locals.filterNote || null;
+  // 可选：卡片可见性（2026-10-19，只有首页进行中的那条分支传）。
+  //   visibleIds     = 当前全部条件筛完的结果 —— 不在里面的卡挂 .is-hidden；
+  //   restVisibleIds = 去掉「武将」那条的结果 —— 不在里面的卡带 data-rest-hidden，
+  //                    客户端换武将时只在这批卡里挑，不能把别的条件筛掉的卡放出来。
+  // 不传（/wall、历史赛期墙、结算后的首页）时，所有卡都可见。
+  const visibleIds = locals.visibleIds || null;
+  const restVisibleIds = locals.restVisibleIds || null;
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -88,7 +97,9 @@
       顺序按互评均分从高到低，还没人打分的排最后；卡上的 #N 是积分名次（交了积分的才有）。
     <% } %>
   </p>
-  <% if (filterNote) { %><p class="filter-note muted small"><%= filterNote %></p><% } %>
+  <% if (locals.filterNote !== undefined) { %>
+    <p class="filter-note muted small" data-filter-note<% if (!filterNote) { %> hidden<% } %>><%= filterNote || '' %></p>
+  <% } %>
   <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
   <% if (canRate && quotaLeft.size) { %>
     <p class="quota-line">
@@ -136,7 +147,11 @@
            tierShaky ? '★ 有机器填的格子还没人核对过，这个级可能不准' : '',
          ].filter(Boolean).join('；') : ''; %>
       <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
-      <figure class="shot-card<%= aceClass %>" id="e<%= r.id %>"<% if (aceTip) { %> title="<%= aceTip %>"<% } %>>
+      <%# is-hidden / data-rest-hidden / data-heroes 是首页换武将（2026-10-19）用的，
+          见上面 const visibleIds 那段说明。别的页面不传 visibleIds，这三个属性不会生效。 %>
+      <figure class="shot-card<%= aceClass %><%= visibleIds && !visibleIds.has(r.id) ? ' is-hidden' : '' %>"
+              id="e<%= r.id %>"<% if (aceTip) { %> title="<%= aceTip %>"<% } %>
+              data-heroes="<%= (r.heroes || []).map((h) => h.key).join(' ') %>"<% if (restVisibleIds && !restVisibleIds.has(r.id)) { %> data-rest-hidden="1"<% } %>>
         <figcaption class="shot-head">
           <%# 评级独占顶栏第一行（2026-10-17 用户要求：字号放大、贴卡框最左上角）。
               ⚠️ 这一格**无条件渲染**，哪怕没认出人（tier 为 null）也要留空行：

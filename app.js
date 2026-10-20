@@ -35,6 +35,8 @@ app.use((req, res, next) => {
     upload: assetVer('upload.js'),
     lightbox: assetVer('lightbox.js'),
     wall: assetVer('wall.js'),
+    // 首页「换武将不刷新页面」（2026-10-19）。只有首页有 .wall-filter，脚本自己会退出。
+    homeFilter: assetVer('home-filter.js'),
     comments: assetVer('comments.js'),
     report: assetVer('report.js'),
     reco: assetVer('reco.js'),
