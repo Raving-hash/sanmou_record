@@ -217,16 +217,12 @@ router.get('/', (req, res) => {
     const filters = parseWallFilters(req.query);
     const filterQS = filterQuery(filters);
     // 2026-10-19：卡片**全部**交给模板渲染，不匹配的挂 .is-hidden。
-    // 为什么要渲染不匹配的：首页换武将不再刷新页面（public/home-filter.js 直接收放卡片），
+    // 为什么要渲染不匹配的：首页筛选不再刷新页面（public/home-filter.js 直接收放卡片），
     // 页面里没有的卡就再也放不出来了。没有 JS 时 .is-hidden 就是 display:none ——
     // GET 表单提交后看到的和从前一模一样，只多了一点隐藏的标记。
-    //   visibleIds     = 当前**全部**条件筛完的结果（首屏该露出来的卡）
-    //   restVisibleIds = 去掉「武将」那条以后的结果：客户端换武将时拿它当底，
-    //                    不能把被势力/积分等条件筛掉的卡也放出来。
+    // visibleIds = 当前**全部**条件筛完的结果（首屏该露出来的卡、也是空态的计数口径）。
+    // 客户端换了条件之后由 home-filter.js 按卡片上的 data-* 自己重算，不再问服务端。
     const visibleIds = new Set(filterWall(allLineups, filters).map((r) => r.id));
-    const restFilters = { ...filters };
-    delete restFilters.hero;
-    const restVisibleIds = new Set(filterWall(allLineups, restFilters).map((r) => r.id));
     const lineups = allLineups;
     const wallReturn = filterQS ? `/?${filterQS}` : '/';
     // 待办卡里「去打分」优先落到第一张还没打分的卡；没有就回墙顶。
@@ -261,10 +257,9 @@ router.get('/', (req, res) => {
       // 一改就能撞出来。
       lineups,
       allLineupCount: allLineups.length,
-      // 卡片的可见性（见上面 visibleIds / restVisibleIds 的说明）。matchCount 给空态用：
+      // 卡片的可见性（见上面 visibleIds 的说明）。matchCount 给空态用：
       // lineups 现在是全量，"有没有筛出东西"不能再拿它的长度冒充。
       visibleIds,
-      restVisibleIds,
       matchCount: visibleIds.size,
       filters,
       filterQuery: filterQS,

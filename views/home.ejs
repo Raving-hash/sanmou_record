@@ -78,12 +78,12 @@
       结算之后走下面「没有进行中的期」那个分支，排名表照旧出来（那时名次才定下来）。
       ⚠️ 要在这儿把排名表加回来，先去 routes/main.js 把 ranking 传回来。 %>
 
-  <%# 阵容墙筛选（2026-10-17）。纯 GET 表单，没有 JS 也能用；提交后整页重排，
-      顺序仍由 db.getLineupWall 决定，筛选只在它的结果上做（#N 不重编号）。
+  <%# 阵容墙筛选（2026-10-17）。纯 GET 表单，没有 JS 也能用；顺序仍由 db.getLineupWall
+      决定，筛选只在它的结果上做（#N 不重编号）。
       筛选项只从路由的白名单里取，非法值在路由里就被忽略。
-      2026-10-19：**换武将不再刷新页面** —— public/home-filter.js 直接收放卡片
-      （卡片现在全量渲染，不匹配的挂 .is-hidden），地址栏用 replaceState 跟着改。
-      其它筛选项仍然是 GET 提交（用户只点名了武将这一项）。 %>
+      2026-10-19：**选任何一项都不再刷新页面** —— public/home-filter.js 直接收放卡片
+      （卡片现在全量渲染，不匹配的挂 .is-hidden），连表单 submit（点「筛选」/回车）
+      也拦下来；地址栏用 replaceState 跟着改。没有 JS 时仍是原来的纯 GET 表单。 %>
   <form method="get" action="/" class="wall-filter">
     <div class="wall-filter-row">
       <label>武将
@@ -150,11 +150,11 @@
       rateLockAt 给墙上显示截止时间。byScore 也在路由里查（db.isWallByScore）：
       封盘后墙改成按积分排，墙上那句顺序说明跟着换。
       backTo 带着筛选 query，打分/评论/纠错 POST 后跳回来时筛选不丢。
-      visibleIds / restVisibleIds 是 2026-10-19 加的：全部卡片都渲染，由它们决定
-      首屏藏哪些（.is-hidden），以及客户端换武将时以哪一批卡为底（见 public/home-filter.js）。 %>
+      visibleIds 是 2026-10-19 加的：全部卡片都渲染，由它决定首屏藏哪些（.is-hidden）；
+      之后客户端换筛选条件时，home-filter.js 按卡片上的 data-* 自己重算（见 public/home-filter.js）。 %>
   <%- include('partials/lineup-gallery', {
         rows: lineups, heading: '本期阵容', canRate, quota, rateLockAt, byScore,
-        backTo: wallReturn, filterNote, visibleIds, restVisibleIds,
+        backTo: wallReturn, filterNote, visibleIds,
       }) %>
   <%# 空态两条都无条件渲染、靠 hidden 收放：换武将是不刷新页面的，
       必须让 home-filter.js 有东西可以现场切换。判断口径：

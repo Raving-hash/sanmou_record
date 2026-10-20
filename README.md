@@ -2160,34 +2160,36 @@ OCR 出来的游戏名常有一两个字读错。接口先精确匹配（含竖�
 `parseWallFilters` 里逐个白名单校验，非法值直接忽略。**过滤放在 `getLineupWall`
 之后**：`rank`（卡上的 `#N`）是全期积分名次，先筛再数会把它重编。
 
-**换武将不刷新页面**（2026-10-19 用户要求）。服务端不再"只渲染匹配的卡"，而是把
+**筛选不刷新页面**（2026-10-19 用户要求）。服务端不再"只渲染匹配的卡"，而是把
 **全部卡片**都交给模板，不匹配当前筛选的挂 `.is-hidden`（`routes/main.js` 的
-`visibleIds`）；`public/home-filter.js` 在下拉框 `change` 时只改这个 class，然后调
-`window.ywWallRefresh()` 让 `public/wall.js` 重新分列。细节：
+`visibleIds`）；`public/home-filter.js` 在**任何一项筛选变化**时只改这个 class，
+然后调 `window.ywWallRefresh()` 让 `public/wall.js` 重新分列。细节：
 
 - **没有 JS 照样能用**：`.is-hidden` 就是 `display:none`，GET 表单提交后看到的仍是
   筛过的那几张（和从前一模一样）。有 JS 时才多出"当场收放"这一层。
-- **`restVisibleIds`** 是"去掉武将那条、其它条件仍然生效"的结果，模板把它写成卡上的
-  `data-rest-hidden`。换武将时只在这批卡里挑 —— 否则会把被势力/积分/昵称筛掉的卡
-  一起放出来。
+- **客户端和服务端同一套口径**：卡片上带着 `data-heroes` / `data-factions` / `data-arms`
+  / `data-tier` / `data-scored` / `data-rated` / `data-nick`，`hiddenBy()` 与
+  `routes/main.js` 的 `filterWall()` 逐条对应（改一边记得改另一边）。`data-tier` 在
+  没认出武将时写 `T3`，因为 `db.lineupTier([])` 就是 T3，服务端 `?tier=T3` 也这么筛。
+- **表单 `submit` 也被拦下**：选完点「筛选」、或在昵称框按回车，都不再整页刷新
+  （2026-10-19 用户报的"还是在刷新、还跳到页顶"就是这一下）。按钮留着只给没有 JS 的
+  情况用；有 JS 时它等于"再应用一次"。
 - **地址栏**用 `history.replaceState` 跟着改成 `/?hero=…`（可收藏、刷新也还在）；
   **打分/评论/纠错的 hidden `returnTo` 也会被改写成当前地址** —— 不刷新页面时它们
   还是服务端渲染那一刻的值，不改就会投完票跳回旧筛选。
 - **「清除筛选」** 由脚本接管：清空表单、当场放回全部卡片、地址栏回 `/`（不刷新）。
-- **其它筛选项仍然走 GET 提交**（用户只点名了武将这一项）；提交后走服务端过滤，
-  结果和从前一致。
 - 空态两条（`[data-wall-empty]`）和筛选说明的空壳（`[data-filter-note]`）都
   **无条件渲染**、靠 `hidden` 收放，否则脚本没有东西可现场切换。
 
 **回跳**：墙带筛选时，打分/评论/纠错表单里的 `returnTo` 会带上 `/?hero=…`，
 投完票跳回同一版墙（见 `views/partials/lineup-gallery.ejs` 和 `returnto.js`）；
-页面内换过武将之后由 `home-filter.js` 把 `returnTo` 改写成当前筛选。
+页面内改过筛选之后由 `home-filter.js` 把 `returnTo` 改写成当前筛选。
 
 **自测**：`bash .devlocal/test/run.sh features`（本套里造一个 settled 的第 900 期，
 覆盖第一图口径、auto 计数、样本门槛、组合/同队、筛选集合、`#N` 不重编号、回跳，
 以及"筛选时卡片全部渲染、不匹配的挂 is-hidden、卡片带 `data-heroes`"）；
-浏览器 `bash .devlocal/preview/run-browser.sh wall` 的第六节量"换武将 → 当场收放、
-地址栏 / returnTo 跟着变、换回全部复原、wall.js 重新分列"。
+浏览器 `bash .devlocal/preview/run-browser.sh wall` 的第六节量"换筛选 → 当场收放、
+submit 被拦下、地址栏 / returnTo 跟着变、换回全部复原、wall.js 重新分列"。
 
 ## 历史赛期阵容墙（2026-10-17 加）
 
@@ -2744,8 +2746,8 @@ wall 那套多出一整支手机断言，comment / title 两套改了档位判�
 - [ ] `/hero/:key` 列出跨期阵容；「找搭档」回组合检索；同部队勾选会收窄结果
 - [ ] `/?hero=…`、`?faction=…`、`?tier=…`、`?scored=…`、`?mine=…`、`?q=…` 都能筛；
       卡上的 `#N` 仍是全期名次；清除筛选能回到全量
-- [ ] 首页换「武将」**不刷新页面**：卡片当场收放、列重新排好，地址栏变成 `/?hero=…`；
-      换回「全部」/ 点「清除筛选」立刻复原（2026-10-19）
+- [ ] 首页换**任何**筛选条件都**不刷新页面**：卡片当场收放、列重新排好，地址栏跟着变；
+      点「筛选」/在昵称框回车也不跳页顶；换回「全部」/ 点「清除筛选」立刻复原（2026-10-19）
 - [ ] 带筛选投一票 → 跳回来还在同一版筛选墙（`returnTo`）
 - [ ] `/seasons/:id` 有「看这一期阵容墙」；历史墙没有打分按钮；评论发完回到那张卡
 - [ ] `/u/:id` 有近期状态（含「缺」）、常用武将、阵容档案；多图老数据能翻第二张

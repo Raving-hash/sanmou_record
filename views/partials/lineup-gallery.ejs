@@ -73,12 +73,10 @@
   // public/home-filter.js 要拿它现场写说明 / 收起来。别的调用方干脆不传 → 这行不渲染。
   const filterNote = locals.filterNote || null;
   // 可选：卡片可见性（2026-10-19，只有首页进行中的那条分支传）。
-  //   visibleIds     = 当前全部条件筛完的结果 —— 不在里面的卡挂 .is-hidden；
-  //   restVisibleIds = 去掉「武将」那条的结果 —— 不在里面的卡带 data-rest-hidden，
-  //                    客户端换武将时只在这批卡里挑，不能把别的条件筛掉的卡放出来。
+  //   visibleIds = 当前全部条件筛完的结果 —— 不在里面的卡挂 .is-hidden（首屏与无 JS 用）。
   // 不传（/wall、历史赛期墙、结算后的首页）时，所有卡都可见。
+  // 客户端换筛选条件之后由 public/home-filter.js 按卡片上的 data-* 自己重算。
   const visibleIds = locals.visibleIds || null;
-  const restVisibleIds = locals.restVisibleIds || null;
 %>
 <% if (rows.length) { %>
   <h3><%= heading %></h3>
@@ -147,11 +145,20 @@
            tierShaky ? '★ 有机器填的格子还没人核对过，这个级可能不准' : '',
          ].filter(Boolean).join('；') : ''; %>
       <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
-      <%# is-hidden / data-rest-hidden / data-heroes 是首页换武将（2026-10-19）用的，
-          见上面 const visibleIds 那段说明。别的页面不传 visibleIds，这三个属性不会生效。 %>
+      <%# data-* 是首页筛选（2026-10-19）用的：public/home-filter.js 按这些属性在本地判断
+          一张卡该不该露出来，不再为每次筛选刷新页面。属性值全部走 EJS 的转义输出，
+          昵称里带引号也不会把标签弄坏。别的页面不传 visibleIds，is-hidden 不会出现。
+          data-tier 在"没认出武将"时写 T3（不是空串）：和 db.lineupTier([]) 同一个结果，
+          服务端的 ?tier=T3 就是这么筛的，客户端必须跟它一致。 %>
       <figure class="shot-card<%= aceClass %><%= visibleIds && !visibleIds.has(r.id) ? ' is-hidden' : '' %>"
               id="e<%= r.id %>"<% if (aceTip) { %> title="<%= aceTip %>"<% } %>
-              data-heroes="<%= (r.heroes || []).map((h) => h.key).join(' ') %>"<% if (restVisibleIds && !restVisibleIds.has(r.id)) { %> data-rest-hidden="1"<% } %>>
+              data-heroes="<%= (r.heroes || []).map((h) => h.key).join(' ') %>"
+              data-factions="<%= (r.heroes || []).map((h) => h.faction || '').join(' ') %>"
+              data-arms="<%= (r.heroes || []).map((h) => h.arm || '').join(' ') %>"
+              data-tier="<%= tier ? tier.tier : 'T3' %>"
+              data-scored="<%= r.score !== null ? '1' : '0' %>"
+              data-rated="<%= r.rating.mine ? '1' : '0' %>"
+              data-nick="<%= r.nickname %>">
         <figcaption class="shot-head">
           <%# 评级独占顶栏第一行（2026-10-17 用户要求：字号放大、贴卡框最左上角）。
               ⚠️ 这一格**无条件渲染**，哪怕没认出人（tier 为 null）也要留空行：
