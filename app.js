@@ -37,6 +37,8 @@ app.use((req, res, next) => {
     wall: assetVer('wall.js'),
     // 首页「换武将不刷新页面」（2026-10-19）。只有首页有 .wall-filter，脚本自己会退出。
     homeFilter: assetVer('home-filter.js'),
+    // 打分不刷新页面（2026-10-21）。只有阵容墙上有 .rate-form，别的页面它找不到就退出。
+    rate: assetVer('rate.js'),
     comments: assetVer('comments.js'),
     report: assetVer('report.js'),
     reco: assetVer('reco.js'),

@@ -6,8 +6,9 @@
 
   **卡片的摆法不只是 CSS 的事**：public/wall.js 会把这一整块拆成一列列的独立竖列
   （`.shot-col`），再按排把顶栏/说明/打分区撑成一样高 —— 所以这里的结构有三处是给它看的：
-  说明那一格**永远渲染**（空的带 is-blank）、打分区下半截包在 `.rate-tail` 里、
-  每张卡的 id 是 `e<entry id>`。改结构之前先看一眼 README 的「阵容墙的版面」一节。
+  说明那一格**永远渲染**（空的带 is-blank）、打分区下半截包在 `.rate-tail` 里
+  （2026-10-21 起在 partials/rate-box.ejs 里，见那个文件）、每张卡的 id 是 `e<entry id>`。
+  改结构之前先看一眼 README 的「阵容墙的版面」一节。
 
   入参：
     rows        db.getLineupWall() 的结果。**已排好序**（打分截止前按互评均分从高到低、
@@ -31,9 +32,11 @@
     quota       本期**打分的人自己**还剩几个名额（db.getMyQuota 的结果，
                 [{ value, quota, used, left }]，只含 400/300/250 这三个有限额的档位）。
                 只有 canRate 时才传（封盘后一个按钮都不出，名额行没地方显示）——
-                页面上就两处用它：标题下面列一行"还剩几个"，以及把投满的那档按钮灰掉。
-                **这是"我"的名额，不是被评分人的**，所以只在墙上说一次，
-                不塞进每张卡里重复十几遍。
+                两个地方用它：partials/quota-line.ejs 在标题下面列一行"还剩几个"
+                （整面墙只说一次），partials/rate-box.ejs 把投满的那档按钮灰掉。
+                **这是"我"的名额，不是被评分人的**，所以不塞进每张卡里重复十几遍。
+                2026-10-21 起这两个 partial 也会被 routes/main.js 单独渲染（打分不刷新
+                页面的那条路），改入参时两边都要对得上。
     showScore   卡顶栏要不要印积分（那个「4800 分」/「未交积分」）。**默认 true**，
                 只有给游客看的那一版（views/wall.ejs）传 false —— 用户定的口径是
                 游客看不到任何积分，连卡上这一格也不给（#N 名次还留着）。
@@ -51,12 +54,12 @@
   db.getLineupWall 已经把每行的 comments 挂好了。
 %>
 <%
-  // value → 还剩几个。查不到的档位（50 / 200）就是不限，按钮照常出。
   // **必须写 locals.xxx 而不是 xxx**：首页回退到「上一期结果」时压根不传 quota 和
   // rateLockAt，而 EJS 里引用一个没传进来的名字是 ReferenceError（不是 undefined），
   // 整个首页会 500 —— 这两行只有在"没有进行中的期"时才炸，最不容易撞见。
+  // 「value → 还剩几个」的换算在 partials/rate-box.ejs 和 partials/quota-line.ejs 里
+  // 各自做（2026-10-21 拆出去的，AJAX 那条路要单独渲染它们）。
   const quota = locals.quota || [];
-  const quotaLeft = new Map(quota.map((q) => [q.value, q.left]));
   const rateLockAt = locals.rateLockAt ?? null;
   // 同上，首页那两处调用不传它们。showScore 要写 `!== false`：写成
   // `locals.showScore || true` 恒为 true，等于没兜 —— 游客照样看到分数。
@@ -99,14 +102,8 @@
     <p class="filter-note muted small" data-filter-note<% if (!filterNote) { %> hidden<% } %>><%= filterNote || '' %></p>
   <% } %>
   <%# 名额和截止都是「这一期」的事，不是某张卡的，所以在墙上各说一次就够（见文件头入参说明） %>
-  <% if (canRate && quotaLeft.size) { %>
-    <p class="quota-line">
-      本期你的打分名额：
-      <%# 「已用完」那档的 class 写成条件属性，不要用「等于号输出 + 三元」把它拼进来：
-          那个写法会转义引号，出来的属性是坏掉的，样式根本不生效（实测踩过）。 %>
-      <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><span<% if (!q.left) { %> class="is-out"<% } %>><b><%= q.value %></b> <%= q.left ? `剩 ${q.left}` : '已用完' %></span><% }) %>
-      （50 / 200 不限）
-    </p>
+  <% if (canRate && quota.length) { %>
+    <%- include('./quota-line', { quota }) %>
   <% } %>
   <%# 截止时间。封盘之后名额行不出了，这一句就是"为什么没有按钮"的答案 %>
   <% if (rateLockAt) { %>
@@ -218,86 +215,11 @@
             **没 JS 时它是 display:none**（见 style.css），和从前一样不留空盒子。 %>
         <p class="shot-note<% if (!r.lineup_note) { %> is-blank<% } %>"><%= r.lineup_note %></p>
 
-        <div class="shot-rate">
-          <% if (!r.rating.n) { %>
-            <p class="rate-line is-empty">还没有人打分</p>
-          <% } else { %>
-            <p class="rate-line">
-              <span class="rate-k">均分</span>
-              <b class="rate-v"><%= r.rating.avg %></b>
-              <span class="rate-who"><%= r.rating.n %> 人打分</span>
-            </p>
-            <p class="rate-line">
-              <span class="rate-k">最高</span>
-              <b class="rate-v is-hi"><%= r.rating.max %></b>
-              <%# 打分人昵称也带慧眼圆框 —— 和别处一样，见 partials/name-list.ejs。
-                  那个 partial **只印并列里的第一个名字**（为的是这一行永远只占一行），
-                  并列的其余人不再列出来；r.rating.maxBy 里照样是全部的人。
-                  下面「最低」那行同理。 %>
-              <span class="rate-who"><%- include('./name-list', { list: r.rating.maxBy }) %></span>
-            </p>
-            <p class="rate-line">
-              <span class="rate-k">最低</span>
-              <b class="rate-v is-lo"><%= r.rating.min %></b>
-              <span class="rate-who"><%- include('./name-list', { list: r.rating.minBy }) %></span>
-            </p>
-            <%# 慧眼王给这套阵容打的分（2026-10-19 用户要的「额外增加一行」）。
-                只在这套阵容被**现在戴着慧眼王称号的人**打过时才出；多个王都投过票时
-                db.summarizeRatings 已经只留**最先打分的那个人**（卡片 200px 宽，
-                一行放不下第二个名字 —— 和上面「最高/最低」只印一个人同一个理由）。
-                称号是"现在"的（和卡顶昵称前那枚亮蓝章同一个真源），不是打分那会儿的。 %>
-            <% if (r.rating.huiyan) { %>
-              <p class="rate-line">
-                <span class="rate-k">慧眼王</span>
-                <b class="rate-v"><%= r.rating.huiyan.value %></b>
-                <span class="rate-who"><%- include('./name-list', { list: [r.rating.huiyan] }) %></span>
-              </p>
-            <% } %>
-          <% } %>
-
-          <%# 打分区下半截（.rate-tail）：贴住卡片底部；上面那三行数字留在顶部。
-              为什么要分出这一层：public/wall.js 会把**同一排**的 .shot-rate 设成一样高，
-              而"我打过分的卡"比旁边多「你打了 X」「点别的档位就是改分」两行 —— 不分开的话
-              多出来的高度全堆在下面，同一排的「均分」就错开 35px（见 style.css 的 .rate-tail）。
-              能打分 / 已封盘两个分支**都要**包进来，否则有的卡贴底、有的不贴。 %>
-          <div class="rate-tail">
-            <%# 我打过的那一档：先一句金色色块，下面按钮行里那一格再高亮（.is-mine）。
-                「打分已截止」**单独一行**，不塞进色块里 —— 塞进去在 200px 卡上会被
-                折成「打分已 / 截止」，断得难看。 %>
-            <% if (r.rating.mine) { %>
-              <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
-            <% } %>
-
-            <% if (canRate) { %>
-              <%# 一个 form 五个提交按钮：点一下就投出去，不用 JS。没有 <input>，
-                  value 直接挂在按钮上。**投过之后按钮照样出** —— 点别的档位就是改分
-                  （服务端 UPDATE 那一行，见 routes/main.js），高亮的那格是我现在打的分。
-                  本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
-                  flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
-                  这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
-              <% if (r.rating.mine) { %>
-                <p class="rate-note">点别的档位就是改分</p>
-              <% } %>
-              <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
-                <%# 投完跳回**带筛选的那一版墙**（2026-10-17）。不传的话只能回 /。 %>
-                <input type="hidden" name="returnTo" value="<%= backTo %>">
-                <% rateValues.forEach((v) => {
-                     const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
-                     const mine = r.rating.mine === v;  // 我给他打的就是这一档
-                     // 投满了**且不是我正占着的那一格**才灰。自己那格永远点得动：
-                     // 灰掉它等于告诉人"你这一票不算数"（老数据还可能超了，见 db.getMyQuota）。
-                     const out = left === 0 && !mine; %>
-                  <button type="submit" name="value" value="<%= v %>" class="rate-tier<% if (mine) { %> is-mine<% } %>"
-                          aria-label="给 <%= r.nickname %> 打 <%= v %> 分<% if (mine) { %>（你打的就是这一档）<% } %>"
-                          <% if (mine) { %>title="你给他打的就是 <%= v %> 分，点它不会变"<% } else if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
-                          <% if (out) { %>disabled<% } %>><%= v %></button>
-                <% }) %>
-              </form>
-            <% } else if (r.rating.mine) { %>
-              <p class="rate-note">打分已截止，改不了</p>
-            <% } %>
-          </div>
-        </div>
+        <%# 打分区（均分 / 最高 / 最低 / 慧眼王 + 我打的 + 五个按钮）。
+            2026-10-21 拆成 partials/rate-box.ejs：打分不再整页刷新之后，
+            public/rate.js 投完一票就让服务端单独渲染这一块换上去 ——
+            两条路共用同一份模板，均分怎么拼不会两处分家。 %>
+        <%- include('./rate-box', { r, canRate, quota, backTo }) %>
 
         <%# 阵容识别（2026-10-16 加）。**必须放在 .shot-rate 之后** ——
             public/wall.js 只量 HEAD / NOTE / RATE 三块做同排对齐，这一块高度天然不一

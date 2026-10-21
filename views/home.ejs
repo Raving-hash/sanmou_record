@@ -48,16 +48,12 @@
           <% } %>
         </span>
       </li>
-      <li class="todo-item <%= !canRate ? 'is-off' : (myRatingCount ? 'is-done' : 'is-todo') %>">
-        <span class="todo-state"><%= !canRate ? '已截止' : (myRatingCount ? '已投' : '待办') %></span>
-        <span class="todo-main">
-          <% if (!canRate) { %>打分已于 <strong><%= rateLockAt ? fmt(rateLockAt) : '—' %></strong> 截止，已投 <%= myRatingCount %> 套
-          <% } else if (!allLineupCount) { %>还没有人传阵容，等别人传了再来打分
-          <% } else { %>已投 <%= myRatingCount %> 套<% if (quota.length) { %>；
-            <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><%= q.value %> <%= q.left ? `剩 ${q.left}` : '已用完' %><% }) %>
-          <% } %>，<a href="<%= firstUnrated ? '/#e' + firstUnrated.id : '/' %>">去打分</a><% } %>
-        </span>
-      </li>
+      <%# 打分这一条拆成了 partial（2026-10-21）：投完票 public/rate.js 会让服务端
+          把整条 li 重新渲染一遍送回来，"已投 N 套"和各档剩余名额立刻跟上，
+          不用刷新页面。data-todo-rate 是给它定位用的。 %>
+      <%- include('partials/todo-rate', {
+            canRate, myRatingCount, allLineupCount, quota, rateLockAt, firstUnrated,
+          }) %>
       <li class="todo-item <%= me_entry && me_entry.score !== null ? 'is-done' : 'is-todo' %>">
         <span class="todo-state"><%= me_entry && me_entry.score !== null ? '已录' : '待办' %></span>
         <span class="todo-main">

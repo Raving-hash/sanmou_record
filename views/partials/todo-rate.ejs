@@ -1,0 +1,34 @@
+<%#
+  首页「本周待办」里**打分**那一条（views/home.ejs 的 todo 卡）。
+
+  拆成 partial 是给 public/rate.js 用的（2026-10-21）：投完一票，"已投 N 套"和
+  各档位剩余名额都得跟着变。不刷新页面时整条 li 由服务端重新渲染一遍送回来，
+  AJAX 那条路和整页渲染共用这一份模板，数字不会两处各写一套。
+
+  入参：
+    canRate        这一期还能不能打分 = 进行中且还没封盘。
+    myRatingCount  我这一期投了几套（db.countMyRatings 的精确计数 —— 不能数墙上的卡，
+                   图被删掉之后票还在）。
+    allLineupCount 这一期一共有几套阵容（没有就催不了"去打分"）。
+    quota          我自己的名额（db.getMyQuota）；封盘后是空的。
+    rateLockAt     封盘时刻（毫秒时间戳），只拿来显示。
+    firstUnrated   墙上第一张我还没打分的卡（可能没有 → 链接回墙顶）。
+%>
+<%
+  const quota = locals.quota || [];
+  const myRatingCount = locals.myRatingCount || 0;
+  const allLineupCount = locals.allLineupCount || 0;
+  const rateLockAt = locals.rateLockAt ?? null;
+  const firstUnrated = locals.firstUnrated || null;
+  const canRate = locals.canRate === true;
+%>
+<li class="todo-item <%= !canRate ? 'is-off' : (myRatingCount ? 'is-done' : 'is-todo') %>" data-todo-rate>
+  <span class="todo-state"><%= !canRate ? '已截止' : (myRatingCount ? '已投' : '待办') %></span>
+  <span class="todo-main">
+    <% if (!canRate) { %>打分已于 <strong><%= rateLockAt ? fmt(rateLockAt) : '—' %></strong> 截止，已投 <%= myRatingCount %> 套
+    <% } else if (!allLineupCount) { %>还没有人传阵容，等别人传了再来打分
+    <% } else { %>已投 <%= myRatingCount %> 套<% if (quota.length) { %>；
+      <% quota.forEach((q, i) => { %><% if (i) { %> · <% } %><%= q.value %> <%= q.left ? `剩 ${q.left}` : '已用完' %><% }) %>
+    <% } %>，<a href="<%= firstUnrated ? '/#e' + firstUnrated.id : '/' %>">去打分</a><% } %>
+  </span>
+</li>

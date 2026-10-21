@@ -1,0 +1,111 @@
+<%#
+  一张阵容卡的打分区：均分 / 最高 / 最低 / 慧眼王，外加「我打了多少」和五个档位按钮。
+
+  **为什么单独拆成一个 partial**（2026-10-21）：打分不再整页刷新（public/rate.js），
+  投完票之后服务端只把**这一块**重新渲染一遍带回去（见 routes/main.js 的 POST
+  /entries/:id/rate）。整页渲染和 AJAX 那条路必须是同一份模板 —— 在这儿另抄一份
+  「均分怎么拼」，两边早晚会分家。
+
+  入参：
+    r         db.getLineupWall 的一行（要有 id / nickname / rating）。
+    canRate   这一期还能不能打分（进行中且还没封盘）。
+    quota     本期**打分的人自己**还剩几个名额（db.getMyQuota 的结果，
+              [{ value, quota, used, left }]，只含 400/300/250 这三个有限额的档位）。
+              封盘后是空的。
+    backTo    打分 form 里那个 hidden returnTo（没有 JS 时 POST 完要跳回哪儿）。
+              有 JS 时它其实用不上了（public/rate.js 不上跳），但表单不刷新页面的
+              那条路得留着 —— 脚本没加载时这就是唯一能把票投出去的方式。
+
+  ★ 外层那个 `<div class="shot-rate">` 必须在**这里面**：public/rate.js 拿到响应后
+    是整块 outerHTML 换掉的。public/wall.js 会重新量它的高度做同排对齐（见下面
+    模板里 .rate-tail 那段注释）—— 所以换完必须让 wall.js 再跑一次 align。
+%>
+<%
+  // value → 还剩几个。查不到的档位（50 / 200）就是不限，按钮照常出。
+  const quota = locals.quota || [];
+  const quotaLeft = new Map(quota.map((q) => [q.value, q.left]));
+  const canRate = locals.canRate === true;
+  const backTo = locals.backTo || '/';
+%>
+<div class="shot-rate">
+  <% if (!r.rating.n) { %>
+    <p class="rate-line is-empty">还没有人打分</p>
+  <% } else { %>
+    <p class="rate-line">
+      <span class="rate-k">均分</span>
+      <b class="rate-v"><%= r.rating.avg %></b>
+      <span class="rate-who"><%= r.rating.n %> 人打分</span>
+    </p>
+    <p class="rate-line">
+      <span class="rate-k">最高</span>
+      <b class="rate-v is-hi"><%= r.rating.max %></b>
+      <%# 打分人昵称也带慧眼圆框 —— 和别处一样，见 partials/name-list.ejs。
+          那个 partial **只印并列里的第一个名字**（为的是这一行永远只占一行），
+          并列的其余人不再列出来；r.rating.maxBy 里照样是全部的人。
+          下面「最低」那行同理。 %>
+      <span class="rate-who"><%- include('./name-list', { list: r.rating.maxBy }) %></span>
+    </p>
+    <p class="rate-line">
+      <span class="rate-k">最低</span>
+      <b class="rate-v is-lo"><%= r.rating.min %></b>
+      <span class="rate-who"><%- include('./name-list', { list: r.rating.minBy }) %></span>
+    </p>
+    <%# 慧眼王给这套阵容打的分（2026-10-19 用户要的「额外增加一行」）。
+        只在这套阵容被**现在戴着慧眼王称号的人**打过时才出；多个王都投过票时
+        db.summarizeRatings 已经只留**最先打分的那个人**（卡片 200px 宽，
+        一行放不下第二个名字 —— 和上面「最高/最低」只印一个人同一个理由）。
+        称号是"现在"的（和卡顶昵称前那枚亮蓝章同一个真源），不是打分那会儿的。 %>
+    <% if (r.rating.huiyan) { %>
+      <p class="rate-line">
+        <span class="rate-k">慧眼王</span>
+        <b class="rate-v"><%= r.rating.huiyan.value %></b>
+        <span class="rate-who"><%- include('./name-list', { list: [r.rating.huiyan] }) %></span>
+      </p>
+    <% } %>
+  <% } %>
+
+  <%# 打分区下半截（.rate-tail）：贴住卡片底部；上面那几行数字留在顶部。
+      为什么要分出这一层：public/wall.js 会把**同一排**的 .shot-rate 设成一样高，
+      而"我打过分的卡"比旁边多「你打了 X」「点别的档位就是改分」两行 —— 不分开的话
+      多出来的高度全堆在下面，同一排的「均分」就错开 35px（见 style.css 的 .rate-tail）。
+      能打分 / 已封盘两个分支**都要**包进来，否则有的卡贴底、有的不贴。 %>
+  <div class="rate-tail">
+    <%# 我打过的那一档：先一句金色色块，下面按钮行里那一格再高亮（.is-mine）。
+        「打分已截止」**单独一行**，不塞进色块里 —— 塞进去在 200px 卡上会被
+        折成「打分已 / 截止」，断得难看。 %>
+    <% if (r.rating.mine) { %>
+      <p class="rate-mine">你打了 <b><%= r.rating.mine %></b></p>
+    <% } %>
+
+    <% if (canRate) { %>
+      <%# 一个 form 五个提交按钮：点一下就投出去。没有 JS 时就是普通表单 POST；
+          有 JS 时 public/rate.js 拦住提交、走 fetch，页面不刷新（2026-10-21）。
+          **投过之后按钮照样出** —— 点别的档位就是改分
+          （服务端 UPDATE 那一行，见 routes/main.js），高亮的那格是我现在打的分。
+          本档名额投满的按钮**留着但 disabled**：五个格子等分整行（.rate-tier 是
+          flex:1 1 0），少一个按钮剩下的会变形。真正拦人的是服务端（routes/main.js），
+          这里只是把"为什么点不动"摆在明面上，省得人对着一个没反应的按钮反复点。 %>
+      <% if (r.rating.mine) { %>
+        <p class="rate-note">点别的档位就是改分</p>
+      <% } %>
+      <form method="post" action="/entries/<%= r.id %>/rate" class="rate-form">
+        <%# 投完跳回**带筛选的那一版墙**（2026-10-17）。不传的话只能回 /。
+            有 JS 时用不上（不上跳），但没 JS 时全靠它。 %>
+        <input type="hidden" name="returnTo" value="<%= backTo %>">
+        <% rateValues.forEach((v) => {
+             const left = quotaLeft.get(v);     // undefined = 这档不限（50 / 200）
+             const mine = r.rating.mine === v;  // 我给他打的就是这一档
+             // 投满了**且不是我正占着的那一格**才灰。自己那格永远点得动：
+             // 灰掉它等于告诉人"你这一票不算数"（老数据还可能超了，见 db.getMyQuota）。
+             const out = left === 0 && !mine; %>
+          <button type="submit" name="value" value="<%= v %>" class="rate-tier<% if (mine) { %> is-mine<% } %>"
+                  aria-label="给 <%= r.nickname %> 打 <%= v %> 分<% if (mine) { %>（你打的就是这一档）<% } %>"
+                  <% if (mine) { %>title="你给他打的就是 <%= v %> 分，点它不会变"<% } else if (left !== undefined) { %>title="<%= out ? `本期的 ${v} 名额已用完` : `本期还能投 ${left} 个 ${v}` %>"<% } %>
+                  <% if (out) { %>disabled<% } %>><%= v %></button>
+        <% }) %>
+      </form>
+    <% } else if (r.rating.mine) { %>
+      <p class="rate-note">打分已截止，改不了</p>
+    <% } %>
+  </div>
+</div>

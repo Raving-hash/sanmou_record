@@ -16,6 +16,12 @@
     别的页面第一行就退出。**必须排在 wall.js 后面** —— 它收放完卡片要调 wall.js 挂出来的
     window.ywWallRefresh() 重新分列。 %>
 <script src="/public/home-filter.js?v=<%= assetVer.homeFilter %>"></script>
+<%# 打分不刷新页面（public/rate.js，2026-10-21）：投完一票只换这一张卡的打分区，
+    不整页重下。页面上没有 .rate-form 时它什么都不做（和 home-filter 一个路数）。
+    ⚠️ 必须排在 home-filter.js **后面** —— 换完 DOM 要调它挂出来的 window.ywFilterApply()
+    重算「我打没打过分」那个筛选（见 public/rate.js 的 settle）。
+    （表单没被拦住时照旧原生 POST + 跳转，所以它是增强不是依赖。） %>
+<script src="/public/rate.js?v=<%= assetVer.rate %>"></script>
 <%# 评论区的自动展开（public/comments.js）：发完评论会跳回 /#e<id>，那张卡的评论区得自己打开，
     否则看着就像"评论没发出去"。和 lightbox 一样挂页脚 —— 它直接找元素、不等 DOMContentLoaded，
     所以要在 </main> 之后。没它页面照常能用（手点一下 ▸ 就展开），是增强不是依赖。

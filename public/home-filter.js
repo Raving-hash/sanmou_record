@@ -192,5 +192,11 @@
     });
   });
 
+  // 打分不刷新页面之后（public/rate.js，2026-10-21），一张卡的 data-rated 会当场变 ——
+  // "我打过分 / 我还没打分"这个筛选得重算一遍，否则刚投的那张卡会留在不该在的一边。
+  // 和下面表单自己触发的那条路一样走 apply(false)：不改地址栏、只收放卡片 + 改说明。
+  // （它内部判到可见集合变了会自己喊 wall.js；rate.js 另外还会再喊一次做同排对齐。）
+  window.ywFilterApply = function () { apply(false); };
+
   apply(false);
 })();

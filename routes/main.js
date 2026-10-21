@@ -684,15 +684,32 @@ router.post('/entries/:id/heroes', (req, res) => {
   res.redirect(back);
 });
 
-router.post('/entries/:id/rate', (req, res) => {
+// 把某个 partial 渲染成字符串（res.render 的回调形态：只回字符串，不自己发响应）。
+// 打分那条 AJAX 请求要一次拿三块 HTML，用 Promise.all 并行拼 —— 三块都只是
+// SQLite 同步查询 + 字符串拼接，比重新 fetch 一整页便宜得多，也不会丢掉滚动位置。
+const renderPartial = (res, view, data) => new Promise((resolve, reject) => {
+  res.render(view, data, (err, html) => (err ? reject(err) : resolve(html)));
+});
+
+router.post('/entries/:id/rate', async (req, res) => {
+  // 两条路（2026-10-21）：
+  //   · public/rate.js 在时 —— 它带上 X-Rate-Ajax 头、拦住表单提交，这里回 JSON，
+  //     页面原地换掉这一张卡的打分区，**不刷新、不卡顿**；
+  //   · 没有 JS（或脚本没加载）—— 还是从前的表单 POST + 302 跳回那张卡。
+  // 所以每条拒绝分支都要分两条路说同一句话：拒绝的理由只写一次，落到哪儿由 deny 决定。
+  const ajax = req.get('X-Rate-Ajax') === '1';
+
   // 跳回墙上的那一次按**投票前的顺序**渲染（见上面的 lineupWall）：投出去的瞬间均分就变了，
   // 顺序跟着变的话，人正在看的那张卡当场跳走。拒绝的分支也置上 —— 被拒的票一个字都没改，
   // 更没理由让墙在眼前重排。用户自己刷新时这个标记早用掉了，按最新的均分重排。
   // 存的是时刻而不是 true：跳回来时还要判"是不是刚投完的那一跳"（见 WALL_HOLD_MS）。
-  req.session.wallHold = Date.now();
+  // ★ AJAX 那条路**不置**：页面根本没重新渲染，而且下一次整页渲染是用户自己发起的
+  //   （刷新/点导航），那时本来就该按最新的均分重排。
+  if (!ajax) req.session.wallHold = Date.now();
 
   const entry = db.getEntry(Number(req.params.id));
   if (!entry) {
+    if (ajax) return res.json({ ok: false, msg: '没有这条记录' });
     req.session.flash = { type: 'err', msg: '没有这条记录' };
     return res.redirect('/');
   }
@@ -701,31 +718,32 @@ router.post('/entries/:id/rate', (req, res) => {
   // 卡上有 id="e<id>"（见 partials/lineup-gallery.ejs）。
   const back = safeReturn(req, '/', entry.season_id) + `#e${entry.id}`;
 
+  // 票没投成：AJAX 回 { ok: false }（**200，不是 4xx** —— 这不是 HTTP 层面的错，
+  // 而是"这票没进去"，正文里说清楚），普通提交照旧 flash + 302。
+  const deny = (msg) => {
+    if (ajax) return res.json({ ok: false, msg });
+    req.session.flash = { type: 'err', msg };
+    return res.redirect(back);
+  };
+
   const season = db.getSeason(entry.season_id);
   if (!season || season.status !== 'open') {
-    req.session.flash = { type: 'err', msg: '这一期已经结算了，不能再打分' };
-    return res.redirect(back);
+    return deny('这一期已经结算了，不能再打分');
   }
 
   // 封盘。截止的具体时刻在阵容墙上写着（重定向回去就落在墙上），这里只把规矩说清楚，
   // 免得模板里再拼一次时间、多一处格式化的地方。
   if (db.isRateLocked(season)) {
-    req.session.flash = {
-      type: 'err',
-      msg: '本期打分已截止（每期开期后第一个周四 12:00 封盘），不能再投也不能改',
-    };
-    return res.redirect(back);
+    return deny('本期打分已截止（每期开期后第一个周四 12:00 封盘），不能再投也不能改');
   }
 
   const value = Number(req.body.value);
   if (!db.RATE_VALUES.includes(value)) {
-    req.session.flash = { type: 'err', msg: `只能打 ${db.RATE_VALUES.join(' / ')} 这几档` };
-    return res.redirect(back);
+    return deny(`只能打 ${db.RATE_VALUES.join(' / ')} 这几档`);
   }
 
   if (!db.getLineupImages(entry.id).length) {
-    req.session.flash = { type: 'err', msg: '他还没传阵容，不能打分' };
-    return res.redirect(back);
+    return deny('他还没传阵容，不能打分');
   }
 
   const target = db.getUserById(entry.user_id);
@@ -735,7 +753,10 @@ router.post('/entries/:id/rate', (req, res) => {
   // 而 created_at 决定"这个分是谁先给的"（见 getSeasonRatings 的排序），
   // 手滑点一下自己那档、署名就换人了。
   if (had && had.value === value) {
-    req.session.flash = { type: 'ok', msg: `你给 ${target.nickname} 打的就是 ${value} 分，没有改动` };
+    const msg = `你给 ${target.nickname} 打的就是 ${value} 分，没有改动`;
+    // AJAX 带 changed:false：页面上的高亮本来就是这一档，不用换 DOM，提示一下就行。
+    if (ajax) return res.json({ ok: true, changed: false, msg });
+    req.session.flash = { type: 'ok', msg };
     return res.redirect(back);
   }
 
@@ -748,12 +769,12 @@ router.post('/entries/:id/rate', (req, res) => {
   // 所以中间插不进另一个请求，不会出现两个并发请求各投一张、合起来超一名额。
   const q = db.getMyQuota(season.id, req.user.id).find((x) => x.value === value);
   if (q && !q.left) {
-    req.session.flash = {
-      type: 'err',
-      msg: `一期内 ${value} 分只有 ${q.quota} 个名额，你已经投满了（50 / 200 不限）`,
-    };
-    return res.redirect(back);
+    return deny(`一期内 ${value} 分只有 ${q.quota} 个名额，你已经投满了（50 / 200 不限）`);
   }
+
+  const msg = had
+    ? `已把给 ${target.nickname} 的 ${had.value} 分改成 ${value} 分`
+    : `已给 ${target.nickname} 打 ${value} 分`;
 
   if (had) {
     // 改分：更新那一行，并刷新 created_at —— 和「本人改了积分就刷新提交时间」同一套道理，
@@ -761,13 +782,53 @@ router.post('/entries/:id/rate', (req, res) => {
     // 点自己原来那档不写库，所以这里一定是真的换了档位。
     db.prepare('UPDATE ratings SET value=?, created_at=? WHERE id=?')
       .run(value, new Date().toISOString(), had.id);
-    req.session.flash = { type: 'ok', msg: `已把给 ${target.nickname} 的 ${had.value} 分改成 ${value} 分` };
   } else {
     db.prepare('INSERT INTO ratings (entry_id, rater_id, value) VALUES (?, ?, ?)')
       .run(entry.id, req.user.id, value);
-    req.session.flash = { type: 'ok', msg: `已给 ${target.nickname} 打 ${value} 分` };
   }
-  res.redirect(back);
+
+  if (!ajax) {
+    req.session.flash = { type: 'ok', msg };
+    return res.redirect(back);
+  }
+
+  /* ---- AJAX 成功分支：把**会变的三块**重新渲染带回去 ----------------------------
+     ① rateHtml  这张卡的打分区（partials/rate-box.ejs）—— 均分/最高/最低/慧眼王、
+                  "你打了 X"、五个档位的高亮和灰不灰，全在这里面；
+     ② quotaHtml 墙上那行「本期你的打分名额」（partials/quota-line.ejs）；
+     ③ todoHtml  首页「本周待办」里的打分那一条（partials/todo-rate.ejs）——
+                  改分不改张数，但首次投票会让"已投 N 套" +1。
+     三块都和整页渲染共用同一份 partial，数字不会两处各写一套。
+     墙的**顺序不重排**（不传 freezeIds）：这一下本来就是"打分以后不动"，
+     和从前那套冻结是同一个口径 —— 用户下次自己刷新时才按最新均分重排。 */
+  const rows = db.getLineupWall(season.id, req.user.id, null, !!req.user?.is_admin);
+  const r = rows.find((x) => x.id === entry.id);
+  if (!r) return res.status(409).json({ ok: false, msg: '这条阵容现在看不到了，刷新一下' });
+  const quota = db.getMyQuota(season.id, req.user.id);
+  const backTo = safeReturn(req, '/', entry.season_id);
+  // 刚过封盘检查，这里必然是 true（渲染期间不会又封一次盘，中间没有 await 到写库之外）
+  const canRate = !db.isRateLocked(season);
+  try {
+    const [rateHtml, quotaHtml, todoHtml] = await Promise.all([
+      renderPartial(res, 'partials/rate-box', { r, canRate, quota, backTo }),
+      renderPartial(res, 'partials/quota-line', { quota }),
+      renderPartial(res, 'partials/todo-rate', {
+        canRate,
+        myRatingCount: db.countMyRatings(season.id, req.user.id),
+        allLineupCount: rows.length,
+        quota,
+        rateLockAt: db.getRateLockAt(season),
+        firstUnrated: rows.find((x) => x.rating.mine === null),
+      }),
+    ]);
+    return res.json({
+      ok: true, changed: true, msg, rated: r.rating.mine ? 1 : 0, rateHtml, quotaHtml, todoHtml,
+    });
+  } catch (e) {
+    // 票已经写进去了，只是页面没拼出来 —— 别让人以为没投上。刷新一下照样能看到。
+    console.error('[打分] 拼打分区失败：', e);
+    return res.status(500).json({ ok: false, msg: '票已经记下了，但页面没拼出来，刷新一下就能看到' });
+  }
 });
 
 router.get('/ratings', (req, res) => {

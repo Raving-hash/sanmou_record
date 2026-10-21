@@ -650,6 +650,30 @@ a:hover {
 }
 .flash-err::before { content: "!"; }
 
+/* 底部一条小提示（public/rate.js，2026-10-21）。打分不再整页刷新之后，失败的原因
+   （名额投满了、刚封盘、网不好）不能再靠页面顶上那条 flash 说 —— 那得刷新才看得见。
+   固定在底部居中，**不吃点击**（pointer-events:none）：它盖住的可能是下面那张卡的按钮。
+   和 .flash 一样不强行分红绿：这里多半是失败，但"你打的就是这一档"那种不算坏消息，
+   正文自己会把话说清楚，配色安静一点就行。 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  z-index: 120;
+  max-width: 92vw;
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--yw-radius);
+  background: rgba(20, 18, 15, 0.95);
+  border: 1px solid var(--yw-line-2);
+  color: var(--yw-text);
+  font-size: var(--yw-fs-sm);
+  line-height: 1.5;
+  box-shadow: var(--yw-hi);
+  pointer-events: none;
+}
+.toast[hidden] { display: none; }
+
 /* 按钮排 */
 .actions {
   display: flex;
