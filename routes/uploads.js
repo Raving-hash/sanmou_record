@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const limiter = require('../limiter');
 const r2 = require('../r2');
+const actas = require('../actas');
 const {
   MAX_LINEUP, MAX_OUT_BYTES, PUT_HEADERS, THUMB_SUFFIX,
   mintKey, issueToken, isKey, IMG_BASE,
@@ -38,6 +39,12 @@ router.post('/uploads/sign', async (req, res) => {
     return res.status(400).json({ error: '一次只能传一张' });
   }
 
+  // 目标成员（2026-10-22）：管理员可以替别人传。**签名预检的是目标的额度**
+  // （每人每期一张），但令牌仍然发给登录者（下面的 issueToken(req.user.id)）——
+  // 提交时 readKeys 校验的也是登录者，两头必须一致。
+  const t = actas.resolve(req.user, req.body.user);
+  if (t.error) return res.status(403).json({ error: t.error });
+
   const season = db.getOpenSeason();
   if (!season) return res.status(409).json({ error: '当前没有进行中的赛期' });
 
@@ -47,7 +54,8 @@ router.post('/uploads/sign', async (req, res) => {
     // （那批字节走的是他自己的流量和 R2 的带宽）。
     // 周二 12:00 起先传初步图；周三 12:00 起完整图可以覆盖初步图，所以那种时候
     // 手里有初步图**不算占名额**（真正拦人的 POST 那一道会删旧图再入库）。
-    const phase = db.getUploadPhase(season);
+    // 2026-10-22：管理员不受窗口限制（actas.phaseFor），窗口关闭时按完整图预检。
+    const phase = actas.phaseFor(req.user, db.getUploadPhase(season)).phase;
     if (phase === 'closed') {
       return res.status(409).json({
         error: `阵容要到 ${res.locals.fmt(db.getUploadOpenAt(season))} 才开放上传`,
@@ -55,7 +63,7 @@ router.post('/uploads/sign', async (req, res) => {
     }
     // 用 findEntry 而不是 getOrCreateEntry：这里只是在**预检**，不该因为人家点了
     // 一次"选择文件"就先在库里给他建一条空记录（提交时才建，和从前的时机一致）。
-    const entry = db.findEntry(season.id, req.user.id);
+    const entry = db.findEntry(season.id, t.user.id);
     const imgs = entry ? db.getLineupImages(entry.id) : [];
     const occupied = phase === 'preliminary'
       ? imgs.length

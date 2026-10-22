@@ -126,6 +126,13 @@
             <button type="submit" class="secondary btn-sm">修正</button>
             <small class="muted">修正不会刷新提交时间</small>
           </form>
+          <%# 代操作（2026-10-22）：完整表单还能替没交分的人建分、代传阵容。 %>
+          <p class="small">
+            <a role="button" class="outline secondary btn-sm"
+               href="/lineup?user=<%= encodeURIComponent(r.uid) %>">代传阵容</a>
+            <a role="button" class="outline secondary btn-sm"
+               href="/score?user=<%= encodeURIComponent(r.uid) %>">代填/改积分</a>
+          </p>
         <% } %>
       </div>
     </article>
@@ -145,6 +152,12 @@
           <span class="badge badge-wait" title="初步阵容只作展示，不算参赛；周三 12:00 后传完整阵容才算">只传了初步图</span>
         <% } else { %>
           <span class="badge badge-wait">还没传阵容</span>
+        <% } %>
+        <% if (me.is_admin) { %>
+          <a role="button" class="outline secondary btn-sm"
+             href="/lineup?user=<%= encodeURIComponent(p.uid) %>">代传阵容</a>
+          <a role="button" class="outline secondary btn-sm"
+             href="/score?user=<%= encodeURIComponent(p.uid) %>">代填积分</a>
         <% } %>
       </li>
     <% }) %>

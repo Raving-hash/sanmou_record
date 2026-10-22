@@ -1,8 +1,13 @@
 <%- include('partials/header') %>
 
 <hgroup class="page-head">
-  <h2>录入积分 · <%= season.name %></h2>
-  <p class="muted">填整数就能交，积分截图不再是必填（2026-10-17 起）</p>
+  <h2><%= acting ? `替 ${targetUser.nickname} 录入积分` : '录入积分' %> · <%= season.name %></h2>
+  <% if (acting) { %>
+    <p class="muted">你正在以管理员身份替
+      <strong><%= targetUser.nickname %></strong>（<%= targetUser.user_id %>）操作。</p>
+  <% } else { %>
+    <p class="muted">填整数就能交，积分截图不再是必填（2026-10-17 起）</p>
+  <% } %>
 </hgroup>
 
 <% if (error) { %><div class="flash flash-err"><%= error %></div><% } %>
@@ -19,20 +24,33 @@
         </a>
       </p>
     <% } %>
-    <p class="muted small">改分会刷新提交时间，同分时排名会靠后。</p>
+    <p class="muted small">
+      <% if (acting) { %>
+        管理员代改：已有积分时改分<strong>不会刷新提交时间</strong>，同分排名不受影响。
+      <% } else { %>
+        改分会刷新提交时间，同分时排名会靠后。
+      <% } %>
+    </p>
     <form method="post" action="/score/withdraw"
-          onsubmit="return confirm('撤回后本期就没有名次了，确定吗？')">
+          onsubmit="return confirm('<%= acting ? '撤回后该成员本期就没有名次了，确定吗？' : '撤回后本期就没有名次了，确定吗？' %>')">
+      <% if (acting) { %><input type="hidden" name="user" value="<%= targetUser.user_id %>"><% } %>
       <button type="submit" class="outline secondary">撤回积分</button>
     </form>
   </article>
 <% } %>
 
 <form method="post" action="/score">
+  <%# 代操作（2026-10-22）：POST 用它决定写进谁的 entry。 %>
+  <% if (acting) { %><input type="hidden" name="user" value="<%= targetUser.user_id %>"><% } %>
   <label>积分
     <input type="number" name="score" min="0" max="999999999" step="1" required
            value="<%= entry && entry.score !== null ? entry.score : '' %>" placeholder="填整数">
   </label>
   <button type="submit"><%= entry && entry.score !== null ? '更新积分' : '提交积分' %></button>
 </form>
+
+<% if (acting && (!entry || entry.score === null)) { %>
+  <p><small class="muted">首次代填会按<strong>当前时间</strong>记提交时间。</small></p>
+<% } %>
 
 <%- include('partials/footer') %>

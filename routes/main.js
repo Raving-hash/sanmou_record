@@ -5,6 +5,7 @@ const {
 } = require('../upload');
 const reco = require('../recognize-worker');
 const returnto = require('../returnto');
+const actas = require('../actas');
 const router = require('express').Router();
 
 /* 提交时的**对象复核**。图片是浏览器直传到 R2 的，服务端没见过那些字节，
@@ -196,6 +197,11 @@ const safeReturn = (req, fallback = '/', seasonId = null) => {
   return returnto.safe(raw, fallback, { seasonId });
 };
 
+// 代成员操作（2026-10-22 加）。actas.resolve 回 { user, self } 或 { error }，
+// 这里只负责“跳到哪一个地址”：替别人操作时跳回带 user 参数的那一页，
+// 否则会被送回管理员自己那张空表单。
+const actUrl = (t, path) => (t.self ? path : `${path}?user=${encodeURIComponent(t.user.user_id)}`);
+
 // ---------- 本期看板 ----------
 router.get('/', (req, res) => {
   const season = db.getOpenSeason();
@@ -209,6 +215,9 @@ router.get('/', (req, res) => {
     // 手动 POST 却写得进去的错位。
     const rateLockAt = db.getRateLockAt(season);
     const canRate = !db.isRateLocked(season);
+    // 管理员代传不受上传窗口限制（见 actas.phaseFor）：首页待办也按有效阶段显示，
+    // 否则会出现“待办说没开放、点进 /lineup 却能传”的错位。
+    const up = actas.phaseFor(req.user, db.getUploadPhase(season));
 
     // 墙的筛选（2026-10-17）。**先取全量、再过滤**：#N 是全期积分名次，
     // 由 db.getLineupWall 先算好；过滤只影响展示，不能重编号。
@@ -285,8 +294,8 @@ router.get('/', (req, res) => {
       // 模板不自己比时间（周二初步窗口 → 周三完整窗口）。
       uploadOpenAt: db.getUploadOpenAt(season),
       fullUploadAt: db.getFullUploadAt(season),
-      uploadPhase: db.getUploadPhase(season),
-      uploadClosed: db.isLineupClosed(season),
+      uploadPhase: up.phase,
+      uploadClosed: up.phase === 'closed',
       myRatingCount: db.countMyRatings(season.id, req.user.id),
       notSubmitted: db.getNotSubmitted(season.id),
       me_entry: entry,
@@ -322,25 +331,37 @@ router.get('/', (req, res) => {
 
 // ---------- 本期阵容 ----------
 router.get('/lineup', (req, res) => {
+  // 目标成员（2026-10-22）：管理员可以用 ?user=<uid> 替别人传阵容；
+  // 普通成员带别人的 uid 直接 403（actas.js 是唯一判据）。
+  const t = actas.resolve(req.user, req.query.user);
+  if (t.error) return res.status(403).send(t.error);
+
   const season = db.getOpenSeason();
   if (!season) return res.redirect('/');
-  const entry = db.findEntry(season.id, req.user.id);
+  const entry = db.findEntry(season.id, t.user.id);
+  const images = entry ? db.getLineupImages(entry.id) : [];
+  // 管理员在窗口关闭时也能传（按完整图处理），见 actas.phaseFor。
+  const up = actas.phaseFor(req.user, db.getUploadPhase(season));
   res.render('lineup', {
-    title: '上传阵容',
+    title: t.self ? '上传阵容' : `替 ${t.user.nickname} 上传阵容`,
     season,
+    targetUser: t.user,
+    acting: !t.self,
     entry,
-    images: entry ? db.getLineupImages(entry.id) : [],
+    images,
     max: MAX_LINEUP,
     // 上传窗口（2026-10-18 改口径）：周二 12:00 起可传「初步图」（只作展示），
     // 周三 12:00 起传的「完整图」会覆盖它。三段判定只在 db.getUploadPhase 一处。
     // 关着的时候页面不出上传组件。但**真正拦人的是下面 POST 那一道** ——
     // 这里只是别让玩家挑完图才被弹回来。
-    uploadPhase: db.getUploadPhase(season),
-    uploadClosed: db.isLineupClosed(season),
+    // 2026-10-22：管理员不受窗口限制，关闭时按完整图显示（adminOverride）。
+    uploadPhase: up.phase,
+    uploadClosed: up.phase === 'closed',
+    adminOverride: up.override,
     uploadOpenAt: db.getUploadOpenAt(season),
     fullUploadAt: db.getFullUploadAt(season),
     // 现在这幅图是初步图还是完整图（决定页面上那句说明和「覆盖」提示怎么写）。
-    hasFullImage: entry ? db.getLineupImages(entry.id).some((i) => !i.is_preliminary) : false,
+    hasFullImage: images.some((i) => !i.is_preliminary),
   });
 });
 
@@ -353,6 +374,16 @@ router.get('/lineup', (req, res) => {
 router.post('/lineup', async (req, res) => {
   const note = String(req.body.lineup_note || '').trim().slice(0, 1000);
   const { keys, bad } = readKeys(req, 'images');
+
+  // 目标成员（2026-10-22）：管理员可以替别人传。**令牌仍然属于登录者**
+  // （readKeys 校验的就是 req.user），这里只决定写进谁的 entry。
+  const t = actas.resolve(req.user, req.body.user);
+  if (t.error) {
+    await removeFiles(keys);
+    req.session.flash = { type: 'err', msg: t.error };
+    return res.redirect('/lineup');
+  }
+  const back = actUrl(t, '/lineup');
 
   const season = db.getOpenSeason();
   if (!season) {
@@ -369,18 +400,20 @@ router.post('/lineup', async (req, res) => {
   //   不识别、不进数据）；周三 12:00 之后传的是「完整图」，会覆盖掉那张初步图。
   //   阶段**由服务端按时刻判定**，不收客户端传来的任何标记 —— 否则手搓一个 POST
   //   就能把初步图洗成完整图。
-  const phase = db.getUploadPhase(season);
+  //
+  //   2026-10-22：管理员不受窗口限制 —— 关闭时按完整图处理（actas.phaseFor）。
+  const phase = actas.phaseFor(req.user, db.getUploadPhase(season)).phase;
   if (phase === 'closed') {
     await removeFiles(keys);
     req.session.flash = {
       type: 'err',
       msg: `阵容要到 ${res.locals.fmt(db.getUploadOpenAt(season))} 才开放上传`,
     };
-    return res.redirect('/lineup');
+    return res.redirect(back);
   }
   const preliminary = phase === 'preliminary';
 
-  const entry = db.getOrCreateEntry(season.id, req.user.id);
+  const entry = db.getOrCreateEntry(season.id, t.user.id);
   const existing = db.getLineupImages(entry.id);
   const prelims = existing.filter((i) => i.is_preliminary);
   const fulls = existing.filter((i) => !i.is_preliminary);
@@ -391,7 +424,7 @@ router.post('/lineup', async (req, res) => {
   if (bad.length) {
     await removeFiles(keys);
     req.session.flash = { type: 'err', msg: '上传凭证无效或已过期，请刷新页面重传' };
-    return res.redirect('/lineup');
+    return res.redirect(back);
   }
 
   const { ok, bad: unverified } = await verifyUploaded(keys);
@@ -401,7 +434,7 @@ router.post('/lineup', async (req, res) => {
       type: 'err',
       msg: `有 ${unverified.length} 张没传成功（${unverified[0].why}），请重传`,
     };
-    return res.redirect('/lineup');
+    return res.redirect(back);
   }
 
   // 已经在用的 key 跳过，不再插一行。两道：
@@ -428,7 +461,7 @@ router.post('/lineup', async (req, res) => {
     if (existing.length + fresh.length > MAX_LINEUP) {
       await removeFiles(keys);
       req.session.flash = { type: 'err', msg: '每期只能传一张阵容图，要换请先删掉现在这张' };
-      return res.redirect('/lineup');
+      return res.redirect(back);
     }
   } else if (fulls.length + fresh.length + promote.length > MAX_LINEUP) {
     // 完整图窗口：手上有完整图就传不进第二张 —— 和从前一样先删再传。
@@ -440,7 +473,7 @@ router.post('/lineup', async (req, res) => {
         ? '每期只能传一张完整阵容图，要换请先删掉现在这张'
         : '每期只能传一张阵容图，要换请先删掉现在这张',
     };
-    return res.redirect('/lineup');
+    return res.redirect(back);
   }
 
   const ins = db.prepare(
@@ -476,11 +509,12 @@ router.post('/lineup', async (req, res) => {
   if (promote.length) parts.push('已把初步阵容图换成完整阵容图');
   if (replaced.length) parts.push('之前的初步阵容图已覆盖');
   if (dup) parts.push(`${dup} 张已经在用，跳过`);
+  const summary = parts.length ? parts.join(' · ') : '阵容说明已保存';
   req.session.flash = {
     type: 'ok',
-    msg: parts.length ? parts.join(' · ') : '阵容说明已保存',
+    msg: t.self ? summary : `已替 ${t.user.nickname}：${summary}`,
   };
-  res.redirect('/lineup');
+  res.redirect(back);
 });
 
 router.post('/lineup/:imgId/delete', (req, res) => {
@@ -495,17 +529,29 @@ router.post('/lineup/:imgId/delete', (req, res) => {
   db.prepare('DELETE FROM lineup_images WHERE id=?').run(img.id);
   removeFile(img.filename);
 
-  res.redirect(req.body.back === 'season' ? `/seasons/${season.id}` : '/lineup');
+  if (req.body.back === 'season') return res.redirect(`/seasons/${season.id}`);
+  // 管理员在代操作页删别人的图 → 跳回那一页；删自己的照旧 /lineup。
+  // 目标从**图片所属的 entry** 来，不信表单里的 hidden user（表单是能改的）。
+  const owner = db.getUserById(entry.user_id);
+  res.redirect(owner && owner.id !== req.user.id
+    ? `/lineup?user=${encodeURIComponent(owner.user_id)}`
+    : '/lineup');
 });
 
 // ---------- 录入积分 ----------
 router.get('/score', (req, res) => {
+  // 目标成员（2026-10-22）：管理员可用 ?user=<uid> 替别人录分/改分。
+  const t = actas.resolve(req.user, req.query.user);
+  if (t.error) return res.status(403).send(t.error);
+
   const season = db.getOpenSeason();
   if (!season) return res.redirect('/');
   res.render('score', {
-    title: '录入积分',
+    title: t.self ? '录入积分' : `替 ${t.user.nickname} 录入积分`,
     season,
-    entry: db.findEntry(season.id, req.user.id),
+    targetUser: t.user,
+    acting: !t.self,
+    entry: db.findEntry(season.id, t.user.id),
     error: null,
   });
 });
@@ -515,20 +561,35 @@ router.get('/score', (req, res) => {
    老用户库里可能还留着从前传的截图 —— 不带图再提交时**沿用那一张**（不主动删），
    真要清掉走「撤回积分」（它会把分和截图一起清）。 */
 router.post('/score', async (req, res) => {
-  const season = db.getOpenSeason();
-  if (!season) return res.redirect('/');
-
   const { keys, bad } = readKeys(req, 'image_key');
   const given = keys[0] || null;   // 只收一张
+
+  // 目标成员（2026-10-22）：管理员可以代别人填分。**令牌仍然属于登录者**
+  // （readKeys 校验的就是 req.user），这里只决定写进谁的 entry。
+  const t = actas.resolve(req.user, req.body.user);
+  if (t.error) {
+    if (given) removeFile(given).catch(() => { /* 记过日志了 */ });
+    req.session.flash = { type: 'err', msg: t.error };
+    return res.redirect('/score');
+  }
+  const back = actUrl(t, '/score');
+
+  const season = db.getOpenSeason();
+  if (!season) {
+    if (given) removeFile(given).catch(() => { /* 记过日志了 */ });
+    return res.redirect('/');
+  }
 
   // 表单校验没过 → 把刚传上去的那张删掉（和从前 removeFile(req.file.filename) 同理：
   // 没进库的对象留着就是孤儿）
   const render = (error) => {
     if (given) removeFile(given).catch(() => { /* 记过日志了 */ });
     res.status(400).render('score', {
-      title: '录入积分',
+      title: t.self ? '录入积分' : `替 ${t.user.nickname} 录入积分`,
       season,
-      entry: db.findEntry(season.id, req.user.id),
+      targetUser: t.user,
+      acting: !t.self,
+      entry: db.findEntry(season.id, t.user.id),
       error,
     });
   };
@@ -538,7 +599,7 @@ router.post('/score', async (req, res) => {
   const raw = String(req.body.score ?? '').trim();
   if (!/^\d{1,9}$/.test(raw)) return render('积分请填 0 到 999999999 之间的整数');
 
-  const entry = db.getOrCreateEntry(season.id, req.user.id);
+  const entry = db.getOrCreateEntry(season.id, t.user.id);
   // 截图可选（2026-10-17）：有图就用新的，没带就沿用库里原来那张；
   // 两边都没有就是 NULL —— R4 的 CHECK 已经放宽成"分数/提交时间同生共死"，写得进去。
   const imageName = given || entry.score_image;
@@ -551,11 +612,16 @@ router.post('/score', async (req, res) => {
     }
   }
 
-  // 本人改分或换截图 → 提交时间刷新；分数和截图都没动就保持原时间
+  // 提交时间：
+  //  · 本人 —— 和从前一样，分数/截图变了才刷新；
+  //  · 管理员代别人 —— **已有分就保持原时间**（和 /admin/entries/:id 的修正口径一致），
+  //    首次代填才记现在（用户 2026-10-22 定的：代改不打乱同分排名）。
+  const now = new Date().toISOString();
   const changed = Number(raw) !== entry.score || !!given;
-  const submittedAt = changed || !entry.score_submitted_at
-    ? new Date().toISOString()
-    : entry.score_submitted_at;
+  const keepTime = !t.self && entry.score !== null && !!entry.score_submitted_at;
+  const submittedAt = keepTime
+    ? entry.score_submitted_at
+    : (changed || !entry.score_submitted_at ? now : entry.score_submitted_at);
 
   db.prepare('UPDATE entries SET score=?, score_image=?, score_submitted_at=? WHERE id=?')
     .run(Number(raw), imageName, submittedAt, entry.id);
@@ -566,15 +632,27 @@ router.post('/score', async (req, res) => {
     removeFile(entry.score_image).catch(() => { /* 记过日志了 */ });
   }
 
-  req.session.flash = { type: 'ok', msg: `已提交积分 ${Number(raw)}` };
-  res.redirect('/');
+  req.session.flash = {
+    type: 'ok',
+    msg: t.self
+      ? `已提交积分 ${Number(raw)}`
+      : `已替 ${t.user.nickname} 提交积分 ${Number(raw)}` + (keepTime ? '（提交时间不变）' : ''),
+  };
+  res.redirect(t.self ? '/' : back);
 });
 
 router.post('/score/withdraw', (req, res) => {
+  // 目标成员（2026-10-22）：管理员可以代别人撤回。权限和录分同一条判据。
+  const t = actas.resolve(req.user, req.body.user);
+  if (t.error) {
+    req.session.flash = { type: 'err', msg: t.error };
+    return res.redirect('/');
+  }
+
   const season = db.getOpenSeason();
   if (!season) return res.redirect('/');
 
-  const entry = db.findEntry(season.id, req.user.id);
+  const entry = db.findEntry(season.id, t.user.id);
   let keptLineup = false;
   if (entry) {
     // 撤回分之后他这一期就没有名次了，但**阵容还在就算参赛**（2026-10-15 起）——
@@ -584,11 +662,12 @@ router.post('/score/withdraw', (req, res) => {
       .run(entry.id);
     removeFile(entry.score_image);
   }
+  const tail = keptLineup ? '本期没有名次了（阵容还留着，仍算参赛）' : '本期没有名次了';
   req.session.flash = {
     type: 'ok',
-    msg: keptLineup ? '已撤回积分，本期没有名次了（阵容还留着，仍算参赛）' : '已撤回积分，本期没有名次了',
+    msg: t.self ? `已撤回积分，${tail}` : `已撤回 ${t.user.nickname} 的积分，${tail}`,
   };
-  res.redirect('/');
+  res.redirect(t.self ? '/' : actUrl(t, '/score'));
 });
 
 // ---------- 打分（成员互评） ----------

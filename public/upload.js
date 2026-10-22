@@ -40,6 +40,9 @@
        form[data-upload-max-bytes]   单张压完后的上限，服务端渲染进来（唯一真源在服务端）
        input[multiple]               有 = 能拖多张；没有 = 只留第一张
        input[data-max="N"]           还能再选几张（阵容墙的剩余额度，见 views/lineup.ejs）
+       input[name="user"]            管理员代成员操作时的目标 uid（2026-10-22 加）：
+                                     只在代操作页出现；转手喂给 /uploads/sign，
+                                     让配额预检查目标成员的 entry，而不是管理员自己的。
        ★ 文件 input **没有 name** —— 这是"字节不再经手服务端"的**结构性保证**：
          没有名字，浏览器就不会把文件放进表单里去。不是靠 input.value='' 之类的技巧。
    ========================================================================== */
@@ -161,14 +164,18 @@
   }
 
   // 要令牌。**用 urlencoded 而不是 JSON** —— 这样服务端不必为了它挂 express.json()。
-  async function signUploads(kind, count) {
+  // `user` = 管理员代操作时的目标成员 uid（模板只在代操作时渲染那个隐藏字段）；
+  // 普通上传不传，服务端就按登录者自己算额度。
+  async function signUploads(kind, count, user) {
+    const body = { kind, count: String(count) };
+    if (user) body.user = user;
     let res;
     try {
       res = await fetch('/uploads/sign', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body: new URLSearchParams({ kind, count: String(count) }),
+        body: new URLSearchParams(body),
       });
     } catch (e) {
       throw new Error('连不上服务器，检查一下网络');
@@ -276,8 +283,11 @@
             const after = variants.reduce((n, v) => n + v.full.size + v.thumb.size, 0);
 
             // 2. 再要令牌（顺带做配额预检：赛期在不在、阵容额度够不够）
+            //    管理员代操作时表单里有 hidden user，签名预检要用**目标成员**的额度。
             note.textContent = '正在上传…';
-            const { items } = await signUploads(kind, files.length);
+            const target = form.querySelector('input[name="user"]');
+            const targetUid = target ? target.value : '';
+            const { items } = await signUploads(kind, files.length, targetUid);
 
             // 3. 再 PUT：每张两个对象（原图 + 缩略图）
             const tokens = [];

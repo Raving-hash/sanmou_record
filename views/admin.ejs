@@ -48,6 +48,7 @@
       <p class="muted small">
         ⏳ 阵容上传<strong>还没开放</strong> —— 要到 <strong><%= fmt(uploadOpenAt) %></strong>（<%= fmtLeft(uploadOpenAt - Date.now()) %>）才开初步阵容图。
         在那之前玩家传不了阵容（打分本来也要有图才能投）。
+        <strong>管理员不受此限</strong>，可以直接用下面的「代传阵容」替成员传。
       </p>
     <% } else if (uploadPhase === 'preliminary') { %>
       <p class="muted small">
@@ -352,6 +353,15 @@
               <% } %>
             </td>
             <td class="row-actions">
+              <%# 代成员操作（2026-10-22）：管理员可以替任何一个成员传阵容 / 填积分。
+                  链接里的 user 是公开 user_id，服务端由 actas.js 再判一次权限。
+                  自己不用代，隐藏掉这两条（普通入口在首页待办里）。 %>
+              <% if (openSeason && u.id !== me.id) { %>
+                <a role="button" class="outline secondary btn-sm"
+                   href="/lineup?user=<%= encodeURIComponent(u.user_id) %>">代传阵容</a>
+                <a role="button" class="outline secondary btn-sm"
+                   href="/score?user=<%= encodeURIComponent(u.user_id) %>">代填积分</a>
+              <% } %>
               <% if (u.id !== me.id) { %>
                 <form method="post" action="/admin/users/<%= u.id %>/toggle">
                   <button type="submit" class="outline secondary btn-sm">
