@@ -402,7 +402,8 @@ db.T0_HEROES = new Set([
 db.isT0 = (key) => db.T0_HEROES.has(key);
 
 // ★ 阵容评级的底表：**双人搭配**的等级（用户 2026-10-16 手工给的 23 组，
-//    2026-10-17 又补了「左慈 + 陆逊」进 T1，现共 24 组）。
+//    2026-10-17 又补了「左慈 + 陆逊」进 T1，2026-10-22 把「SP周瑜 + 诸葛亮」
+//    从 T1 升进 T0，现共 24 组：T0 12 / T1 8 / T2 4）。
 // 注意它和上面那份 T0 名单**不是一回事**：T0_HEROES 是"单个武将够不够强"（卡上金色高亮用），
 // 这里是"两个武将凑在一起算不算一套好搭配"（评级用）。一个武将可以既在 T0 名单里、
 // 又出现在某几组搭配里，两者各算各的。
@@ -416,7 +417,7 @@ db.isT0 = (key) => db.T0_HEROES.has(key);
 // 一名一组写清楚（key + 中文对照），方便和用户给的那份名单逐行对着看。
 const tierPairs = (tier, list) => list.map(([a, b]) => ({ a, b, tier }));
 db.LINEUP_PAIRS = [
-  ...tierPairs(0, [   // —— T0（11 组）——
+  ...tierPairs(0, [   // —— T0（12 组）——
     ['cao_pi', 'si_ma_yi'],           // 曹丕 + 司马懿
     ['zhang_chun_hua', 'si_ma_yi'],   // 张春华 + 司马懿
     ['zhang_chun_hua', 'wang_yi'],    // 张春华 + 王异
@@ -428,11 +429,11 @@ db.LINEUP_PAIRS = [
     ['zhu_ge_liang2', 'jiang_wei'],   // SP诸葛亮 + 姜维
     ['zhu_ge_liang2', 'ma_chao'],     // SP诸葛亮 + 马超
     ['huang_pu_song2', 'yuan_shu'],   // 皇甫嵩 + 袁术
+    ['zhou_yu2', 'zhu_ge_liang'],     // SP周瑜 + 诸葛亮（**普通的**那个，不是 SP；2026-10-22 从 T1 升上来）
   ]),
-  ...tierPairs(1, [   // —— T1（9 组）——
+  ...tierPairs(1, [   // —— T1（8 组）——
     ['zuo_ci', 'lu_xun'],             // 左慈 + 陆逊（2026-10-17 用户补的）
     ['zuo_ci', 'zhang_ning'],         // 左慈 + 张宁
-    ['zhou_yu2', 'zhu_ge_liang'],     // SP周瑜 + 诸葛亮（**普通的**那个，不是 SP）
     ['le_jin', 'zhang_liao'],         // 乐进 + 张辽
     ['yuan_shao', 'jiang_wei'],       // 袁绍 + 姜维
     ['yuan_shao', 'ma_chao'],         // 袁绍 + 马超
