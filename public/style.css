@@ -1961,23 +1961,8 @@ details.cmt[open] > summary {
   color: var(--yw-gold-lt); border-color: var(--yw-gold);
   background: color-mix(in srgb, var(--yw-gold) 14%, transparent);
 }
-/* 机器自动填的、还没人核对过：**虚框 + 压暗**，和"人确认过的实框"一眼分得开。
-   用户定的是"含机器填的对所有人可见，但要标出是机器填的" ——
-   所以它得看得见，但不能看着跟确认过的一样可信。 */
-.reco-hero.is-auto {
-  border-style: dashed; border-color: var(--yw-text-mute);
-  color: var(--yw-text-mute);
-}
-/* 那个小问号。放小了、且不参与语义（屏幕阅读器读的是 title）。 */
-.reco-q {
-  font-style: normal; margin-left: 0.15rem;
-  opacity: 0.75; font-size: 0.9em;
-}
-/* T0 和 is-auto 撞上时金色仍然要压得住（T0 是主角），但保持虚框表示存疑 */
-.reco-hero.is-t0.is-auto {
-  color: color-mix(in srgb, var(--yw-gold-lt) 70%, var(--yw-text-mute));
-  border-color: color-mix(in srgb, var(--yw-gold) 55%, var(--yw-text-mute));
-}
+/* 识别结果不再区分"机器填的 / 人核对过的"（2026-10-22 用户口径：
+   去掉问号标记，直接确定）—— 所以这里也没有 is-auto 的虚框/压暗了。 */
 
 /* ---- 搭配评级的 T 牌（2026-10-16 晚加，规则见 db.lineupTier）。
    四档借用色板上现成的四支：金（和 T0 胶囊同色，都表示"最好"）、亮蓝、亮银、
@@ -2002,15 +1987,6 @@ details.cmt[open] > summary {
 }
 /* T3 = 默认档，灰着；它只是"这套没什么搭配"，不该抢眼 */
 .reco-tier.is-t3 { color: var(--yw-text-mute); background: none; }
-/* 存疑（还有机器填的格子没人核对）：**虚框 + 压暗**，和胶囊那一套完全一样。
-   为什么牌子也要标：它比胶囊更容易骗人 —— 少认一个武将、多认一个武将，级就变了。 */
-.reco-tier.is-auto {
-  border-style: dashed; border-color: var(--yw-text-mute);
-  background: none;
-}
-.reco-tier.is-auto.is-t0 { color: color-mix(in srgb, var(--yw-gold-lt) 70%, var(--yw-text-mute)); }
-.reco-tier.is-auto.is-t1 { color: color-mix(in srgb, var(--yw-azure-lt) 70%, var(--yw-text-mute)); }
-.reco-tier.is-auto.is-t2 { color: color-mix(in srgb, var(--yw-silver) 70%, var(--yw-text-mute)); }
 
 /* 纠正面板 */
 .reco-box { margin-top: 0.35rem; font-size: var(--yw-fs-2xs); }
@@ -2039,9 +2015,6 @@ details.cmt[open] > summary {
   background: var(--yw-ink-800); border: 1px solid var(--yw-line);
 }
 .reco-slot-k { color: var(--yw-text-mute); margin-bottom: 0.1rem; }
-/* 这一格是机器填的、还没人核对 → 整格加一圈虚线，和上面那行的虚框呼应。
-   玩家点过之后就恢复实线，一眼能看出"还剩几格没看"。 */
-.reco-slot.is-pending { border-style: dashed; }
 .reco-opt {
   display: flex; align-items: center; gap: 0.3rem;
   cursor: pointer; line-height: 1.3;
@@ -2460,17 +2433,6 @@ details.report[open] > summary {
 #pair {
   scroll-margin-top: 4.5rem;
 }
-.auto-q {
-  display: inline-block;
-  min-width: 1.25em;
-  padding: 0 0.2em;
-  border: 1px dashed var(--yw-gold-dk);
-  border-radius: 999px;
-  color: var(--yw-gold-lt);
-  font-size: var(--yw-fs-2xs);
-  text-align: center;
-  cursor: help;
-}
 .hero-chip {
   display: inline-block;
   margin: 0 0.2rem 0.2rem 0;
@@ -2485,7 +2447,6 @@ details.report[open] > summary {
 a.hero-chip { color: var(--yw-text); text-decoration: none; }
 a.hero-chip:hover { border-color: var(--yw-gold-dk); }
 .hero-chip small { color: var(--yw-text-mute); }
-.hero-chip.is-auto { border-style: dashed; }
 .hero-chip.is-target { border-color: var(--yw-gold); color: var(--yw-gold-lt); }
 .hero-chip-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 

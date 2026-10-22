@@ -3,8 +3,7 @@
 <hgroup class="page-head">
   <h2>武将索引</h2>
   <p class="muted">
-    只统计每套阵容<strong>卡上第一张图</strong>识别出的武将；机器自动填、还没人核对的格子带
-    <span class="auto-q" title="机器自动识别，尚未核对">?</span>。
+    只统计每套阵容<strong>卡上第一张图</strong>识别出的武将。
     胜率 / 平均分 / 平均互评只算已结算的期，样本少于 <%= minSample %> 条时显示「样本不足」；
     出场和使用人数包含进行中的期。
   </p>
@@ -38,7 +37,6 @@
           <th class="w-score">胜率</th>
           <th class="w-score">平均分</th>
           <th class="w-score">平均互评</th>
-          <th class="w-score">未核对</th>
         </tr>
       </thead>
       <tbody>
@@ -65,11 +63,6 @@
               <% if (h.avgRating === null) { %><small class="muted">样本不足</small>
               <% } else { %><%= h.avgRating %><% } %>
               <% if (h.ratingN) { %><small class="muted">（<%= h.ratingN %> 票）</small><% } %>
-            </td>
-            <td class="num">
-              <% if (h.autoCells) { %>
-                <span class="auto-q" title="机器自动识别、尚未核对的格子数"><%= h.autoCells %> ?</span>
-              <% } else { %><small class="muted">—</small><% } %>
             </td>
           </tr>
         <% }) %>
@@ -144,8 +137,7 @@
               <td>
                 <% pair.keys.forEach((k) => { const hit = r.heroes.find((x) => x.key === k); %>
                   <% if (hit) { %>
-                    <span class="hero-chip<% if (hit.auto) { %> is-auto<% } %>"
-                          title="<%= hit.auto ? '机器自动识别，尚未核对' : '' %>"><%= (hit.variant || '') + hit.name %><% if (hit.auto) { %> ?<% } %></span>
+                    <span class="hero-chip"><%= (hit.variant || '') + hit.name %></span>
                   <% } %>
                 <% }) %>
               </td>

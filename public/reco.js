@@ -250,11 +250,8 @@
     btn.textContent = box.value || '手输 / 挑选…';
     if (box.value) btn.classList.add('is-set');
     // 弹窗标题上要写清是哪一格 —— 九格长得一模一样，只写「手输武将名」会不知道在改哪儿。
-    // 末尾那个 ? 是"机器填的还没人核对"那个小问号（.reco-q，模板里是 <i>），
-    // 标题里带着它只是噪音 —— 何况我们正在做的就是核对它。去掉。
     var k = slot.querySelector('.reco-slot-k');
-    btn.setAttribute('data-where', k
-      ? k.textContent.replace(/\s+/g, ' ').replace(/\s*\?\s*$/, '').trim() : '');
+    btn.setAttribute('data-where', k ? k.textContent.replace(/\s+/g, ' ').trim() : '');
     box.hidden = true;
     box.insertAdjacentElement('beforebegin', btn);
 

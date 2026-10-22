@@ -113,7 +113,7 @@
           <p class="archive-meta">
             <span class="reco-tier is-<%= tier.tier.toLowerCase() %>"><%= tier.tier %></span>
             <% r.heroes.filter((h) => isT0(h.key)).forEach((h) => { %>
-              <span class="hero-chip<% if (h.auto) { %> is-auto<% } %>"><%= (h.variant || '') + h.name %><% if (h.auto) { %> ?<% } %></span>
+              <span class="hero-chip"><%= (h.variant || '') + h.name %></span>
             <% }) %>
             <% if (r.rating.avg !== null) { %><span class="muted small">互评 <%= r.rating.avg %>（<%= r.rating.n %>）</span><% } %>
             <% if (commentsEnabled && r.commentsN) { %><span class="muted small">💬 <%= r.commentsN %></span><% } %>

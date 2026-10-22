@@ -35,14 +35,10 @@
       <span class="stat-num"><%= stat.avgRating === null ? '—' : stat.avgRating %></span>
       <span class="stat-label">平均互评<%= stat.ratingN ? `（${stat.ratingN} 票）` : '' %></span>
     </article>
-    <article class="stat">
-      <span class="stat-num"><%= stat.autoCells || '—' %></span>
-      <span class="stat-label">未核对格子</span>
-    </article>
   </div>
   <p class="muted small">
     出场 / 使用人数算所有期；胜率、平均分、平均互评只算已结算的期，样本少于
-    <%= minSample %> 条显示「—」。机器自动填、还没人核对的格子计入统计，详情里标 <span class="auto-q">?</span>。
+    <%= minSample %> 条显示「—」。
   </p>
 <% } %>
 
@@ -52,8 +48,7 @@
 <% } else { %>
   <div class="archive-list">
     <% rows.forEach((r) => {
-         const tier = lineupTier(r.heroes);
-         const hit = r.heroes.find((h) => h.key === hero.key); %>
+         const tier = lineupTier(r.heroes); %>
       <article class="archive-card">
         <div class="archive-shot">
           <% if (r.images[0]) { %>
@@ -75,9 +70,8 @@
             <% r.heroes.filter((h) => isT0(h.key)).forEach((h) => { %>
               <span class="hero-chip"><%= (h.variant || '') + h.name %></span>
             <% }) %>
-            <span class="hero-chip is-target<% if (hit && hit.auto) { %> is-auto<% } %>"
-                  title="<%= hit && hit.auto ? '机器自动识别，尚未核对' : '' %>">
-              目标：<%= (hero.variant || '') + hero.name %><% if (hit && hit.auto) { %> ?<% } %>
+            <span class="hero-chip is-target">
+              目标：<%= (hero.variant || '') + hero.name %>
             </span>
           </p>
           <p class="muted small">

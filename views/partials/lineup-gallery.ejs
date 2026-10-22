@@ -130,16 +130,14 @@
          const aceTip = r.ace ? `上期积分第${r.ace === 1 ? '一' : '二'}` : '';
          // 搭配评级（T0~T3）。2026-10-17 用户要求：**放到卡框最左上角、独占一行、字号放大**，
          // 所以从 partials/reco.ejs 的那一行里挪到了这里（那边只留 T0 金胶囊）。
-         // 口径不变：九格全算（db.lineupTier）；有任何一格是机器填的就虚框 + 问号。
+         // 口径不变：九格全算（db.lineupTier）。
          // 没认出人 = 没有级可给，tier 为 null，但**空行照样占位**（见下面的 .shot-tier）。
          const allHeroes = r.heroes || [];
          const tier = allHeroes.length ? lineupTier(allHeroes) : null;
-         const tierShaky = allHeroes.some((h) => h.auto);
          const tierTip = tier ? [
            `这套阵容的搭配评级：${tier.tier}`,
            tier.pairs.length ? `命中 ${tier.pairs.join('、')}` : '一组 T0/T1/T2 搭配都没命中',
            '两人在同一支部队里才算一组（见 db.js 的 LINEUP_PAIRS）',
-           tierShaky ? '★ 有机器填的格子还没人核对过，这个级可能不准' : '',
          ].filter(Boolean).join('；') : ''; %>
       <%# id 是给打分提交后的 /#e<id> 锚点用的，别删 %>
       <%# data-* 是首页筛选（2026-10-19）用的：public/home-filter.js 按这些属性在本地判断
@@ -163,8 +161,8 @@
               同一排的图框就错开了（见 style.css 的 .shot-tier）。 %>
           <div class="shot-tier">
             <% if (tier) { %>
-              <span class="reco-tier is-<%= tier.tier.toLowerCase() %><%= tierShaky ? ' is-auto' : '' %>"
-                    title="<%= tierTip %>"><%= tier.tier %><% if (tierShaky) { %><i class="reco-q" aria-hidden="true">?</i><% } %></span>
+              <span class="reco-tier is-<%= tier.tier.toLowerCase() %>"
+                    title="<%= tierTip %>"><%= tier.tier %></span>
             <% } %>
           </div>
           <%# 初步阵容图（2026-10-18 加的赛制）：周二 12:00–周三 12:00 传的那张只作展示，
