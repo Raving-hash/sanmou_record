@@ -385,8 +385,9 @@ db.filenamesMissingOcr = () => db.prepare(`
 //   （阵容墙走的是 getSeasonHeroData 的批量版），而且改版后"已确认"这个说法本身
 //   就不成立了：机器填的也算数。留着只会误导下一个人。）
 
-// ★ T0 名单。**用户 2026-10-16 手工给的 7 个**，按 key 写而不是按名字 ——
-// 名字不是唯一键（诸葛亮 / SP诸葛亮 同名不同人），写名字将来一定会认错人。
+// ★ T0 名单。**用户 2026-10-16 手工给的 7 个**，2026-10-22 又加了 SP周瑜（现 8 个）——
+// 按 key 写而不是按名字：名字不是唯一键（诸葛亮 / SP诸葛亮 同名不同人），
+// 写名字将来一定会认错人。
 // 和 RATE_VALUES / TOP_N 一个路数：产品参数、单一真源、改的时候改这一处。
 // ⚠️ 注意 `huang_pu_song2`：皇甫嵩有紫/橙两版，紫的那版（huang_fu_song）已按用户要求丢弃，
 //    留下的是这张橙卡，显示名仍叫「皇甫嵩」。
@@ -398,12 +399,14 @@ db.T0_HEROES = new Set([
   'huang_pu_song2',   // 皇甫嵩
   'wang_yi',          // 王异
   'zuo_ci',           // 左慈
+  'zhou_yu2',         // SP周瑜（2026-10-22 用户加的；普通周瑜 zhou_yu 不是）
 ]);
 db.isT0 = (key) => db.T0_HEROES.has(key);
 
 // ★ 阵容评级的底表：**双人搭配**的等级（用户 2026-10-16 手工给的 23 组，
 //    2026-10-17 又补了「左慈 + 陆逊」进 T1，2026-10-22 把「SP周瑜 + 诸葛亮」
 //    从 T1 升进 T0，现共 24 组：T0 12 / T1 8 / T2 4）。
+//    另有 1 组**三人搭配**（乐进 + 马腾 + 任一追击英雄），见下面的 LINEUP_TRIPLES。
 // 注意它和上面那份 T0 名单**不是一回事**：T0_HEROES 是"单个武将够不够强"（卡上金色高亮用），
 // 这里是"两个武将凑在一起算不算一套好搭配"（评级用）。一个武将可以既在 T0 名单里、
 // 又出现在某几组搭配里，两者各算各的。
@@ -449,15 +452,36 @@ db.LINEUP_PAIRS = [
   ]),
 ];
 
+// ★ 三人搭配（2026-10-22 用户加的）：乐进 + 马腾 + **任意一个**追击武将。
+// 用户定的口径：这组和一条双人搭配**同权**，只算 **1 组 T1** —— 单独出现时
+// 按现有规则仍落 T3，要再凑一组 T1（或 T0）才升上去。
+// core 两个人必须都在**同一支部队**里；any 里至少有一个也在。
+// 一组只记一次：不管 any 里同时命中几个人，都只算这一组。
+db.LINEUP_TRIPLES = [
+  {
+    tier: 1,
+    core: ['le_jin', 'ma_teng'],      // 乐进 + 马腾
+    any: [
+      'ma_yun_lu',                    // 马云禄
+      'lv_bu',                        // 吕布
+      'wang_shuang',                  // 王双
+      'zhang_liao',                   // 张辽
+      'xia_hou_yuan',                 // 夏侯渊
+    ],
+  },
+];
+
 // 一套阵容的评级（用户 2026-10-16 定的规则，从高往低依次判，命中一条就停）：
 //   T0 ← 2 组 T0 搭配，或 3 组 T1
 //   T1 ← T0 和 T1 都有，或 2 组 T1，或 3 组 T2
 //   T2 ← 1 组 T0，或 T1 和 T2 都有
 //   T3 ← 其余（默认档）
+// 「搭配」既可以是双人的（LINEUP_PAIRS），也可以是三人的（LINEUP_TRIPLES），
+// 每组都按它表里标的 tier 记一次 —— 三人组不因为多一个人就多算。
 // 入参是**能改这张卡的人看到的那份武将表**（db.getSeasonHeroData 的 confirmed，
 // 每项带 key / slot / name / variant / auto）。返回 { tier: 'T0'..'T3', pairs: [...] }，
 // pairs 是命中的搭配（模板拿去当 title，让人看得见"凭什么给这个级"）。
-// ⚠️ 只认**同一支部队**（slot 1-3 = 部队一，4-6 = 二，7-9 = 三）里的两个人。
+// ⚠️ 只认**同一支部队**（slot 1-3 = 部队一，4-6 = 二，7-9 = 三）里的搭配。
 db.lineupTier = (heroes) => {
   const units = new Map();               // 部队号 → 这支部队里的 key
   const label = new Map();               // key → 显示名（拼 title 用）
@@ -477,6 +501,17 @@ db.lineupTier = (heroes) => {
         hits[p.tier].push(`${label.get(p.a)} + ${label.get(p.b)}`);
         break;
       }
+    }
+  }
+  // 三人搭配：core 全在、any 至少一个在，就算一组（tier 由表里给）。
+  // 同样必须是**同一支部队**；any 里同时命中几个人也只记一次。
+  for (const t of db.LINEUP_TRIPLES) {
+    for (const keys of units.values()) {
+      if (!t.core.every((k) => keys.has(k))) continue;
+      const pick = t.any.find((k) => keys.has(k));
+      if (!pick) continue;
+      hits[t.tier].push(`${t.core.map((k) => label.get(k)).join(' + ')} + ${label.get(pick)}`);
+      break;
     }
   }
   const n = hits.map((list) => list.length);
