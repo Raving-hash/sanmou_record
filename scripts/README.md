@@ -51,6 +51,11 @@ node scripts/rank-shot.js --from data/rank-shots/20261017-074822
 常用旋钮：`--frames <最多几屏>`、`--notches <每屏滚几格>`、`--title <标题正则>`、
 `--batch-size <一个包几条，默认 0 = 全塞一个请求>`、`--prune <只留最近 n 轮目录>`。
 
+上报那两个旋钮一般不用动：`--post-timeout <毫秒，默认 45000>`、`--post-retries <默认 3>`。
+站点在 Cloudflare 后面，冷连接很慢（2026-10-29 实测一次正常 3.8–6.5 秒，首个请求偶发超过 20 秒），
+所以超时放宽到 45 秒，并且**传输层失败会自动重试**（同一批名字同一批分，重发是安全的）；
+4xx 不重试——令牌错、报文不合法，重发一万次也一样。重试过的包会在成功那行标出「其中 N 个是重试才通的」。
+
 `--score-grow / --score-add / --score-reset` 是**试跑**用的偏移：在真实积分上整数叠加，
 跨进程记账（`data/rank-shots/.offset-state.json`）。默认不加，不动真实分数。
 

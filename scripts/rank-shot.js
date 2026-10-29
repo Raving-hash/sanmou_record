@@ -143,7 +143,11 @@ const HALL_BTN_AT = (opt('--hall-btn-at', '0.241,0.921')).split(',').map(Number)
 const POST = opt('--post', process.env.SCORE_API_URL || process.env.RANK_IMPORT_URL || '');
 const TOKEN = opt('--token', process.env.SCORE_API_TOKEN || process.env.RANK_IMPORT_TOKEN || '');
 const PAYLOAD = opt('--payload', '');
-const POST_TIMEOUT_MS = Number(opt('--post-timeout', 20000));
+// 站点在 Cloudflare 后面，冷连接**很慢**：2026-10-29 实测一次正常 3.8–6.5s，
+// 首个请求偶发卡到 20s 以上被 abort（一轮抓了 4 分钟，最后一步白扔）。
+// 所以默认超时放宽到 45s，并且传输层失败自动重试 —— 报文是覆盖语义，重发安全。
+const POST_TIMEOUT_MS = Number(opt('--post-timeout', 45000));
+const POST_RETRIES = Math.max(1, Number(opt('--post-retries', 3)));
 // 一个包最多装几条写法（0 = 全塞进一个请求）。接口是裸数组、实测 301 条也正常，
 // 所以默认一个包；只有对端 body 上限比这还小才需要 --batch-size 切片。
 const BATCH_SIZE = Number(opt('--batch-size', 0));
@@ -992,7 +996,7 @@ function nameVariants(name) {
 // 每条也带 game_name，对不上顺序时还能按名字找（见下面那个兜底）。
 // 这两点都是 2026-10-18 拿真实接口问出来的：rows/scores/items/data/list 这些
 // 包装一律被当成"game_name 不能为空"，只有裸数组认。
-async function postBatch(entries) {
+async function postOnce(entries) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), POST_TIMEOUT_MS);
   try {
@@ -1014,6 +1018,28 @@ async function postBatch(entries) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// 只对**传输层**失败重试（超时 / 连接被断）：那个地址慢，但请求本身是幂等的
+// （同一批名字同一批分，重发不会写出别的东西）。4xx 一律不重试 —— 令牌错、报文不合法
+// 重发一万次也一样，还会白白多打后端。
+async function postBatch(entries) {
+  let last = null;
+  for (let attempt = 1; attempt <= POST_RETRIES; attempt++) {
+    if (attempt > 1) {
+      const wait = attempt === 2 ? 2000 : 5000;
+      console.error(`  发送失败（${last.text}），${wait}ms 后重试 ${attempt}/${POST_RETRIES}`);
+      await new Promise((r2) => setTimeout(r2, wait));
+    }
+    last = await postOnce(entries);
+    last.attempts = attempt;
+    if (last.ok) return last;
+    if (last.http >= 400 && last.http < 500) return last;   // 4xx 不重试
+    if (last.http === 0) continue;                          // 超时 / 网络：重试
+    if (last.http >= 500 || last.http === 429) continue;    // 对端自己出问题：重试
+    return last;                                            // 3xx 之类：不猜，交给人看
+  }
+  return last;
 }
 
 async function deliver(rows, dir) {
@@ -1050,7 +1076,7 @@ async function deliver(rows, dir) {
   for (let start = 0; start < entries.length && !aborted; start += CHUNK) {
     const slice = entries.slice(start, start + CHUNK);
     const res = await postBatch(slice);
-    requests.push({ http: res.http, entries: slice.length });
+    requests.push({ http: res.http, entries: slice.length, attempts: res.attempts || 1 });
 
     // 令牌错 / 没权限 / 没有进行中的赛期：整批停，别再打下去
     if (res.http === 401 || res.http === 403 || res.http === 409) {
@@ -1156,9 +1182,11 @@ async function deliver(rows, dir) {
   });
 
   const unchanged = ok.filter((o) => !o.changed).length;
+  const retried = requests.filter((r) => (r.attempts || 1) > 1).length;
   console.log(`✓ 写入 ${ok.length - unchanged} 行${unchanged ? `，另有 ${unchanged} 行分数没变` : ''}` +
     (fallbackUsed ? `（其中 ${fallbackUsed} 行是靠换了写法才对上的）` : '') +
-    `　[${requests.length} 个请求 / ${entries.length} 条写法]`);
+    `　[${requests.length} 个请求 / ${entries.length} 条写法` +
+    (retried ? `，其中 ${retried} 个是重试才通的` : '') + ']');
 
   // 模糊命中：分已经写进去了，但"是谁"是后端按相似度猜的。接口是覆盖语义，
   // 猜错就等于把别人的分改掉了 —— 这一屏是唯一能发现它的地方，所以单列。
